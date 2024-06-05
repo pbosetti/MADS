@@ -6,122 +6,52 @@ Multi-Agent Distributed System for monitoring and control of industrial processe
 
 ## Architecture
 
-The architecture is based on a distributed network of processes, connected via ZeroMQ protocol as publishers-subscribers, using a central broker for network discovery.
+The architecture is based on a distributed network of processes, called **agents**, connected via ZeroMQ protocol as publishers-subscribers, using a central **broker** for network discovery and settings sharing.
 
-The broker implements a call to `zmq_proxy(frontend, backend);` (see [here](https://zguide.zeromq.org/docs/chapter2/#ZeroMQ-s-Built-In-Proxy-Function)), where
+Agents can be implemented as **monolithic processes**, i.e. a single executable that performs a specific task, or as **plugins**, i.e. shared libraries that can be loaded at runtime by a general purpose executable.
 
-* `frontend` is a `PUB/XSUB` pair of sockets collecting data from the field and from the results of elaboration performed by worker processes
-* `backend` is a `XPUB/SUB` pair of sockets distributing data to the workers
+**Plugins** can be of three different types:
 
-Data coming from the frontend socket are routed as-is to the backend socket and to the capture socket for frame recording.
+* **Sources**: they grab data from the field and publish them to the broker
+* **Filters**: they receive data from other sources or filters, process them, and publish the results to the broker
+* **Sinks**: they receive data from the broker and process them locally (visualizing, logging, bridging to other networks, etc.)
 
-In the following chart, each group (subgraph) corresponds to a separate process, not necessarily running on the same OS instance.
+There are three corresponding general purpose, plugin-based agents, named `source`, `filter`, and `sink`.
+
+Some specific monolithic agents are also available for common tasks, such as `logger`, which saves incoming data to a MongoDB database.
 
 ```mermaid
 %%{init: {"flowchart": {"defaultRenderer": "elk"}} }%%
-flowchart TB
-  subgraph "hardware layer (frontend)"
-    subgraph cameras["Cameras"]
-      camera_p[PUB]
-    end
-
-    subgraph rfid[RFID]
-      rfid_p[PUB]
-    end
-
-    subgraph force[Force platform]
-      force_p[PUB]
-    end
-
-    subgraph meta[Metadata]
-      meta_p[PUB]
-    end
-
-    subgraph wear[Wearables]
-      wearable_p[PUB]
-    end
-  end
-
-  subgraph broker[Broker]
-    xsub[XSUB]
-    xpub[XPUB]
-    xsub -.-> xpub
-  end
-
-  subgraph mongo[Logger]
-    sub[SUB]
-  end
-
-  subgraph "Functional layer (backend)"
-
-
-    subgraph rtfeed[Feedback]
-      rtfeed_s[SUB]
-    end
-
-    subgraph fusion[Skeleton fusion]
-      fusion_s[SUB]
-      fusion_p[PUB]
-      fusion_s -.-> fusion_e[Elaborate] -.->fusion_p
-    end
-
-    subgraph postural[Postural assessment]
-      postural_s[SUB]
-      postural_p[PUB]
-      postural_s -.-> postural_e[Elaborate] -.-> postural_p
-    end
-
-    subgraph properaction[Proper action]
-      proper_s[SUB]
-      proper_p[PUB]
-      proper_s -.-> proper_e[Elaborate] -.-> proper_p
-    end
-
-    subgraph tracking[Tracking]
-      tracking_s[SUB]
-      tracking_p[PUB]
-      tracking_s -.-> tracking_e[Elaborate] -.-> tracking_p
-    end
-
-    subgraph stress[Stress]
-      stress_s[SUB]
-      stress_p[PUB]
-      stress_s -.-> stress_e[Elaborate] -.-> stress_p
-    end
-  end
-
-  camera_p --> xsub
-  rfid_p --> xsub
-  force_p --> xsub
-  meta_p --> xsub
-  wearable_p --> xsub
-
-  xpub --> sub
-  mongo --> mongodb[(MongoDB)]
-
-  xpub --> rtfeed_s
-
-  xpub --> fusion_s
-  fusion_p --> xsub
-
-  xpub --> postural_s
-  postural_p --> xsub
-
-  xpub --> proper_s
-  proper_p --> xsub
-
-  xpub --> tracking_s
-  tracking_p --> xsub
-
-  xpub --> stress_s
-  stress_p --> xsub
-
+flowchart LR
+    broker["Broker"]
+    source["Source"]
+    filter["Filter"]
+    sink["Sink"]
+    monolithic["Mon. source"]
+    source_plugin["Source Plugin"]
+    filter_plugin["Filter Plugin"]
+    sink_plugin["Sink Plugin"]
+    source_plugin <--> source
+    filter_plugin <--> filter
+    sink_plugin <--> sink
+    source --> broker
+    filter --> broker
+    broker --> sink
+    monolithic --> broker
+    broker --> filter
+    sink --> field
+    broker --> logger
+    logger --> mongodb[(MongoDB)]
 ```
 
 
 ## Settings
 
-The settings are stored in an INI file according to the [TOML format](https://toml.io). By defaut, the setting file is read by the broker (which should be the first process to start), and then passed to the other processes via a ZeroMQ REQ/REP socket. This way, all agents share the same settingsm even if they run on different filesystems.
+The settings are stored in an INI file according to the [TOML format](https://toml.io). By defaut, the setting file is read by the broker (which must be the first process to start), and then passed to the other processes via a ZeroMQ REQ/REP socket. This way, all agents share the same settings even if they run on different filesystems.
+
+The settings file is divided into sections, one for each agent. The section name is the name of the executable file, without the path and the extension. For example, the settings for the `logger` agent are stored in a section named `[logger]`.
+
+An `[agents]` section is also present, which contains the settings that are meant to be shared among all agents.
 
 ## Database
 
@@ -135,49 +65,17 @@ docker run --name miroscic-mongo -v ${PWD}/db:/data/db -p27017:27017 -d mongo
 
 The `Logger` agent connects to a MongoDB instance. The URI of the database (possibly on a different machine) is specified in the `mads.ini` file, as well as the name of the database to be used.
 
-For each and every message received by the `Logger` agent, it saves a new document on a table named as the topic of the message. The document contains the following fields:
+For each and every message received by the `logger` agent, it saves a new document on a table named as the topic of the message. The document contains the following fields:
 
 * `_id`: a unique identifier for the document, automatically generated by MongoDB
 * `timestamp`: the timestamp of the message
 * `message`: the message itself, as a JSON object
 * `error`: error message when the JSON is not valid
 
-## Gantt
-
-```mermaid
-gantt
-  title Project Gantt
-  dateFormat YYYY-MM-DD
-  axisFormat %b %y
-  Section Management
-    Management                       :mgm, 2023-12-01, 24M
-  section Physical Layer
-    Shopfloor interface (TN)           :active, a2-1, 2024-04-01, 10M
-    Shopfloor monitor (BS)             :a2-2, 2024-04-01, 6M
-    Wearable sensors (BS)              :a2-3, 2024-04-01, 6M
-    RT Feedback (PG)                   :a2-3, 2024-04-01, 6M
-    Immersive HMI (TN)                 :a2-3, 2024-08-01, 6M
-    Integration (TN)                   :a2-3, 2024-12-01, 4M
-
-  section Functional Layer
-    Operator tracking (BS)             :a3-1, 2024-08-01, 6M
-    Postural assessment (BS)           :a3-2, 2024-10-01, 6M
-    Proper action recog. (BS)          :a3-3, 2024-12-01, 8M
-    Object tracking (PG)               :a3-4, 2024-08-01, 6M
-    Stress and attention estimator (BS) :a3-5, 2024-08-01, 6M
-    Supervisor (TN)                    :active, a3-6, 2024-08-01, 8M
-    Integration (PG)                   :a3-7, after a3-6, 4M
-
-  Section Use cases
-    Use case 1 (BS)                    :after a3-7, 4M
-    Use case 2 (TN)                    :after a3-7, 4M
-    Use case 3 (PG)                    :after a3-7, 4M
-
-```
 
 ## Development
 
-The code is supposed to be compiled and run on Unix systems (Linux or MacOS), and shall be portable to x86 or ARM architecture.
+The code is supposed to be compiled and run on Windows, Linux or MacOS, and shall be portable to x86 or ARM architecture.
 
 Project configuration is performed via cmake and compilation preferably via clang, although gcc should work as well.
 
@@ -215,7 +113,7 @@ In the configuration step (`cmake -Bbuild ...`) some of the targets can be expli
 cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -DMADS_ENABLE_LOGGER=OFF
 ```
 
-To see the complete list of optional targets, run CMake in interactive mode (note the **double leading** 'c'):
+To see the complete list of optional targets, run CMake in interactive mode (notice the **double leading** 'c'!):
 
 ```bash
 ccmake -Bbuild
@@ -223,7 +121,7 @@ ccmake -Bbuild
 
 `ccmake` can be installed via `apt install cmake-curses-gui` on Debian/Ubuntu. As an alternative, you can use the graphical `cmake-gui` tool. You can also list the available options with `cmake -Bbuild -LH | grep MIROSCIC`.
 
-**NOTE**: cmake check-compile external libraries, which may take some time in compilation. Once the external libraries are compiled, you can disable this ckeck with the cmake option `-DMADS_SKIP_EXTERNALS=ON`. Likewise, header-only libraries are grabbed via CMake `FetchContent` module, which may take some time. You can disable this check with the cmake option `-DFETCHCONTENT_FULLY_DISCONNECTED=ON`.
+**NOTE**: cmake checks-compiles external libraries, which may take some time in the making. Once the external libraries are compiled, you can disable this ckeck with the cmake option `-DMADS_SKIP_EXTERNALS=ON`. Likewise, header-only libraries are grabbed via CMake `FetchContent` module, which may take some time. You can disable this check with the cmake option `-DFETCHCONTENT_FULLY_DISCONNECTED=ON`.
 
 ### Coding style
 
@@ -239,7 +137,7 @@ ccmake -Bbuild
 
 ### How to implement an agent
 
-To implement an agent two files have to be created:
+To implement a **monolithic agent** two files have to be created:
 
 * `src/new_agent.hpp`. This is a class that inherits from `Mads::Agent` and should:
   * override the method `Mads::Agent::load_settings()`, which has to load the customized settings from the INI file
@@ -251,17 +149,19 @@ The base `Agent` class provides all the low level functionality to exchange info
 In the main function for the new agent, the steps to follow are:
 
 1. Instantiate the new agent: `auto agent = MyNewAgent(argv[0], "settings.ini")`. This way, the agent reads the settings in the ini file from the section named after the last element in `argv[0]`, i.e. the executable file name
-2. If the agent is part of the frontend (hardware) layer, call `agent.connect_sub()`, which sets up the connection to the broker `XSUB` port
-3. If the agent is part of the backend (functional) layer, also call `agent.connect_pub()`, which sets up the connection to the broker `XPUB` port
+2. If the agent is a source, call `agent.connect_sub()`, which sets up the connection to the broker `XSUB` port
+3. If the agent is a filter or a sink, also call `agent.connect_pub()`, which sets up the connection to the broker `XPUB` port
 4. Optionally, print configuration input with `agent.info()`
 5. Within the main loop, you typically have to:
-   1. If the agent is in the hardware layer, read data from the field and pack as JSON using `nlohmann::json`
-   2. If the agent is in the functional layer, read incoming topics with `agent.receive()`. This receives inbound messages and stores them in a status hash (one kay per topic), retrivable with `agent.status()`. The very last message is available as a tuple `topic,content` from `agent.last_message()`. Messages are encoded as JSON, so decoding is needed with `nlohmann::json` class
+   1. If the agent is a source, read data from the field and pack them as JSON using `nlohmann::json`
+   2. If the agent is filter or sink, read incoming topics with `agent.receive()`. This receives inbound messages and stores them in a status hash (one key per topic), retrivable with `agent.status()`. The very last message is available as a tuple `topic,content` from `agent.last_message()`. Messages are encoded as JSON, so decoding is needed with `nlohmann::json` class
    3. Operate on inbound or field data to build the new outbound payload
    4. Publish the new payload with `agent.publish()`. It will use the topic specified in the settings file.
 6. That's it. 
 
 In order to keep the code more readable and organized, the algorithms implemented in step 5.3 are preferably implemented in the class `MyNewAgent`, rather than in the main function or in the executable file.
+
+For **plugin agents**, see the [dedicated section below](#plugins).
 
 ### Windows support
 
@@ -303,7 +203,6 @@ The advantages of the pluging systems are:
 * in the future, it would be possible to have the broker distribute the plugins to the agents, so that the agents can load the plugins at runtime together with the settings file
 * Respect to have completely separate projects and repos for whole agents, the plugins are supposed to be smaller and more focused, and much easier to develop: they can act as simple blocks that takes an input in the form of a JSON object and provide a similar output. No knowledge about the Miroscic agent network is required
 
-There are three possible types of plugins: sources, filters, and sinks. **Source** plugins are supposed to grab data from the field and publish them to the broker. **Filter** plugins are supposed to receive data from the broker, process them, and publish the results to the broker. **Sink** plugins are supposed to receive data from the broker and send them to the field.
 
 ## How to develop a plugin
 
@@ -314,4 +213,4 @@ To develop a plugin follow these steps:
 3. customize the `CMakeLists.txt` file to compile the plugin. Add any external library needed by the plugin. If the libraries are static, you won't need to install them in the target system, but the resulting plugin file would be bigger (possibly an issue if distributing plugins via broker)
 4. in developing the plugin you must also add a `main()` function, which is used to test the plugin. This function is not used in the final plugin, but it is useful to test the plugin in isolation
 5. once the plugin is ready, compile it and copy it on the target system where the Miroscic agent is supposed to run
-6. the Miroscic agent is `filter` or `source`: it takes the name of the plugin as a key for loading the proper settings section and as a publishing topic. Settings are passed to the plugin as a JSON object on loading
+6. the Mads agent is `source`, `filter`, or `sink`: it takes the name of the plugin as a key for loading the proper settings section and as a publishing topic. Settings are passed to the plugin as a JSON object on loading, the name of the section being the name of the plugin file (no extension).
