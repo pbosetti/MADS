@@ -1,0 +1,76 @@
+/*
+  _____             _ _                _    
+ |  ___|__  ___  __| | |__   __ _  ___| | __
+ | |_ / _ \/ _ \/ _` | '_ \ / _` |/ __| |/ /
+ |  _|  __/  __/ (_| | |_) | (_| | (__|   < 
+ |_|  \___|\___|\__,_|_.__/ \__,_|\___|_|\_\
+                                            
+A pure subscriber. Provides feedback to the user.
+
+Author(s): Paolo Bosetti
+*/
+#include "../mads.hpp"
+#include "../agent.hpp"
+#include <cxxopts.hpp>
+
+using namespace std;
+using namespace cxxopts;
+using json = nlohmann::json;
+using namespace Mads;
+
+int main(int argc, char *argv[]) {
+  string settings_uri = SETTINGS_URI;
+  json payload;
+
+  // CLI options
+  Options options(argv[0]);
+  SETUP_OPTIONS(options, Agent);
+
+  // Settings
+  // none
+  
+  // Core stuff
+  Agent agent(argv[0], settings_uri);
+  try {
+    agent.init();
+  } catch(const std::exception& e) {
+    std::cout << fg::red << "Error initializing agent: " << e.what() << fg::reset << endl;
+    exit(EXIT_FAILURE);
+  }
+  agent.enable_remote_control();
+  agent.connect();
+  agent.register_event(event_type::startup);
+  agent.info();
+
+  // Main loop
+  cout << fg::green << "Feedback process started" << fg::reset << endl;
+  agent.loop([&]() {
+    message_type type = agent.receive();
+    auto msg = agent.last_message();
+    agent.remote_control();
+    switch (type) {
+    case message_type::json:
+      cout << style::bold << agent.last_topic() << ": " << style::reset 
+           << get<1>(msg).substr(0, 65) << "..." << endl;
+      break;
+    case message_type::blob:
+      cout << fg::yellow << "Received BLOB message" << fg::reset << endl;
+      break;
+    case message_type::none:
+      break;
+    default:
+      cout << fg::red << "Received unknown message type" << fg::reset << endl;
+      break;
+    }
+  });
+  cout << fg::green << "Feedback process stopped" << fg::reset << endl;
+
+  // Cleanup
+  agent.register_event(event_type::shutdown);
+  agent.disconnect();
+  if (agent.restart()) {
+    cout << "Restarting..." << endl;
+    execvp(argv[0], argv);
+  }
+  return 0;
+}

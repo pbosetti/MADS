@@ -1,0 +1,16 @@
+build
+external
+products
+packages
+db
+src/mads.hpp
+.vscode
+.venv
+
+/*.jpg
+/*.txt
+!/CMakeLists.txt
+.Rproj.user
+.Rhistory
+
+Dockerfile

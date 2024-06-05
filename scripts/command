@@ -1,0 +1,36 @@
+#!/bin/bash
+# restart all agents
+
+SCRIPT_DIR=$(dirname "$0")
+COMMAND="bridge"
+USAGE="Usage: $0 <stop|restart>"
+
+
+# Check number of arguments
+if [ $# -eq 0 ]; then
+  echo ${USAGE}
+  exit 1
+fi
+
+# Find proper command
+if [ -x "${SCRIPT_DIR}/${COMMAND}" ]; then
+  COMMAND="${SCRIPT_DIR}/${COMMAND}"
+elif [ -x "${SCRIPT_DIR}/../build/${COMMAND}" ]; then
+  COMMAND="${SCRIPT_DIR}/../build/${COMMAND}"
+else
+  echo "${COMMAND} agent not found"
+  exit 1
+fi
+
+if [ "$1" == "stop" ]; then
+  echo "Stopping agents"
+  ${COMMAND} -t control -m "{\"cmd\":\"shutdown\"}"
+  exit 0
+elif [ "$1" == "restart" ]; then
+  echo "Restarting agents"
+  ${COMMAND} -t control -m "{\"cmd\":\"restart\"}"
+  exit 0
+else
+  echo "Unsupported command. ${USAGE}"
+  exit 1
+fi

@@ -1,0 +1,16 @@
+#!/bin/bash
+# Stress test for bridge agent
+# It is supposed to be call as:
+#  ./stress.sh | build/bridge -t topic
+
+counter=0
+
+while true; do
+  # The topic can be dynamically changed with a leading "topic:" string:
+  json="bridge: {\"hostname\": $(hostname),\"command\": \"$0\", \"id\": ${counter}, \"date\": \"$(date)\"}"
+  # Or just accept the one passed on the CLI:
+  json="{\"hostname\": \"$(hostname)\",\"command\": \"$0\", \"id\": ${counter}, \"date\": \"$(date)\"}"
+  echo $json
+  counter=$((counter+1))
+  sleep 0.2
+done

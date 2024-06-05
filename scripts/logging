@@ -1,0 +1,36 @@
+#!/bin/bash
+# enable/disable logging
+
+SCRIPT_DIR=$(dirname "$0")
+COMMAND="bridge"
+USAGE="Usage: $0 <on|off> [mads bin dir]"
+
+# Check number of arguments
+if [ $# -eq 0 ]; then
+  echo ${USAGE}
+  exit 1
+fi
+
+# Find proper command
+if [ -x "${SCRIPT_DIR}/${COMMAND}" ]; then
+  COMMAND="${SCRIPT_DIR}/${COMMAND}"
+elif [ -x "${SCRIPT_DIR}/../build/${COMMAND}" ]; then
+  COMMAND="${SCRIPT_DIR}/../build/${COMMAND}"
+else
+  echo "${COMMAND} agent not found"
+  exit 1
+fi
+
+
+if [ "$1" == "on" ]; then
+  echo "Enabling logging"
+  ${COMMAND} -t metadata -m "{\"pause\":false}"
+  exit 0
+elif [ "$1" == "off" ]; then
+  echo "Disabling logging"
+  ${COMMAND} -t metadata -m "{\"pause\":true}"
+  exit 0
+else
+  echo "Unsupported command. ${USAGE}"
+  exit 1
+fi

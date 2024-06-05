@@ -1,0 +1,40 @@
+FROM ubuntu:22.04
+LABEL maintainer="paolo.bosetti@unitn.it"
+
+ENV BUILDDIR /build
+
+RUN mkdir ${BUILDDIR}
+WORKDIR /root
+
+RUN apt-get update && apt-get install -y \
+    clang \
+    cmake \
+    git && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* 
+
+COPY src ${BUILDDIR}/src
+COPY CMakeLists.txt ${BUILDDIR}
+COPY external.cmake ${BUILDDIR}
+COPY Dockerfile.in ${BUILDDIR}
+COPY mads.ini ${BUILDDIR}
+
+ENV CC /usr/bin/clang
+ENV CXX /usr/bin/clang++
+
+RUN cd ${BUILDDIR} && \
+    cmake -Bbuild -DMADS_ENABLE_METADATA=OFF -DMADS_ENABLE_LOGGER=ON -DCMAKE_BUILD_TYPE=Release && \
+    cmake --build build -j6 && \
+    cmake --install build --prefix /usr/local && \
+    rm -rf build && \
+    cp ${BUILDDIR}/products/lib/*.so* /usr/local/lib
+
+COPY scripts ${BUILDDIR}/scripts
+COPY Docker/compose.yml ${BUILDDIR}
+COPY Docker/cmd.sh ${BUILDDIR}
+
+EXPOSE 9090 9091 9092
+
+LABEL version=@LIB_VERSION@
+
+ENTRYPOINT ["/build/cmd.sh"]
