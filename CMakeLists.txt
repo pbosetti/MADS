@@ -29,7 +29,6 @@ if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
 else()
   set(MADS_ENABLE_METADATA OFF)
 endif()
-option(MADS_ENABLE_DUMMY "Enable dummy publisher agent" OFF)
 option(MADS_ENABLE_PERF_ASSESS "Enable performance assessment tool" OFF)
 option(MADS_ENABLE_MONGODB_AWS 
        "Enable Cloud MongoDB (requires crypto library on linux)" OFF)
@@ -229,10 +228,6 @@ endif()
 
 if (${MADS_ENABLE_LOGGER})
   create_exec(logger ${MONGO_LIBS})
-endif()
-
-if (${MADS_ENABLE_DUMMY})
-  create_exec(dummy ${ARMA_LIBS})
 endif()
   
 
