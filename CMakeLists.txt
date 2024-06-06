@@ -22,19 +22,19 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 #   \___/| .__/ \__|_|\___/|_| |_|___/
 #        |_|                          
 
-option(MADS_ENABLE_LOGGER "Enable logger agent (connects to MongoDB)" OFF)
+option(MADS_ENABLE_LOGGER "Enable logger agent (connects to MongoDB)" ON)
 if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
-  option(MADS_ENABLE_METADATA "Enable metadata agent" ON)
+  option(MADS_ENABLE_METADATA "Enable metadata agent" OFF)
   option(MADS_USE_GPIOD_2 "Use libgpiod version 2" ON)
 else()
   set(MADS_ENABLE_METADATA OFF)
 endif()
 option(MADS_ENABLE_PERF_ASSESS "Enable performance assessment tool" OFF)
 option(MADS_ENABLE_MONGODB_AWS 
-       "Enable Cloud MongoDB (requires crypto library on linux)" OFF)
-option(MADS_ENABLE_TOOLS "Compile tools" OFF)
+       "Enable Cloud MongoDB (requires crypto library on linux)" ON)
+option(MADS_ENABLE_TOOLS "Compile tools (requires OpenCV)" OFF)
 option(MADS_ENABLE_PYTHON_WRAPPER "Compile Python3 wrapper to Agent class" OFF)
-option(MADS_ENABLE_GUI "Compile GUI" OFF)
+option(MADS_ENABLE_GUI "Compile GUI (requires QT6)" OFF)
 option(MADS_SKIP_EXTERNALS 
        "Skip external targets (assume already compiled)" OFF)
 option(MADS_MINIMAL "Only compile filter and source executables" OFF)
