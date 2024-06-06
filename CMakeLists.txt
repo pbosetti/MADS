@@ -208,6 +208,7 @@ if(NOT MADS_MINIMAL)
 endif()
 create_exec(filter pugg ${DLOPEN_LIB})
 create_exec(source pugg ${DLOPEN_LIB})
+create_exec(sink pugg ${DLOPEN_LIB})
 
 # Conditionally built targets
 

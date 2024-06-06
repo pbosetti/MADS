@@ -96,7 +96,7 @@ int main(int argc, char *argv[]) {
        << endl;
 
   // Main loop
-  cout << fg::green << "Feedback process started" << fg::reset << endl;
+  cout << fg::green << "Source plugin process started" << fg::reset << endl;
   agent.loop([&]() {
     json out;
     vector<unsigned char> blob;
@@ -118,7 +118,7 @@ int main(int argc, char *argv[]) {
           << " errors";
     cout.flush();
   });
-  cout << fg::green << "Feedback process stopped" << fg::reset << endl;
+  cout << fg::green << "Source plugin process stopped" << fg::reset << endl;
 
   // Cleanup
   agent.register_event(event_type::shutdown);
