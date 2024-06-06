@@ -208,8 +208,8 @@ The advantages of the pluging systems are:
 
 To develop a plugin follow these steps:
 
-1. fork the repo [plugin_cpp](https://github.com/miroscic/plugin_cpp). Create a new branch and work on that branch.
-2. look at the fils within `src/plugin` dir. Duplicate one of the source or filter plugins and customize it. The plugin  must have a plugin class derived from one of the base plugin classes that you find in `src`
+1. use the template repo [mads_plugin](https://github.com/pbosetti/mads_plugin). Click on the green button "Use this template" to create a new repo with the same structure
+2. look at the fils within `src/plugin` dir. Duplicate one of the source or filter or sink plugins and customize it. The plugin  must have a plugin class derived from one of the base plugin classes that you find in `src`
 3. customize the `CMakeLists.txt` file to compile the plugin. Add any external library needed by the plugin. If the libraries are static, you won't need to install them in the target system, but the resulting plugin file would be bigger (possibly an issue if distributing plugins via broker)
 4. in developing the plugin you must also add a `main()` function, which is used to test the plugin. This function is not used in the final plugin, but it is useful to test the plugin in isolation
 5. once the plugin is ready, compile it and copy it on the target system where the Miroscic agent is supposed to run
