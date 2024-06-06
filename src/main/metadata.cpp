@@ -16,7 +16,7 @@ Author(s): Paolo Bosetti
 using namespace std;
 using namespace cxxopts;
 using json = nlohmann::json;
-using namespace Miroscic;
+using namespace Mads;
 
 int main(int argc, char *argv[]) {
   string settings_uri = SETTINGS_URI;
@@ -29,7 +29,7 @@ int main(int argc, char *argv[]) {
   options.add_options()
     ("p", "Sampling period (default 100 ms)", value<size_t>())
     ("c,continuous", "Continuous sampling", value<bool>());
-  SETUP_OPTIONS(options, Miroscic::Metadata);
+  SETUP_OPTIONS(options, Mads::Metadata);
 
   // Settings
   if (options_parsed.count("p") != 0) {
