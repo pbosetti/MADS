@@ -16,6 +16,7 @@ Author(s): Paolo Bosetti
 #include <filesystem>
 #include <source.hpp>
 #include <pugg/Kernel.h>
+#include <chrono>
 
 using namespace std;
 using namespace cxxopts;
@@ -30,11 +31,14 @@ int main(int argc, char *argv[]) {
   string settings_uri = SETTINGS_URI;
   string plugin_name, plugin_file;
   size_t count = 0, count_err = 0;
+  chrono::milliseconds time{0};
 
   // CLI options
   Options options(argv[0]);
-  options.add_options()("plugin", "Plugin to load", value<string>())
-    ("i,agent_id", "Agent ID to be added to JSON frames", value<string>());
+  options.add_options()
+    ("plugin", "Plugin to load", value<string>())
+    ("i,agent_id", "Agent ID to be added to JSON frames", value<string>())
+    ("p", "Sampling period (default 100 ms)", value<size_t>());
   options.parse_positional({"plugin"});
   options.positional_help("plugin");
   SETUP_OPTIONS(options, Agent);
@@ -86,6 +90,21 @@ int main(int argc, char *argv[]) {
   if (options_parsed.count("agent_id")) {
     settings["agent_id"] = options_parsed["agent_id"].as<string>();
   }
+  cout << "  Sampling period:  " << style::bold;
+  if (options_parsed.count("p") != 0) {
+    time = chrono::milliseconds(options_parsed["p"].as<size_t>());
+    cout << fg::yellow << time.count() << " ms" << " (from -p option)" 
+         << fg::reset << style::reset << endl;
+  } else if (!settings["period"].is_null()) {
+    time = chrono::milliseconds(settings["period"].get<size_t>());
+    cout << time.count() << " ms" << " (from settings)" 
+         << style::reset << endl;
+  }  else {
+    cout << fg::red << "free run" << fg::reset << style::reset 
+         << " (default)" << endl;
+  }
+
+
   source->set_params((void *)&settings);
   string out_format = source->blob_format();
   for (auto &[k, v] : source->info()) {
@@ -117,7 +136,7 @@ int main(int argc, char *argv[]) {
           << fg::reset << " total, with " << fg::red << count_err << fg::reset
           << " errors";
     cout.flush();
-  });
+  }, time);
   cout << fg::green << "Source plugin process stopped" << fg::reset << endl;
 
   // Cleanup

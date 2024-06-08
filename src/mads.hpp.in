@@ -44,7 +44,7 @@ Author(s): Paolo Bosetti
 // binnng of sampled data at this FPS
 #define MADS_FPS 25
 
-#define METADATA_TOPIC "metadata"
+#define METADATA_TOPIC "agent_event"
 
 #define SETTINGS_PATH "mads.ini"
 #define FRONTEND_URI "tcp://localhost:9090"
