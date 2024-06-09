@@ -15,8 +15,6 @@ class MainWindow;
 }
 QT_END_NAMESPACE
 
-#include <agent.hpp>
-
 class MainWindow : public QMainWindow {
   Q_OBJECT
 
