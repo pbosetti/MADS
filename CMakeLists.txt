@@ -121,7 +121,7 @@ FetchContent_Declare(pugg
 )
 
 FetchContent_Declare(plugin 
-  GIT_REPOSITORY https://github.com/miroscic/plugin_cpp.git
+  GIT_REPOSITORY https://github.com/pbosetti/mads_plugin.git
   GIT_TAG        HEAD
   GIT_SHALLOW    TRUE
 )
