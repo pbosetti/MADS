@@ -14,6 +14,8 @@ set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Prefix for executable ames
+set(PREFIX "mads-")
 
 #    ___        _   _                 
 #   / _ \ _ __ | |_(_) ___  _ __  ___ 
@@ -182,9 +184,9 @@ endif()
 macro(create_exec target )
   set(libs ${ARGV})
   list(REMOVE_ITEM libs ${target})
-  add_executable(${target} ${MAIN_DIR}/${target}.cpp)
-  target_link_libraries(${target} ${LIB_LIST} ${libs})
-  list(APPEND TARGET_LIST ${target})
+  add_executable(${PREFIX}${target} ${MAIN_DIR}/${target}.cpp)
+  target_link_libraries(${PREFIX}${target} ${LIB_LIST} ${libs})
+  list(APPEND TARGET_LIST ${PREFIX}${target})
 endmacro()
 
 

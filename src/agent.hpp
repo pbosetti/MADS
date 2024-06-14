@@ -168,6 +168,11 @@ public:
 #else
     _name = name.substr(name.find_last_of("/") + 1);
 #endif
+    // If the command name has a prefix (e.g. "mads-"), remove it
+    size_t pos = _name.rfind('-');
+    if (pos != std::string::npos) {
+      _name = _name.substr(pos + 1);
+    } 
   }
 
 
@@ -182,7 +187,12 @@ public:
    * @throws AgentError if timed out in reading settings from broker.
    */
   void init(string name, string settings_uri) {
-    _name = name;
+    size_t pos = name.rfind('-');
+    if (pos != std::string::npos) {
+      _name = name.substr(pos + 1);
+    } else {
+      _name = name;
+    }
     _settings_uri = settings_uri;
     init();
   }

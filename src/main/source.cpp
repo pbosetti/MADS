@@ -128,8 +128,10 @@ int main(int argc, char *argv[]) {
       }
     } else if (result == return_type::critical) {
       Mads::running = false;
-    } else {
+    } else if (result == return_type::error) {
       count_err++;
+    } else if (result == return_type::retry) {
+      return;
     }
     count++;
     cout << "\r\x1b[0KMessages processed: " << fg::green << count
