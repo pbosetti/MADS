@@ -259,7 +259,7 @@ if(NOT ${MADS_SKIP_EXTERNALS})
     add_dependencies(${t} snappy)
   endforeach()
   if (${MADS_ENABLE_LOGGER})
-    add_dependencies(logger mongocxx)
+    add_dependencies(${PREFIX}logger mongocxx)
   endif()
 endif()
 
