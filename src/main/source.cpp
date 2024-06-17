@@ -128,6 +128,7 @@ int main(int argc, char *argv[]) {
       }
     } else if (result == return_type::critical) {
       Mads::running = false;
+      return;
     } else if (result == return_type::error) {
       count_err++;
     } else if (result == return_type::retry) {
