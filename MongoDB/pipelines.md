@@ -111,6 +111,29 @@
       },
       data: "$flat_data"
     }
+  },
+  /* Group the data by timecode, taking the minimum timestamp, the first type
+   * and the maximum data
+  */
+  {
+    $group: {
+      _id: "$timecode",
+      timestamp: {
+        $min: "$timestamp"
+      },
+      type: {
+        $first: "$type"
+      },
+      data: {
+        $max: "$data"
+      }
+    }
+  },
+  /* Sort the data by timecode, because $group does not order its results */
+  {
+    $sort: {
+      _id: 1
+    }
   }
 ]
 ```
