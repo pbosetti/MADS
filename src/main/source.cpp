@@ -128,6 +128,11 @@ int main(int argc, char *argv[]) {
       }
     } else if (result == return_type::critical) {
       Mads::running = false;
+      json msg{
+        {"error", source->error()}
+      };
+      this_thread::sleep_for(chrono::milliseconds(1000));
+      agent.register_event(event_type::marker, msg);
       return;
     } else if (result == return_type::error) {
       count_err++;

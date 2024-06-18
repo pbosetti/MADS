@@ -472,12 +472,9 @@ public:
    * @throws AgentError if not initialized
    */
   void register_event(const event_type event = event_type::marker,
-                      const nlohmann::json *info = nullptr) {
+                      const nlohmann::json &info = nlohmann::json()) {
     if (!_init_done)
       throw AgentError("Agent not initialized");
-    bool include_info = false;
-    if (info)
-      include_info = true;
     nlohmann::json settings = get_settings();
     thread t([=, this]() {
       nlohmann::json payload;
@@ -487,10 +484,10 @@ public:
       payload["version"] = LIB_VERSION;
       payload["event"] = event_map.at(event);
       payload["settings_path"] = _settings_uri;
-      if (include_info) {
-        payload["info"] = *info;
-      }
       payload["settings"] = settings;
+      if (!info.empty()) {
+        payload["info"] = info;
+      }
       publish(payload, METADATA_TOPIC);
     });
     if (event == event_type::shutdown) {
