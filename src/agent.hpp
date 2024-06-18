@@ -479,7 +479,7 @@ public:
     if (info)
       include_info = true;
     nlohmann::json settings = get_settings();
-    thread t([=]() {
+    thread t([=, this]() {
       nlohmann::json payload;
       if (event == event_type::startup)
         this_thread::sleep_for(chrono::milliseconds(STARTUP_SHUTDOWN_DELAY));

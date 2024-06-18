@@ -79,7 +79,7 @@ if (MSVC)
   add_definitions(-D_CRT_SECURE_NO_WARNINGS)
   add_compile_options(/wd4068 /wd4005 /wd4267 /wd4244 /wd4804 /EHsc)
 else()
-# add_compile_options("-Wno-#pragma-messages")
+  add_compile_options("-Wno-pragmas")
 endif()
 
 
