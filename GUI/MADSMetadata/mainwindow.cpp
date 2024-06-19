@@ -7,7 +7,7 @@
 #include <nlohmann/json.hpp>
 
 using namespace Mads;
-using namespace nlohmann;
+using json = nlohmann::json;
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), ui(new Ui::MainWindow), _agent(QAgent("", "")) {
@@ -92,30 +92,30 @@ MainWindow::MainWindow(QWidget *parent)
 
   // Agent name line updates the name of the agent (defailt topic)
   connect(ui->agentNameLine, &QLineEdit::textEdited, this,
-          [=](QString s) { ui->agentNameLine->setText(s.toLower()); });
+          [=, this](QString s) { ui->agentNameLine->setText(s.toLower()); });
 
   // enable/disable logging checkbox acts immediately
-  connect(ui->enableLogging, &QCheckBox::stateChanged, this, [=](int state) {
+  connect(ui->enableLogging, &QCheckBox::stateChanged, this, [=, this](int state) {
     json j;
     j["pause"] = !(state == Qt::Checked);
     _agent.publish(j);
   });
 
-  connect(ui->markInButton, &QPushButton::clicked, this, [=]() {
+  connect(ui->markInButton, &QPushButton::clicked, this, [=, this]() {
     const json j = collectData();
-    _agent.register_event(event_type::marker_in, &j);
+    _agent.register_event(event_type::marker_in, j);
     ui->markInButton->setEnabled(false);
     ui->markOutButton->setEnabled(true);
   });
 
-  connect(ui->markOutButton, &QPushButton::clicked, this, [=]() {
+  connect(ui->markOutButton, &QPushButton::clicked, this, [=, this]() {
     _agent.register_event(event_type::marker_out);
     ui->trialNumber->stepUp();
     ui->markInButton->setEnabled(true);
     ui->markOutButton->setEnabled(false);
   });
 
-  connect(ui->immediateMarkButton, &QPushButton::clicked, this, [=]() {
+  connect(ui->immediateMarkButton, &QPushButton::clicked, this, [=, this]() {
     _agent.register_event(event_type::marker);
   });
 
@@ -134,7 +134,7 @@ MainWindow::MainWindow(QWidget *parent)
   });
 
   // Subscriber thread: on new message, updates the JSON tree view
-  connect(&_agent, &QAgent::gotNewMessage, this, [=]() {
+  connect(&_agent, &QAgent::gotNewMessage, this, [=, this]() {
     if (ui->tabWidget->currentIndex() != 1) return;
     json j;
     QByteArray ba;
