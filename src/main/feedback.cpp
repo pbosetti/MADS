@@ -20,7 +20,8 @@ using namespace Mads;
 
 int main(int argc, char *argv[]) {
   string settings_uri = SETTINGS_URI;
-  json payload;
+  json payload, params;
+  int width = 65, indent = -1;
 
   // CLI options
   Options options(argv[0]);
@@ -39,9 +40,15 @@ int main(int argc, char *argv[]) {
   }
   agent.enable_remote_control();
   agent.connect();
+  params = agent.get_settings();
   agent.register_event(event_type::startup);
   agent.info();
-
+  try {
+    width = params["print_width"].get<int>();
+  } catch (...) {}
+  try {
+    indent = params["indent_width"].get<int>();
+  } catch (...) {}
   // Main loop
   cout << fg::green << "Feedback process started" << fg::reset << endl;
   agent.loop([&]() {
@@ -50,8 +57,13 @@ int main(int argc, char *argv[]) {
     agent.remote_control();
     switch (type) {
     case message_type::json:
-      cout << style::bold << agent.last_topic() << ": " << style::reset 
-           << get<1>(msg).substr(0, 65) << "..." << endl;
+      if (width > 0) {
+        cout << style::bold << agent.last_topic() << ": " << style::reset 
+             << get<1>(msg).substr(0, width) << "..." << endl;
+      } else {
+        cout << style::bold << agent.last_topic() << ": " << style::reset 
+             << json::parse(get<1>(msg)).dump(indent) << endl;
+      }
       break;
     case message_type::blob:
       cout << fg::yellow << "Received BLOB message" << fg::reset << endl;
