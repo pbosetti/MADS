@@ -36,6 +36,7 @@ MainWindow::MainWindow(QWidget *parent)
     if (_watcher.result()) {
       statusBar()->showMessage("Connected");
       ui->sendMessageButton->setEnabled(true);
+      ui->sendMessageButton->setText("Mark with info (published to the " + ui->agentNameLine->text() + " topic)");
       ui->connectButton->setText("Click to disconnect");
       ui->enableLogging->setEnabled(true);
       ui->markOutButton->setEnabled(false);
@@ -79,6 +80,7 @@ MainWindow::MainWindow(QWidget *parent)
       statusBar()->showMessage("Disconnected", 5000);
       ui->connectButton->setText("Click to connect");
       ui->sendMessageButton->setEnabled(false);
+      ui->sendMessageButton->setText("Mark with info");
       ui->enableLogging->setEnabled(false);
       ui->markOutButton->setEnabled(false);
       ui->markInButton->setEnabled(false);
