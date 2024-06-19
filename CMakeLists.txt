@@ -33,7 +33,7 @@ else()
 endif()
 option(MADS_ENABLE_PERF_ASSESS "Enable performance assessment tool" OFF)
 option(MADS_ENABLE_MONGODB_AWS 
-       "Enable Cloud MongoDB (requires crypto library on linux)" ON)
+       "Enable Cloud MongoDB (requires crypto library on linux)" OFF)
 option(MADS_ENABLE_TOOLS "Compile tools (requires OpenCV)" OFF)
 option(MADS_ENABLE_PYTHON_WRAPPER "Compile Python3 wrapper to Agent class" OFF)
 option(MADS_ENABLE_GUI "Compile GUI (requires QT6)" OFF)
