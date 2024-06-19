@@ -116,54 +116,56 @@
    * and the proper data statistics
   */
   {
-    _id: "$timecode",
-    timestamp: {
-      $min: "$timestamp"
-    },
-    type: {
-      $first: "$type"
-    },
-    data: {
-      $first: "$data"
-    },
-    p_min: {
-      $min: {
-        $arrayElemAt: ["$data", 6]
-      }
-    },
-    p_max: {
-      $max: {
-        $arrayElemAt: ["$data", 6]
-      }
-    },
-    p_avg: {
-      $avg: {
-        $arrayElemAt: ["$data", 6]
-      }
-    },
-    X: {
-      $min: {
-        $arrayElemAt: ["$data", 1]
-      }
-    },
-    Y: {
-      $min: {
-        $arrayElemAt: ["$data", 2]
-      }
-    },
-    Z: {
-      $min: {
-        $arrayElemAt: ["$data", 3]
-      }
-    },
-    A: {
-      $min: {
-        $arrayElemAt: ["$data", 4]
-      }
-    },
-    B: {
-      $min: {
-        $arrayElemAt: ["$data", 5]
+    $group: {
+      _id: "$timecode",
+      timestamp: {
+        $min: "$timestamp"
+      },
+      type: {
+        $first: "$type"
+      },
+      data: {
+        $first: "$data"
+      },
+      p_min: {
+        $min: {
+          $arrayElemAt: ["$data", 6]
+        }
+      },
+      p_max: {
+        $max: {
+          $arrayElemAt: ["$data", 6]
+        }
+      },
+      p_avg: {
+        $avg: {
+          $arrayElemAt: ["$data", 6]
+        }
+      },
+      X: {
+        $min: {
+          $arrayElemAt: ["$data", 1]
+        }
+      },
+      Y: {
+        $min: {
+          $arrayElemAt: ["$data", 2]
+        }
+      },
+      Z: {
+        $min: {
+          $arrayElemAt: ["$data", 3]
+        }
+      },
+      A: {
+        $min: {
+          $arrayElemAt: ["$data", 4]
+        }
+      },
+      B: {
+        $min: {
+          $arrayElemAt: ["$data", 5]
+        }
       }
     }
   },
