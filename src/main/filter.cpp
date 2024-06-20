@@ -102,7 +102,7 @@ int main(int argc, char *argv[]) {
       json in = json::parse(get<1>(msg));
       json out;
       filter->load_data(in);
-      return_type processed = filter->process(&out);
+      return_type processed = filter->process(out);
       if (processed != return_type::success) {
         out = {{"error", filter->error()}};
         count_err++;

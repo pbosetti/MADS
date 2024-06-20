@@ -119,7 +119,7 @@ int main(int argc, char *argv[]) {
   agent.loop([&]() {
     json out;
     vector<unsigned char> blob;
-    return_type result = source->get_output(&out, &blob);
+    return_type result = source->get_output(out, &blob);
     if (return_type::success == result) {
       agent.publish(out);
       if (blob.size() > 0) {
