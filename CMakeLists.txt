@@ -57,11 +57,23 @@ configure_file(
   ${SOURCE_DIR}/mads.hpp.in 
   ${SOURCE_DIR}/mads.hpp
 )
-configure_file(
-  ${CMAKE_CURRENT_LIST_DIR}/Dockerfile.in
-  ${CMAKE_CURRENT_LIST_DIR}/Dockerfile
-  @ONLY
+# List of filenames to be configured
+set(CONFIG_FILENAMES
+  Dockerfile
+  tools/mads-broker.service
+  tools/mads-logger.service
+  tools/mads-source.service
+  tools/mads-filter.service
+  tools/mads-sink.service
 )
+# Loop over the filenames
+foreach(filename ${CONFIG_FILENAMES})
+  configure_file(
+    ${CMAKE_CURRENT_LIST_DIR}/${filename}.in
+    ${CMAKE_CURRENT_LIST_DIR}/${filename}
+  )
+endforeach()
+
 
 # RPATH management
 # This embeds the relative path of the dynamic library into the executable
@@ -271,7 +283,9 @@ endif()
 #  |___|_| |_|___/\__\__,_|_|_|
 #
 
-set(CMAKE_INSTALL_PREFIX ${USR_DIR})
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+  set(CMAKE_INSTALL_PREFIX ${USR_DIR} CACHE PATH "Installation dir" FORCE)
+endif()
 install(TARGETS ${TARGET_LIST}
   BUNDLE DESTINATION bin
   LIBRARY DESTINATION lib

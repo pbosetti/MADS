@@ -1,0 +1,27 @@
+#  __  __    _    ____  ____  
+# |  \/  |  / \  |  _ \/ ___| 
+# | |\/| | / _ \ | | | \___ \ 
+# | |  | |/ ___ \| |_| |___) |
+# |_|  |_/_/   \_\____/|____/ 
+#
+# Linux Systemd service file for MADS Broker
+# Notice that the settings file will be read from 
+# ${CMAKE_INSTALL_PREFIX}/etc/mads.ini
+#
+# Copy this file to /etc/systemd/system
+# and run `sudo systemctl enable mads-filter.service`
+
+[Unit]
+Description=MADS Broker
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=$ENV{USER}
+ExecStart=${CMAKE_INSTALL_PREFIX}/bin/mads-broker
+
+[Install]
+WantedBy=multi-user.target
