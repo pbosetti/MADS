@@ -485,6 +485,9 @@ public:
       payload["event"] = event_map.at(event);
       payload["settings_path"] = _settings_uri;
       payload["settings"] = settings;
+      if (!_agent_id.empty()) {
+        payload["agent_id"] = _agent_id;
+      }
       if (!info.empty()) {
         payload["info"] = info;
       }
@@ -709,6 +712,22 @@ public:
   */
 
   /**
+   * @brief Set the agent ID field
+   * 
+   * @param id The agent ID
+   */
+   void set_agent_id(string id) { _agent_id = id; }
+
+  
+  /**
+   * @brief Get the agent ID
+   * 
+   * @return The agent ID
+   */
+  string get_agent_id() { return _agent_id; }
+
+
+  /**
    * @brief Returns the status of the system.
    *
    * @return A map containing the last messages for each subscribed topic.
@@ -862,6 +881,7 @@ protected:
   toml::table _config;
   string _pub_endpoint, _sub_endpoint;
   string _pub_topic;
+  string _agent_id;
   vector<string> _sub_topic;
   context _context;
   zmqpp::socket _publisher;

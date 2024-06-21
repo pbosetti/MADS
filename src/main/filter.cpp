@@ -76,7 +76,6 @@ int main(int argc, char *argv[]) {
   }
   agent.enable_remote_control();
   agent.connect();
-  agent.register_event(event_type::startup);
   agent.info();
   cout << "  Plugin:           " << style::bold << plugin_file << " (loaded as "
        << plugin_name << ")" << style::reset << endl;
@@ -85,6 +84,7 @@ int main(int argc, char *argv[]) {
   json settings = agent.get_settings();
   if (options_parsed.count("agent_id")) {
     settings["agent_id"] = options_parsed["agent_id"].as<string>();
+    agent.set_agent_id(options_parsed["agent_id"].as<string>());
   }
   filter->set_params((void *)&settings);
   for (auto &[k, v] : filter->info()) {
@@ -93,6 +93,7 @@ int main(int argc, char *argv[]) {
   }
 
   // Main loop
+  agent.register_event(event_type::startup);
   cout << fg::green << "Filter plugin process started" << fg::reset << endl;
   agent.loop([&]() {
     message_type type = agent.receive();
