@@ -133,6 +133,27 @@ public:
     return msg.get(0);
   }
 
+  static double get_broker_timecode(string uri, int timeout = 2000) {
+    zmqpp::context context;
+    zmqpp::socket socket(context, zmqpp::socket_type::req);
+    message msg;
+    if (timeout > 0)
+      socket.set(zmqpp::socket_option::receive_timeout, timeout);
+    socket.connect(uri);
+    msg << "timecode";
+    socket.send(msg);
+    if (!socket.receive(msg)) {
+      socket.disconnect(uri);
+      socket.close();
+      throw AgentError("Timed out in receiving timecode from broker");
+    }
+    double timecode = std::stod(msg.get(0));
+    socket.disconnect(uri);
+    socket.close();
+    context.terminate();
+    return timecode;
+  }
+
 
 /*
   _     _  __                      _      
@@ -211,7 +232,11 @@ public:
     if (settings_are_local()) {
       _config = (toml::table)toml::parse_file(_settings_uri);
     } else {
+      double broker_tc;
       _raw_settings = read_settings(_settings_uri, _name, _settings_timeout);
+      chrono::system_clock::time_point now = chrono::system_clock::now();
+      broker_tc = get_broker_timecode(_settings_uri, _settings_timeout);
+      _timecode_offset = broker_tc - timecode(now, MADS_FPS);
       _config = (toml::table)toml::parse(_raw_settings);
     }
 
@@ -352,6 +377,8 @@ public:
       out << "enabled" << style::reset << endl;
     else
       out << fg::red << "disabled" << fg::reset << style::reset << endl;
+    out << "  Timecode offset:  " << style::bold << _timecode_offset
+        << " s" << style::reset << endl;
   }
 #endif
 
@@ -483,6 +510,7 @@ public:
       payload["name"] = _name;
       payload["version"] = LIB_VERSION;
       payload["event"] = event_map.at(event);
+      payload["timecode_offset"] = _timecode_offset;
       payload["settings_path"] = _settings_uri;
       payload["settings"] = settings;
       if (!_agent_id.empty()) {
@@ -898,7 +926,7 @@ protected:
   thread *control_thread = nullptr;
   bool _restart = false;
   chrono::milliseconds _time_step = chrono::milliseconds(0);
-
+  double _timecode_offset = 0.0;
 public:
   bool dummy = false;
 };

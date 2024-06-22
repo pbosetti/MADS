@@ -266,6 +266,9 @@ int main(int argc, char **argv) {
             cout << "Sending settings to unknown agent" << endl;
           }
           settings.send(content);
+        } else if (cmd == "timecode") {
+          chrono::system_clock::time_point now = chrono::system_clock::now();
+          settings.send(to_string(Mads::timecode(now, MADS_FPS)));
         } else {
           settings.send("{\"error\": \"Unknown command\"}");
         }
