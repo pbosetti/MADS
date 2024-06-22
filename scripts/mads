@@ -1,0 +1,24 @@
+#!/bin/bash
+
+CMD_PREFIX="mads-"
+AVAILABLE_COMMANDS=("broker" "logger" "source" "filter" "sink" "feedback")
+
+# Check if the program argument is provided
+if [ -z "$1" ]; then
+  echo "Usage: $0 <command> [arguments...]"
+  echo "Available commands:"
+  for command in "${AVAILABLE_COMMANDS[@]}"; do
+    echo "  - $command"
+  done
+  echo "type mads <command> -h for command help"
+  exit 1
+fi
+
+# Store the program name
+program=$CMD_PREFIX"$1"
+
+# Shift the arguments to remove the program name
+shift
+
+# Call the program with the remaining arguments
+$program "$@"
