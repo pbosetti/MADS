@@ -102,12 +102,14 @@ int main(int argc, char *argv[]) {
     if (type == message_type::json && agent.last_topic() != "control") {
       json in = json::parse(get<1>(msg));
       json out;
+      double timecode = in["timecode"];
       filter->load_data(in);
       return_type processed = filter->process(out);
       if (processed != return_type::success) {
         out = {{"error", filter->error()}};
         count_err++;
       }
+      out["timecode"] = timecode;
       agent.publish(out);
       cout << "\r\x1b[0KMessages processed: " << fg::green << count++
            << fg::reset << " total, " << fg::red << count_err << fg::reset

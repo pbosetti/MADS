@@ -551,7 +551,9 @@ public:
     chrono::system_clock::time_point now = chrono::system_clock::now();
     payload["hostname"] = _hostname;
     payload["timestamp"]["$date"] = get_ISODate_time(now, -offset);
-    payload["timecode"] = timecode(now, MADS_FPS) - offset;
+    if (!payload.contains("timecode")) {
+      payload["timecode"] = timecode(now, MADS_FPS) - offset;
+    }
     str = payload.dump();
     if (topic.empty())
       topic = _pub_topic;
