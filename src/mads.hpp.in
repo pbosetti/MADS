@@ -68,6 +68,12 @@ Author(s): Paolo Bosetti
 
 #define UNUSED(x) (void)(x)
 
+#ifdef __linux__
+#define THIS_EXEC_DIR std::filesystem::canonical("/proc/self/exe").parent_path()
+#else
+#define THIS_EXEC_DIR fs::path(argv[0]).parent_path()
+#endif
+
 // Used for common CLI options in agent executables
 #define SETUP_OPTIONS(options, Klass)                                          \
   options.add_options()("s,settings", "Settings file path/URI",                \
