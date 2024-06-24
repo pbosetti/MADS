@@ -19,7 +19,7 @@ usage() {
     echo "  - $command"
   done
   if [ "$(uname)" == "Linux" ]; then
-    echo "  - service [-w] <command> [arguments...]"
+    echo "  - service <service_name> <command> [arguments...]"
   fi
   echo "type mads <command> -h for command help"
 }
@@ -27,23 +27,22 @@ usage() {
 # Define the function to print a systemd service file
 print_service_file() {
   # Check if the number of arguments is 0
-  if [ $# -eq 1 ]; then
+  if [ $# -lt 3 ]; then
     echo "No command provided."
     usage
     exit 1
   fi
-  local out_stream="/dev/stdout"
-  if [ "$2" = "-w" ]; then
-    local description="$3"
-    out_stream=${SYSTEMD_PATH}/${CMD_PREFIX}${description}.service
-    shift
-  else
-    local description="$2"
-  fi
-  shift 1
+  local name=$2
+  local description="$3"
+  shift 2
   local command="${CMD_PREFIX}$@"
+  local out_stream="/dev/stdout"
+  if [ "$(id -u)" = "0" ]; then
+    out_stream=${SYSTEMD_PATH}/${CMD_PREFIX}${name}.service
+    echo "Running as root; saving service file to ${out_stream}"
+  fi
 
-  cat <<EOF > $out_stream
+  cat <<EOF > ${out_stream}
 #  __  __    _    ____  ____  
 # |  \/  |  / \  |  _ \/ ___| 
 # | |\/| | / _ \ | | | \___ \ 
@@ -54,12 +53,13 @@ print_service_file() {
 # Notice that the settings file will be read from 
 # ${USR_PATH}/etc/mads.ini
 #
-# Save this file to ${SYSTEMD_PATH}/${CMD_PREFIX}${description}.service
-# (or run "sudo mads service -w $@" to save it automatically)
-# and run "sudo systemctl enable ${CMD_PREFIX}${description}.service"
+# Save this file to ${SYSTEMD_PATH}/${CMD_PREFIX}${name}.service
+# (or run "sudo mads service ${name} $@" 
+# to save it automatically)
+# then run "sudo systemctl enable ${CMD_PREFIX}${name}.service"
 
 [Unit]
-Description=MADS ${description}
+Description=MADS ${name}
 After=network.target
 StartLimitIntervalSec=0
 
