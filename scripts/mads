@@ -1,8 +1,15 @@
 #!/bin/bash
-
+#   __  __    _    ____  ____                                             
+#  |  \/  |  / \  |  _ \/ ___|  __      ___ __ __ _ _ __  _ __   ___ _ __ 
+#  | |\/| | / _ \ | | | \___ \  \ \ /\ / / '__/ _` | '_ \| '_ \ / _ \ '__|
+#  | |  | |/ ___ \| |_| |___) |  \ V  V /| | | (_| | |_) | |_) |  __/ |   
+#  |_|  |_/_/   \_\____/|____/    \_/\_/ |_|  \__,_| .__/| .__/ \___|_|   
+#                                                  |_|   |_|              
+# MADS wraper for all "mads-" prefixed commands
 CMD_PREFIX="mads-"
 AVAILABLE_COMMANDS=("broker" "logger" "source" "filter" "sink" "feedback")
 USR_PATH="$(dirname "$(dirname "$(readlink -f "$0")")")"
+SYSTEMD_PATH="/etc/systemd/system"
 
 # Define the usage function
 usage() {
@@ -12,7 +19,7 @@ usage() {
     echo "  - $command"
   done
   if [ "$(uname)" == "Linux" ]; then
-    echo "  - service <command>"
+    echo "  - service [-w] <command> [arguments...]"
   fi
   echo "type mads <command> -h for command help"
 }
@@ -25,11 +32,18 @@ print_service_file() {
     usage
     exit 1
   fi
-  local description="$2"
+  local out_stream="/dev/stdout"
+  if [ "$2" = "-w" ]; then
+    local description="$3"
+    out_stream=${SYSTEMD_PATH}/${CMD_PREFIX}${description}.service
+    shift
+  else
+    local description="$2"
+  fi
   shift 1
   local command="${CMD_PREFIX}$@"
 
-  cat <<EOF
+  cat <<EOF > $out_stream
 #  __  __    _    ____  ____  
 # |  \/  |  / \  |  _ \/ ___| 
 # | |\/| | / _ \ | | | \___ \ 
@@ -40,8 +54,9 @@ print_service_file() {
 # Notice that the settings file will be read from 
 # ${USR_PATH}/etc/mads.ini
 #
-# Save this file to /etc/systemd/system/${CMD_PREFIX}${description}.service
-# and run sudo systemctl enable ${CMD_PREFIX}${description}.service
+# Save this file to ${SYSTEMD_PATH}/${CMD_PREFIX}${description}.service
+# (or run "sudo mads service -w $@" to save it automatically)
+# and run "sudo systemctl enable ${CMD_PREFIX}${description}.service"
 
 [Unit]
 Description=MADS ${description}
