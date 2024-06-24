@@ -684,6 +684,10 @@ public:
       UNUSED(signum);
       Mads::running = false;
     });
+    std::signal(SIGTERM, [](int signum) {
+      UNUSED(signum);
+      Mads::running = false;
+    });
     while (running) {
       if (duration > chrono::milliseconds(0)) {
         thread t([&]() { this_thread::sleep_for(duration); });
