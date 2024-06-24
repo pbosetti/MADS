@@ -53,24 +53,17 @@ set(EXTERNAL_DIR ${CMAKE_CURRENT_LIST_DIR}/external)
 set(USR_DIR ${CMAKE_CURRENT_LIST_DIR}/products)
 set(SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/src)
 set(MAIN_DIR ${SOURCE_DIR}/main)
-configure_file(
-  ${SOURCE_DIR}/mads.hpp.in 
-  ${SOURCE_DIR}/mads.hpp
-)
+
 # List of filenames to be configured
 set(CONFIG_FILENAMES
-  Dockerfile
-  tools/mads-broker.service
-  tools/mads-logger.service
-  tools/mads-source.service
-  tools/mads-filter.service
-  tools/mads-sink.service
+${CMAKE_CURRENT_LIST_DIR}/Dockerfile
+  ${SOURCE_DIR}/mads.hpp
 )
 # Loop over the filenames
 foreach(filename ${CONFIG_FILENAMES})
   configure_file(
-    ${CMAKE_CURRENT_LIST_DIR}/${filename}.in
-    ${CMAKE_CURRENT_LIST_DIR}/${filename}
+    ${filename}.in
+    ${filename}
   )
 endforeach()
 

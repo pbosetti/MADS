@@ -2,23 +2,93 @@
 
 CMD_PREFIX="mads-"
 AVAILABLE_COMMANDS=("broker" "logger" "source" "filter" "sink" "feedback")
+USR_PATH="$(dirname "$(dirname "$(readlink -f "$0")")")"
 
-# Check if the program argument is provided
-if [ -z "$1" ]; then
+# Define the usage function
+usage() {
   echo "Usage: $0 <command> [arguments...]"
   echo "Available commands:"
   for command in "${AVAILABLE_COMMANDS[@]}"; do
     echo "  - $command"
   done
+  if [ "$(uname)" == "Linux" ]; then
+    echo "  - service <command>"
+  fi
   echo "type mads <command> -h for command help"
+}
+
+# Define the function to print a systemd service file
+print_service_file() {
+  # Check if the number of arguments is 0
+  if [ $# -eq 1 ]; then
+    echo "No command provided."
+    usage
+    exit 1
+  fi
+  local description="$2"
+  shift 1
+  local command="${CMD_PREFIX}$@"
+
+  cat <<EOF
+#  __  __    _    ____  ____  
+# |  \/  |  / \  |  _ \/ ___| 
+# | |\/| | / _ \ | | | \___ \ 
+# | |  | |/ ___ \| |_| |___) |
+# |_|  |_/_/   \_\____/|____/ 
+#
+# Linux Systemd service file for MADS ${description}
+# Notice that the settings file will be read from 
+# ${USR_PATH}/etc/mads.ini
+#
+# Save this file to /etc/systemd/system/${CMD_PREFIX}${description}.service
+# and run sudo systemctl enable ${CMD_PREFIX}${description}.service
+
+[Unit]
+Description=MADS ${description}
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=${USER}
+ExecStart=${USR_PATH}/bin/${command}
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+# Check if the program argument is provided
+if [ -z "$1" ]; then
+  usage
+  exit 1
+fi
+
+
+# Check if the operating system is Linux
+if [ "$(uname)" == "Linux" ]; then
+  # Check if the program argument is the "service" command
+  if [ "$1" = "service" ]; then
+    # Call the function for the "service" command
+    print_service_file "$@"
+    exit 0
+  fi
+fi
+
+# Check if the program argument is a valid command
+if [[ ! " ${AVAILABLE_COMMANDS[@]} " =~ " $1 " ]]; then
+  echo "Invalid command: $1"
+  usage
   exit 1
 fi
 
 # Store the program name
-program=$CMD_PREFIX"$1"
+PROGRAM=$CMD_PREFIX"$1"
 
 # Shift the arguments to remove the program name
 shift
 
 # Call the program with the remaining arguments
-$program "$@"
+${PROGRAM} "$@"

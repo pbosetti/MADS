@@ -44,6 +44,10 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
   plugin_file = options_parsed["plugin"].as<string>();
+  if (!fs::exists(plugin_file)) {
+    fs::path parent_dir = fs::path(argv[0]).parent_path().parent_path();
+    plugin_file = (parent_dir / "lib" / plugin_file).string();
+  }
   plugin_name = fs::path(plugin_file).stem().string();
 
   // Loading plugin
