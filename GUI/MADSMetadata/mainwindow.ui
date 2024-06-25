@@ -167,7 +167,7 @@
              </widget>
             </item>
             <item>
-             <widget class="QCheckBox" name="enableLogging">
+             <widget class="QCheckBox" name="enableLoggingOld">
               <property name="text">
                <string>Enable Logging</string>
               </property>
@@ -188,6 +188,26 @@
                </size>
               </property>
              </spacer>
+            </item>
+            <item>
+             <widget class="QLabel" name="label_10">
+              <property name="text">
+               <string>Enable logging</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="ToggleSwitch" name="enableLogging" native="true">
+              <property name="enabled">
+               <bool>true</bool>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>30</width>
+                <height>0</height>
+               </size>
+              </property>
+             </widget>
             </item>
            </layout>
           </item>
@@ -434,6 +454,14 @@
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
  </widget>
+ <customwidgets>
+  <customwidget>
+   <class>ToggleSwitch</class>
+   <extends>QWidget</extends>
+   <header>toggleswitch.h</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
  <tabstops>
   <tabstop>brokerURILine</tabstop>
   <tabstop>agentNameLine</tabstop>

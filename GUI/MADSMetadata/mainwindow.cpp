@@ -97,9 +97,9 @@ MainWindow::MainWindow(QWidget *parent)
           [=, this](QString s) { ui->agentNameLine->setText(s.toLower()); });
 
   // enable/disable logging checkbox acts immediately
-  connect(ui->enableLogging, &QCheckBox::stateChanged, this, [=, this](int state) {
+  connect(ui->enableLogging, &ToggleSwitch::toggled, this, [=, this](bool checked) {
     json j;
-    j["pause"] = !(state == Qt::Checked);
+    j["pause"] = !(checked);
     _agent.publish(j);
   });
 

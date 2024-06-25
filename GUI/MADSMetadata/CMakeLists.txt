@@ -19,6 +19,10 @@ set(PROJECT_SOURCES
         mainwindow.ui
         qjsonmodel.cpp
         qjsonmodel.h
+        toggleswitch.cpp
+        toggleswitch.h
+        colorrepository.cpp
+        colorrepository.h
 )
 
 include(FetchContent)
@@ -38,6 +42,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(tomlplusplus nlohmann_json)
 
 include_directories(
+  ${PROJECT_SOURCE_DIR}
   ${PROJECT_SOURCE_DIR}/../../src
   ${PROJECT_SOURCE_DIR}/../../products/include
   ${tomlplusplus_SOURCE_DIR}/include
