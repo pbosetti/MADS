@@ -137,12 +137,21 @@ MainWindow::MainWindow(QWidget *parent)
 
   // Subscriber thread: on new message, updates the JSON tree view
   connect(&_agent, &QAgent::gotNewMessage, this, [=, this]() {
-    if (ui->tabWidget->currentIndex() != 1) return;
     json j;
-    QByteArray ba;
     for (auto &[k, v] : _agent.status()) {
       j[k] = json::parse(v);
     }
+    if (j.contains(LOGGER_STATUS_TOPIC)) {
+      bool paused = j[LOGGER_STATUS_TOPIC]["logger_paused"];
+      if (ui->enableLogging->isChecked() == paused) {
+        qDebug() << "paused: " << paused << " switch: " << ui->enableLogging->isChecked();
+        ui->enableLogging->blockSignals(true);
+        ui->enableLogging->setChecked(!paused);
+        ui->enableLogging->blockSignals(false);
+      }
+    }
+    if (ui->tabWidget->currentIndex() != 1) return;
+    QByteArray ba;
     ba = QByteArray(j.dump().c_str());
     _model->loadJson(ba);
     if (ui->keepExpandedCheckBox->isChecked())

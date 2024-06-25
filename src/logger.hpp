@@ -268,7 +268,8 @@ private:
     auto now = chrono::system_clock::now();
     auto doc = make_document();
     auto msg = message ? *message : _last_message;
-    if (get<0>(msg).empty()) {
+    auto topic = get<0>(msg);
+    if (topic.empty() || topic == LOGGER_STATUS_TOPIC) {
       return;
     }
     try {
@@ -279,7 +280,7 @@ private:
       doc =
           make_document(kvp("timestamp", b_date(now)), kvp("error", e.what()));
     }
-    auto coll = _db[get<0>(msg)];
+    auto coll = _db[topic];
     try {
       coll.insert_one(doc.view());
     } catch (const mongocxx::bulk_write_exception &e) {

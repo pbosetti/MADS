@@ -55,6 +55,9 @@ int main(int argc, char *argv[]) {
     message_type type = agent.receive();
     auto msg = agent.last_message();
     agent.remote_control();
+    if (get<0>(msg) == LOGGER_STATUS_TOPIC) {
+      return;
+    }
     switch (type) {
     case message_type::json:
       if (width > 0) {

@@ -37,6 +37,8 @@ Author(s): Paolo Bosetti
 #define LIB_NAME "@APP_NAME@"
 #define LIB_VERSION "@PROJECT_VERSION@"
 
+#define LOGGER_STATUS_TOPIC "logger_status"
+
 #ifndef HOST_NAME_MAX
 #define HOST_NAME_MAX 255
 #endif

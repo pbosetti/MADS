@@ -75,6 +75,17 @@ int main(int argc, char *argv[]) {
   logger.register_event(Mads::event_type::startup);
   logger.info();
 
+  // Create and start the thread
+  std::thread logger_status_thread([&logger] {
+    json j;
+    while (Mads::running) {
+      j["logger_paused"] = logger.paused;
+      logger.publish(j, LOGGER_STATUS_TOPIC);
+      std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+    cout << "Logger thread stopped" << endl;
+  });
+
 
   // Main loop
   cout << fg::green << "Logger process started" << fg::reset << endl;
@@ -123,6 +134,7 @@ int main(int argc, char *argv[]) {
   cout << fg::green << "Logger process stopped" << fg::reset << endl;
 
   // Cleanup
+  logger_status_thread.join();
   logger.register_event(Mads::event_type::shutdown);
   logger.disconnect(); // Not necessary, called by destructor
   logger.close_db();      // Not necessary, called by destructor
