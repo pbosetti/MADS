@@ -182,7 +182,7 @@ if(APPLE)
   link_directories("/opt/homebrew/lib/")
   set(MONGO_LIBS mongocxx bsoncxx)
 else()
-  set(MONGO_LIBS mongocxx bsoncxx mongoc-1.0 bson-1.0)
+  set(MONGO_LIBS mongocxx-static bsoncxx-static mongoc-static-1.0 bson-static-1.0 resolv)
 endif()
 
 # Macro for building exec targets
