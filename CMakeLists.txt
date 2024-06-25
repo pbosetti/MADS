@@ -159,7 +159,7 @@ link_directories(${USR_DIR}/lib)
 
 if(WIN32)
   file(GLOB LIB_ZMQ "${USR_DIR}/lib/libzmq*.lib")
-  set(LIB_LIST ${LIB_ZMQ} zmqpp-static snappy Ws2_32 Iphlpapi)
+  set(LIB_LIST zmqpp-static ${LIB_ZMQ} snappy Ws2_32 Iphlpapi)
   set(MONGO_LIBS 
     mongocxx mongoc-static-1.0 
     bsoncxx bson-static-1.0 
