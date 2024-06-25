@@ -60,7 +60,7 @@ The logger agent can log all the messages to a plain file or to a MongoDB databa
 The suggested way to install MongoDB is via Docker. The following command will install the latest version of MongoDB in a Docker container, and will expose the default port (27017) to the host machine.
 
 ```bash
-docker run --name mads-mongo -v ${PWD}/db:/data/db -p27017:27017 -d mongo
+docker run --name mads-mongo --restart unless-stopped -v ${PWD}/db:/data/db -p27017:27017 -d mongo
 ```
 
 The `Logger` agent connects to a MongoDB instance. The URI of the database (possibly on a different machine) is specified in the `mads.ini` file, as well as the name of the database to be used.
