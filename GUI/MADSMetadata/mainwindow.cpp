@@ -194,10 +194,14 @@ json MainWindow::collectData() {
 }
 
 void MainWindow::sendMessage(bool clicked) {
-  json j = collectData();
-  _agent.publish(j);
-  ui->lastJSON->clear();
-  ui->lastJSON->insertPlainText(QString::fromUtf8(j.dump(4)));
+  try {
+    json j = collectData();
+    _agent.publish(j);
+    ui->lastJSON->clear();
+    ui->lastJSON->insertPlainText(QString::fromUtf8(j.dump(4)));
+  } catch(nlohmann::json::exception &e) {
+    statusBar()->showMessage("Error: Invalid JSON");
+  }
 }
 
 void MainWindow::writeSettings() {
