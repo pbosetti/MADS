@@ -247,6 +247,10 @@ if(${MADS_ENABLE_PYTHON_WRAPPER})
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/src/wrap)
 endif()
 
+if(${MADS_ENABLE_GUI})
+  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/GUI/MADSMetadata)
+endif()
+
 
 #   _____      _                        _     
 #  | ____|_  _| |_ ___ _ __ _ __   __ _| |___ 
