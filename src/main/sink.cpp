@@ -28,12 +28,14 @@ using SinkDriverJ = SinkDriver<json>;
 
 int main(int argc, char *argv[]) {
   string settings_uri = SETTINGS_URI;
-  string plugin_name, plugin_file;
+  string plugin_name, plugin_file, agent_name;
   size_t count = 0, count_err = 0;
 
   // CLI options
   Options options(argv[0]);
-  options.add_options()("plugin", "Plugin to load", value<string>())
+  options.add_options()
+    ("plugin", "Plugin to load", value<string>())
+    ("n,name", "Agent name (default to plugin name)", value<string>())
     ("i,agent_id", "Agent ID to be added to JSON frames", value<string>());
   options.parse_positional({"plugin"});
   options.positional_help("plugin");
@@ -49,6 +51,11 @@ int main(int argc, char *argv[]) {
     plugin_file = (parent_dir / "lib" / plugin_file).string();
   }
   plugin_name = fs::path(plugin_file).stem().string();
+  if (options_parsed.count("name") != 0) {
+    agent_name = options_parsed["name"].as<string>();
+  } else {
+    agent_name = plugin_name;
+  }
 
   // Loading plugin
   pugg::Kernel kernel;
@@ -70,7 +77,7 @@ int main(int argc, char *argv[]) {
   SinkJ *sink = sink_driver->create();
 
   // Core stuff
-  Agent agent(plugin_name, settings_uri);
+  Agent agent(agent_name, settings_uri);
   try {
     agent.init();
   } catch (const std::exception &e) {
@@ -82,7 +89,7 @@ int main(int argc, char *argv[]) {
   agent.connect();
   agent.info();
   cout << "  Plugin:           " << style::bold << plugin_file << " (loaded as "
-       << plugin_name << ")" << style::reset << endl;
+       << agent_name << ")" << style::reset << endl;
 
   // Copy agent settings as plugin parameters
   json settings = agent.get_settings();

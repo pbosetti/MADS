@@ -51,6 +51,10 @@ The settings are stored in an INI file according to the [TOML format](https://to
 
 The settings file is divided into sections, one for each agent. The section name is the name of the executable file, without the path and the extension. For example, the settings for the `logger` agent are stored in a section named `[logger]`.
 
+Agents that are plugin-based (i.e. `source`, `filter`, and `sink`) have their settings stored in a section named after the plugin file name, without the path and the extension. For example, the settings for the source agent loading the plugin `my_plugin.plugin` are stored in a section named `[my_plugin]`.
+
+**NOTE**: it is possible to have multiple plugin agents with different settings, but sharing the same plugin file. This is useful when the same plugin is used in different contexts, that require different settings. To do that, the `mads-source`, `mads-filter`, and `mads-sink` executables have the command line option `-n|--name`, which sets the name of the plugin to be loaded. The name is used to select the proper settings section in the INI file. FOr example, the agent loaded as `mads source clock.plugin -n clock_slow` will load settings from the section `[clock_slow]` in the INI file. If that option is missing, the name of the plugin is assumed to be the same as the plugin file name.
+
 An `[agents]` section is also present, which contains the settings that are meant to be shared among all agents.
 
 ## Database
