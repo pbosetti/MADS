@@ -186,11 +186,14 @@ else()
 endif()
 
 # Macro for building exec targets
-macro(create_exec target )
-  set(libs ${ARGV})
-  list(REMOVE_ITEM libs ${target})
-  add_executable(${PREFIX}${target} ${MAIN_DIR}/${target}.cpp)
-  target_link_libraries(${PREFIX}${target} ${LIB_LIST} ${libs})
+macro(create_exec target)
+  set(multiValueArgs SRCS LIBS DEFS)
+  cmake_parse_arguments(ARG "" "" "${multiValueArgs}" ${ARGN})
+  # set(libs ${ARGV})
+  # list(REMOVE_ITEM libs ${target})
+  add_executable(${PREFIX}${target} ${MAIN_DIR}/${ARG_SRCS})
+  target_link_libraries(${PREFIX}${target} ${LIB_LIST} ${ARG_LIBS})
+  target_compile_definitions(${PREFIX}${target} PRIVATE ${ARG_DEFS})
   list(APPEND TARGET_LIST ${PREFIX}${target})
 endmacro()
 
@@ -205,37 +208,36 @@ endmacro()
 
 # The following also work on WINDOWS!
 if(NOT MADS_MINIMAL)
-  create_exec(broker)
-  create_exec(feedback)
-  create_exec(bridge)
+  create_exec(broker SRCS broker.cpp)
+  create_exec(feedback SRCS feedback.cpp)
+  create_exec(bridge SRCS bridge.cpp)
   # Not supported on Windows
   if(NOT WIN32)
-  create_exec(image)
+    create_exec(image SRCS image.cpp)
   endif()
 endif()
-create_exec(filter pugg ${DLOPEN_LIB})
-create_exec(source pugg ${DLOPEN_LIB})
-create_exec(sink pugg ${DLOPEN_LIB})
+create_exec(filter SRCS plugin_loader.cpp LIBS pugg ${DLOPEN_LIB} DEFS "PLUGIN_LOADER_FILTER")
+create_exec(source SRCS plugin_loader.cpp LIBS  pugg ${DLOPEN_LIB} DEFS "PLUGIN_LOADER_SOURCE")
+create_exec(sink SRCS plugin_loader.cpp LIBS  pugg ${DLOPEN_LIB} DEFS "PLUGIN_LOADER_SINK")
 
 # Conditionally built targets
 
 if(${MADS_ENABLE_PERF_ASSESS})
-  create_exec(perf_assess)
+  create_exec(perf_assess SRCS perf_assess.cpp)
 endif()
 
 if (${MADS_ENABLE_METADATA})
-  add_compile_definitions("HAVE_GPIOD")
   if(${MADS_USE_GPIOD_2})
-    add_compile_definitions("MADS_USE_GPIOD_2")
+    create_exec(metadata SRCS metadata.cpp LIBS ${GPIOD_LIB} DEFS "HAVE_GPIOD" "MADS_USE_GPIOD_2")
     set(GPIOD_LIB gpiodcxx gpiod)
   else()
+    create_exec(metadata SRCS metadata.cpp LIBS ${GPIOD_LIB} DEFS "HAVE_GPIOD")
     set(GPIOD_LIB gpiod)
   endif()
-  create_exec(metadata ${GPIOD_LIB})
 endif()
 
 if (${MADS_ENABLE_LOGGER})
-  create_exec(logger ${MONGO_LIBS})
+  create_exec(logger SRCS logger.cpp LIBS ${MONGO_LIBS})
 endif()
   
 

@@ -1,10 +1,10 @@
 /*
-  _____ _ _ _                                     _
- |  ___(_) | |_ ___ _ __    __ _  __ _  ___ _ __ | |_
- | |_  | | | __/ _ \ '__|  / _` |/ _` |/ _ \ '_ \| __|
- |  _| | | | ||  __/ |    | (_| | (_| |  __/ | | | |_
- |_|   |_|_|\__\___|_|     \__,_|\__, |\___|_| |_|\__|
-                                 |___/
+  ____  _             _         _                 _           
+ |  _ \| |_   _  __ _(_)_ __   | | ___   __ _  __| | ___ _ __ 
+ | |_) | | | | |/ _` | | '_ \  | |/ _ \ / _` |/ _` |/ _ \ '__|
+ |  __/| | |_| | (_| | | | | | | | (_) | (_| | (_| |  __/ |   
+ |_|   |_|\__,_|\__, |_|_| |_| |_|\___/ \__,_|\__,_|\___|_|   
+                |___/                                         
 
 This is a plugin-based general purpose filter for the Mads framework.
 Actual work is done by the plugins, this executable is just a wrapper.
@@ -14,9 +14,24 @@ Author(s): Paolo Bosetti
 #include "../mads.hpp"
 #include <cxxopts.hpp>
 #include <filesystem>
-#include <source.hpp>
 #include <pugg/Kernel.h>
-#include <chrono>
+
+#if defined(PLUGIN_LOADER_SOURCE)
+  #include <source.hpp>
+  #include <chrono>
+  #define PLUGIN_CLASS Source
+  #define PLUGIN_NAME "Source"
+#elif defined(PLUGIN_LOADER_FILTER)
+  #include <filter.hpp>
+  #define PLUGIN_CLASS Filter
+  #define PLUGIN_NAME "Filter"
+#elif defined(PLUGIN_LOADER_SINK)
+  #include <sink.hpp>
+  #define PLUGIN_CLASS Sink
+  #define PLUGIN_NAME "Sink"
+#else
+  #error "No plugin type defined"
+#endif
 
 using namespace std;
 using namespace cxxopts;
@@ -24,8 +39,16 @@ using namespace Mads;
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
-using SourceJ = Source<json>;
-using SourceDriverJ = SourceDriver<json>;
+#if defined(PLUGIN_LOADER_SOURCE)
+using Plugin = Source<json>;
+using PluginDriver = SourceDriver<json>;
+#elif defined(PLUGIN_LOADER_FILTER)
+using Plugin = Filter<json, json>;
+using PluginDriver = FilterDriver<json, json>;
+#elif defined(PLUGIN_LOADER_SINK)
+using Plugin = Sink<json>;
+using PluginDriver = SinkDriver<json>;
+#endif
 
 int main(int argc, char *argv[]) {
   string settings_uri = SETTINGS_URI;
@@ -38,8 +61,11 @@ int main(int argc, char *argv[]) {
   options.add_options()
     ("plugin", "Plugin to load", value<string>())
     ("n,name", "Agent name (default to plugin name)", value<string>())
-    ("i,agent_id", "Agent ID to be added to JSON frames", value<string>())
+    ("i,agent_id", "Agent ID to be added to JSON frames", value<string>());
+  #if defined(PLUGIN_LOADER_SOURCE)
+  options.add_options()
     ("p", "Sampling period (default 100 ms)", value<size_t>());
+  #endif
   options.parse_positional({"plugin"});
   options.positional_help("plugin");
   SETUP_OPTIONS(options, Agent);
@@ -62,14 +88,14 @@ int main(int argc, char *argv[]) {
 
   // Loading plugin
   pugg::Kernel kernel;
-  kernel.add_server<Source<>>();
+  kernel.add_server<PLUGIN_CLASS<>>();
   kernel.load_plugin(plugin_file);
-  SourceDriverJ *source_driver =
-      kernel.get_driver<SourceDriverJ>(SourceJ::server_name(), plugin_name);
-  if (source_driver == nullptr) {
+  PluginDriver *plugin_driver =
+      kernel.get_driver<PluginDriver>(Plugin::server_name(), plugin_name);
+  if (plugin_driver == nullptr) {
     cout << fg::red << "Error: cannot find plugin driver " << plugin_name
          << " in plugin at " << plugin_file << fg::reset << endl;
-    auto drivers = kernel.get_all_drivers<SourceDriverJ>(SourceJ::server_name());
+    auto drivers = kernel.get_all_drivers<PluginDriver>(Plugin::server_name());
     cout << "Available drivers:" << endl;
     for (auto &d : drivers) {
       cout << "- " << d->name() << endl;
@@ -77,7 +103,7 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
   // Create the class from the plugin:
-  SourceJ *source = source_driver->create();
+  Plugin *plugin = plugin_driver->create();
 
   // Core stuff
   Agent agent(agent_name, settings_uri);
@@ -100,6 +126,7 @@ int main(int argc, char *argv[]) {
     settings["agent_id"] = options_parsed["agent_id"].as<string>();
     agent.set_agent_id(options_parsed["agent_id"].as<string>());
   }
+#if defined(PLUGIN_LOADER_SOURCE)
   cout << "  Sampling period:  " << style::bold;
   if (options_parsed.count("p") != 0) {
     time = chrono::milliseconds(options_parsed["p"].as<size_t>());
@@ -113,24 +140,28 @@ int main(int argc, char *argv[]) {
     cout << fg::red << "free run" << fg::reset << style::reset 
          << " (default)" << endl;
   }
+#endif
 
-
-  source->set_params((void *)&settings);
-  string out_format = source->blob_format();
-  for (auto &[k, v] : source->info()) {
+  plugin->set_params((void *)&settings);
+  for (auto &[k, v] : plugin->info()) {
     cout << "  " << left << setw(18) << k << style::bold << v << style::reset 
          << endl;
   }
+#if defined(PLUGIN_LOADER_SOURCE)
+  string out_format = plugin->blob_format();
   cout << "  Blob format:      " << style::bold << out_format << style::reset
        << endl;
+#endif
 
   // Main loop
   agent.register_event(event_type::startup);
-  cout << fg::green << "Source plugin process started" << fg::reset << endl;
+  cout << fg::green << PLUGIN_NAME " plugin started" << fg::reset << endl;
+
+#if defined(PLUGIN_LOADER_SOURCE)
   agent.loop([&]() {
     json out;
     vector<unsigned char> blob;
-    return_type result = source->get_output(out, &blob);
+    return_type result = plugin->get_output(out, &blob);
     if (return_type::success == result) {
       agent.publish(out);
       if (blob.size() > 0) {
@@ -140,7 +171,7 @@ int main(int argc, char *argv[]) {
     } else if (result == return_type::critical) {
       Mads::running = false;
       json msg{
-        {"error", source->error()}
+        {"error", plugin->error()}
       };
       this_thread::sleep_for(chrono::milliseconds(1000));
       agent.register_event(event_type::marker, msg);
@@ -156,12 +187,56 @@ int main(int argc, char *argv[]) {
           << " errors";
     cout.flush();
   }, time);
-  cout << fg::green << "Source plugin process stopped" << fg::reset << endl;
+  
+#elif defined(PLUGIN_LOADER_FILTER)
+  agent.loop([&]() {
+    message_type type = agent.receive();
+    auto msg = agent.last_message();
+    agent.remote_control();
+    if (type == message_type::json && agent.last_topic() != "control") {
+      json in = json::parse(get<1>(msg));
+      json out;
+      double timecode = in["timecode"];
+      plugin->load_data(in);
+      return_type processed = plugin->process(out);
+      if (processed != return_type::success) {
+        out = {{"error", plugin->error()}};
+        count_err++;
+      }
+      out["timecode"] = timecode;
+      agent.publish(out);
+      cout << "\r\x1b[0KMessages processed: " << fg::green << count++
+           << fg::reset << " total, " << fg::red << count_err << fg::reset
+           << " with errors";
+      cout.flush();
+    }
+  });
+#elif defined(PLUGIN_LOADER_SINK)
+  agent.loop([&]() {
+    message_type type = agent.receive();
+    auto msg = agent.last_message();
+    agent.remote_control();
+    if (type == message_type::json && agent.last_topic() != "control") {
+      json in = json::parse(get<1>(msg));
+      json out;
+      return_type processed = plugin->load_data(in);
+      if (processed != return_type::success) {
+        out = {{"error", plugin->error()}};
+        count_err++;
+      }
+      cout << "\r\x1b[0KMessages processed: " << fg::green << count++
+           << fg::reset << " total, " << fg::red << count_err << fg::reset
+           << " with errors";
+      cout.flush();
+    }
+  });
+#endif
+  cout << fg::green << PLUGIN_NAME " plugin stopped" << fg::reset << endl;
 
   // Cleanup
   agent.register_event(event_type::shutdown);
   agent.disconnect();
-  delete source;
+  delete plugin;
   kernel.clear_drivers();
 
   if (agent.restart()) {
