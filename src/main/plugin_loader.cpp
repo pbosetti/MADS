@@ -21,14 +21,17 @@ Author(s): Paolo Bosetti
   #include <chrono>
   #define PLUGIN_CLASS Source
   #define PLUGIN_NAME "Source"
+  #define PLUGIN_DEFAULT "publish.plugin"
 #elif defined(PLUGIN_LOADER_FILTER)
   #include <filter.hpp>
   #define PLUGIN_CLASS Filter
   #define PLUGIN_NAME "Filter"
+  #define PLUGIN_DEFAULT "none"
 #elif defined(PLUGIN_LOADER_SINK)
   #include <sink.hpp>
   #define PLUGIN_CLASS Sink
   #define PLUGIN_NAME "Sink"
+  #define PLUGIN_DEFAULT "feedback.plugin"
 #else
   #error "No plugin type defined"
 #endif
@@ -71,10 +74,15 @@ int main(int argc, char *argv[]) {
   SETUP_OPTIONS(options, Agent);
 
   if (options_parsed.count("plugin") == 0) {
-    cout << options.help() << endl << "No plugin specified" << endl;
-    exit(1);
+    if (string("none") == PLUGIN_DEFAULT) {
+      cerr << options.help() << endl << "No plugin specified" << endl;
+      options.show_positional_help();
+      exit(1);
+    }
+    plugin_file = PLUGIN_DEFAULT;
+  } else {
+    plugin_file = options_parsed["plugin"].as<string>();
   }
-  plugin_file = options_parsed["plugin"].as<string>();
   if (!fs::exists(plugin_file)) {
     fs::path parent_dir = THIS_EXEC_DIR.parent_path();
     plugin_file = (parent_dir / "lib" / plugin_file).string();
@@ -93,12 +101,12 @@ int main(int argc, char *argv[]) {
   PluginDriver *plugin_driver =
       kernel.get_driver<PluginDriver>(Plugin::server_name(), plugin_name);
   if (plugin_driver == nullptr) {
-    cout << fg::red << "Error: cannot find plugin driver " << plugin_name
+    cerr << fg::red << "Error: cannot find plugin driver " << plugin_name
          << " in plugin at " << plugin_file << fg::reset << endl;
     auto drivers = kernel.get_all_drivers<PluginDriver>(Plugin::server_name());
-    cout << "Available drivers:" << endl;
+    cerr << "Available drivers:" << endl;
     for (auto &d : drivers) {
-      cout << "- " << d->name() << endl;
+      cerr << "- " << d->name() << endl;
     }
     exit(1);
   }
@@ -110,14 +118,14 @@ int main(int argc, char *argv[]) {
   try {
     agent.init();
   } catch (const std::exception &e) {
-    std::cout << fg::red << "Error initializing agent: " << e.what()
-              << fg::reset << endl;
+    cerr << fg::red << "Error initializing agent: " << e.what()
+         << fg::reset << endl;
     exit(EXIT_FAILURE);
   }
   agent.enable_remote_control();
   agent.connect();
-  agent.info();
-  cout << "  Plugin:           " << style::bold << plugin_file << " (loaded as "
+  agent.info(cerr);
+  cerr << "  Plugin:           " << style::bold << plugin_file << " (loaded as "
        << agent_name << ")" << style::reset << endl;
 
   // Copy agent settings as plugin parameters
@@ -127,35 +135,35 @@ int main(int argc, char *argv[]) {
     agent.set_agent_id(options_parsed["agent_id"].as<string>());
   }
 #if defined(PLUGIN_LOADER_SOURCE)
-  cout << "  Sampling period:  " << style::bold;
+  cerr << "  Sampling period:  " << style::bold;
   if (options_parsed.count("p") != 0) {
     time = chrono::milliseconds(options_parsed["p"].as<size_t>());
-    cout << fg::yellow << time.count() << " ms" << " (from -p option)" 
+    cerr << fg::yellow << time.count() << " ms" << " (from -p option)" 
          << fg::reset << style::reset << endl;
   } else if (!settings["period"].is_null()) {
     time = chrono::milliseconds(settings["period"].get<size_t>());
-    cout << time.count() << " ms" << " (from settings)" 
+    cerr << time.count() << " ms" << " (from settings)" 
          << style::reset << endl;
   }  else {
-    cout << fg::red << "free run" << fg::reset << style::reset 
+    cerr << fg::red << "free run" << fg::reset << style::reset 
          << " (default)" << endl;
   }
 #endif
 
   plugin->set_params((void *)&settings);
   for (auto &[k, v] : plugin->info()) {
-    cout << "  " << left << setw(18) << k << style::bold << v << style::reset 
+    cerr << "  " << left << setw(18) << k << style::bold << v << style::reset 
          << endl;
   }
 #if defined(PLUGIN_LOADER_SOURCE)
   string out_format = plugin->blob_format();
-  cout << "  Blob format:      " << style::bold << out_format << style::reset
+  cerr << "  Blob format:      " << style::bold << out_format << style::reset
        << endl;
 #endif
 
   // Main loop
   agent.register_event(event_type::startup);
-  cout << fg::green << PLUGIN_NAME " plugin started" << fg::reset << endl;
+  cerr << fg::green << PLUGIN_NAME " plugin started" << fg::reset << endl;
 
 #if defined(PLUGIN_LOADER_SOURCE)
   agent.loop([&]() {
@@ -182,10 +190,10 @@ int main(int argc, char *argv[]) {
       return;
     }
     count++;
-    cout << "\r\x1b[0KMessages processed: " << fg::green << count
+    cerr << "\r\x1b[0KMessages processed: " << fg::green << count
           << fg::reset << " total, with " << fg::red << count_err << fg::reset
           << " errors";
-    cout.flush();
+    cerr.flush();
   }, time);
   
 #elif defined(PLUGIN_LOADER_FILTER)
@@ -197,7 +205,7 @@ int main(int argc, char *argv[]) {
       json in = json::parse(get<1>(msg));
       json out;
       double timecode = in["timecode"];
-      plugin->load_data(in);
+      plugin->load_data(in, agent.last_topic());
       return_type processed = plugin->process(out);
       if (processed != return_type::success) {
         out = {{"error", plugin->error()}};
@@ -205,10 +213,10 @@ int main(int argc, char *argv[]) {
       }
       out["timecode"] = timecode;
       agent.publish(out);
-      cout << "\r\x1b[0KMessages processed: " << fg::green << count++
+      cerr << "\r\x1b[0KMessages processed: " << fg::green << count++
            << fg::reset << " total, " << fg::red << count_err << fg::reset
            << " with errors";
-      cout.flush();
+      cerr.flush();
     }
   });
 #elif defined(PLUGIN_LOADER_SINK)
@@ -219,19 +227,19 @@ int main(int argc, char *argv[]) {
     if (type == message_type::json && agent.last_topic() != "control") {
       json in = json::parse(get<1>(msg));
       json out;
-      return_type processed = plugin->load_data(in);
+      return_type processed = plugin->load_data(in, agent.last_topic());
       if (processed != return_type::success) {
         out = {{"error", plugin->error()}};
         count_err++;
       }
-      cout << "\r\x1b[0KMessages processed: " << fg::green << count++
+      cerr << "\r\x1b[0KMessages processed: " << fg::green << count++
            << fg::reset << " total, " << fg::red << count_err << fg::reset
            << " with errors";
-      cout.flush();
+      cerr.flush();
     }
   });
 #endif
-  cout << fg::green << PLUGIN_NAME " plugin stopped" << fg::reset << endl;
+  cerr << fg::green << PLUGIN_NAME " plugin stopped" << fg::reset << endl;
 
   // Cleanup
   agent.register_event(event_type::shutdown);
@@ -240,7 +248,7 @@ int main(int argc, char *argv[]) {
   kernel.clear_drivers();
 
   if (agent.restart()) {
-    cout << "Restarting..." << endl;
+    cerr << "Restarting..." << endl;
     execvp(argv[0], argv);
   }
   return 0;
