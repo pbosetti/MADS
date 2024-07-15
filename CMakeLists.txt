@@ -228,11 +228,9 @@ endif()
 
 if (${MADS_ENABLE_METADATA})
   if(${MADS_USE_GPIOD_2})
-    create_exec(metadata SRCS metadata.cpp LIBS ${GPIOD_LIB} DEFS "HAVE_GPIOD" "MADS_USE_GPIOD_2")
-    set(GPIOD_LIB gpiodcxx gpiod)
+    create_exec(metadata SRCS metadata.cpp LIBS gpiodcxx gpiod DEFS "HAVE_GPIOD" "MADS_USE_GPIOD_2")
   else()
-    create_exec(metadata SRCS metadata.cpp LIBS ${GPIOD_LIB} DEFS "HAVE_GPIOD")
-    set(GPIOD_LIB gpiod)
+    create_exec(metadata SRCS metadata.cpp LIBS gpiod DEFS "HAVE_GPIOD")
   endif()
 endif()
 
