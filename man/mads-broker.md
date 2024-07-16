@@ -1,6 +1,3 @@
-% mads-broker(1) | User Commands
-%
-% "July 16 2024"
 
 # NAME
 
