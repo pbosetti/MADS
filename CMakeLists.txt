@@ -254,6 +254,7 @@ endif()
 # Default plugins
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/src/plugin)
 
+add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/man)
 
 #   _____      _                        _     
 #  | ____|_  _| |_ ___ _ __ _ __   __ _| |___ 
