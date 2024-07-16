@@ -26,7 +26,7 @@ Author(s): Paolo Bosetti
   #include <filter.hpp>
   #define PLUGIN_CLASS Filter
   #define PLUGIN_NAME "Filter"
-  #define PLUGIN_DEFAULT "none"
+  #define PLUGIN_DEFAULT "bridge.plugin"
 #elif defined(PLUGIN_LOADER_SINK)
   #include <sink.hpp>
   #define PLUGIN_CLASS Sink
@@ -191,8 +191,8 @@ int main(int argc, char *argv[]) {
     }
     count++;
     cerr << "\r\x1b[0KMessages processed: " << fg::green << count
-          << fg::reset << " total, with " << fg::red << count_err << fg::reset
-          << " errors";
+          << fg::reset << " total, " << fg::red << count_err << fg::reset
+          << " with errors ";
     cerr.flush();
   }, time);
   
@@ -215,7 +215,7 @@ int main(int argc, char *argv[]) {
       agent.publish(out);
       cerr << "\r\x1b[0KMessages processed: " << fg::green << count++
            << fg::reset << " total, " << fg::red << count_err << fg::reset
-           << " with errors";
+           << " with errors ";
       cerr.flush();
     }
   });
@@ -234,7 +234,7 @@ int main(int argc, char *argv[]) {
       }
       cerr << "\r\x1b[0KMessages processed: " << fg::green << count++
            << fg::reset << " total, " << fg::red << count_err << fg::reset
-           << " with errors";
+           << " with errors ";
       cerr.flush();
     }
   });

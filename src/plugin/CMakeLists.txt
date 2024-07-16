@@ -6,17 +6,23 @@
 #                 |___/             
 # Default plugins for Source, filter and sink agents
 
-# Sink plugin
-add_library(feedback SHARED ${SOURCE_DIR}/plugin/sink_default.cpp)
-set_target_properties(feedback PROPERTIES PREFIX "" SUFFIX ".plugin")
-target_link_libraries(feedback pugg)
-list(APPEND TARGET_LIST feedback)
-
 # Source plugin
 add_library(publish SHARED ${SOURCE_DIR}/plugin/source_default.cpp)
 set_target_properties(publish PROPERTIES PREFIX "" SUFFIX ".plugin")
 target_link_libraries(publish pugg)
 list(APPEND TARGET_LIST publish)
+
+# Filter plugin
+add_library(bridge SHARED ${SOURCE_DIR}/plugin/filter_default.cpp)
+set_target_properties(bridge PROPERTIES PREFIX "" SUFFIX ".plugin")
+target_link_libraries(bridge pugg)
+list(APPEND TARGET_LIST bridge)
+
+# Sink plugin
+add_library(feedback SHARED ${SOURCE_DIR}/plugin/sink_default.cpp)
+set_target_properties(feedback PROPERTIES PREFIX "" SUFFIX ".plugin")
+target_link_libraries(feedback pugg)
+list(APPEND TARGET_LIST feedback)
 
 # Install plugins
 install(TARGETS ${TARGET_LIST}
