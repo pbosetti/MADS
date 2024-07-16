@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.20)
 #  |____/ \___|\__|\__|_|_| |_|\__, |___/
 #                              |___/     
 set(LIB_NAME mads)
-set(LIB_VERSION 0.9.0)
+set(LIB_VERSION 0.9.1)
 project(${LIB_NAME} VERSION ${LIB_VERSION} LANGUAGES CXX)
 set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
 
