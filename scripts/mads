@@ -16,7 +16,9 @@ usage() {
   echo "Usage: $0 <command> [arguments...]"
   echo "Available commands:"
   for command in "${AVAILABLE_COMMANDS[@]}"; do
-    echo "  - $command"
+    if command -v "$command" >/dev/null 2>&1; then
+      echo "  - $command"
+    fi
   done
   if [ "$(uname)" == "Linux" ]; then
     echo "  - service <service_name> <command> [arguments...]"

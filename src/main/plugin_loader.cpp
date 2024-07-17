@@ -64,10 +64,10 @@ int main(int argc, char *argv[]) {
   options.add_options()
     ("plugin", "Plugin to load", value<string>())
     ("n,name", "Agent name (default to plugin name)", value<string>())
-    ("i,agent_id", "Agent ID to be added to JSON frames", value<string>());
+    ("i,agent-id", "Agent ID to be added to JSON frames", value<string>());
   #if defined(PLUGIN_LOADER_SOURCE)
   options.add_options()
-    ("p", "Sampling period (default 100 ms)", value<size_t>());
+    ("p,period", "Sampling period (default 100 ms)", value<size_t>());
   #endif
   options.parse_positional({"plugin"});
   options.positional_help("plugin");
@@ -130,7 +130,7 @@ int main(int argc, char *argv[]) {
 
   // Copy agent settings as plugin parameters
   json settings = agent.get_settings();
-  if (options_parsed.count("agent_id")) {
+  if (options_parsed.count("agent-id")) {
     settings["agent_id"] = options_parsed["agent_id"].as<string>();
     agent.set_agent_id(options_parsed["agent_id"].as<string>());
   }
