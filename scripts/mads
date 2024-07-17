@@ -16,7 +16,7 @@ usage() {
   echo "Usage: $0 <command> [arguments...]"
   echo "Available commands:"
   for command in "${AVAILABLE_COMMANDS[@]}"; do
-    if command -v "$command" >/dev/null 2>&1; then
+    if [ -f "${USR_PATH}/bin/${CMD_PREFIX}${command}" ]; then
       echo "  - $command"
     fi
   done
