@@ -7,7 +7,10 @@ cmake_minimum_required(VERSION 3.20)
 #  |____/ \___|\__|\__|_|_| |_|\__, |___/
 #                              |___/     
 set(LIB_NAME mads)
-set(LIB_VERSION 0.9.1)
+set(CPACK_PACKAGE_VERSION_MAJOR 0)
+set(CPACK_PACKAGE_VERSION_MINOR 9)
+set(CPACK_PACKAGE_VERSION_PATCH 1)
+set(LIB_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
 project(${LIB_NAME} VERSION ${LIB_VERSION} LANGUAGES CXX)
 set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
 
@@ -317,16 +320,27 @@ endif()
 #                              __/ |         __/ |
 #                             |___/         |___/ 
 
-set(CPACK_PACKAGE_NAME ${LIB_NAME})
+set(CPACK_PACKAGE_NAME "${LIB_NAME}")
+set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${LIB_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
 set(CPACK_PACKAGE_VENDOR "MADS Consortium")
-set(CPACK_GENERATOR "TGZ")
-set(CPACK_INSTALLED_DIRECTORIES 
-  ${CMAKE_INSTALL_PREFIX}/lib ./lib
-  ${CMAKE_INSTALL_PREFIX}/include ./include
-)
-set(CPACK_PACKAGE_VERSION ${LIB_VERSION})
 set(CPACK_PACKAGE_DIRECTORY ${CMAKE_SOURCE_DIR}/packages)
 set(CPACK_STRIP_FILES TRUE)
+set(CPACK_PACKAGING_INSTALL_PREFIX "/usr/local")
+set(CPACK_PACKAGE_CONTACT "paolo.bosetti@unitn.it")
+set(CMAKE_PROJECT_HOMEPAGE_URL "https://github.com/pbosetti/MADS")
+set(CPACK_PACKAGE_DESCRIPTION "MADS installer: Multi-Agent Distributed System")
+if(APPLE)
+  set(CPACK_GENERATOR "TGZ")
+elseif(MSVC)
+  set(CPACK_GENERATOR "ZIP")
+  set(CPACK_INSTALLED_DIRECTORIES 
+    ${CMAKE_INSTALL_PREFIX}/lib ./lib
+    ${CMAKE_INSTALL_PREFIX}/include ./include
+  )
+else()
+  set(CPACK_DEBIAN_PACKAGE_NAME MADS)
+  set(CPACK_GENERATOR "DEB")
+endif()
 include(CPack)
 
 
