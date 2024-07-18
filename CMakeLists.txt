@@ -185,7 +185,7 @@ if(APPLE)
   link_directories("/opt/homebrew/lib/")
   set(MONGO_LIBS mongocxx bsoncxx)
 elseif(UNIX AND NOT APPLE)
-  set(MONGO_LIBS mongocxx-static bsoncxx-static mongoc-static-1.0 bson-static-1.0 resolv ssl crypto zstd)
+  set(MONGO_LIBS mongocxx-static bsoncxx-static mongoc-static-1.0 bson-static-1.0 resolv)
 endif()
 
 # Macro for building exec targets
