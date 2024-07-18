@@ -186,6 +186,9 @@ if(APPLE)
   set(MONGO_LIBS mongocxx bsoncxx)
 elseif(UNIX AND NOT APPLE)
   set(MONGO_LIBS mongocxx-static bsoncxx-static mongoc-static-1.0 bson-static-1.0 resolv)
+  if(NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
+    set(MONGO_LIBS ${MONGO_LIBS} ssl crypto)
+  endif()
 endif()
 
 # Macro for building exec targets
