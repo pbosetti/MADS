@@ -299,6 +299,7 @@ install(TARGETS ${TARGET_LIST}
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
   ARCHIVE DESTINATION lib
+  COMPONENT MADS
 )
 install(FILES ${CMAKE_CURRENT_LIST_DIR}/mads.ini
   TYPE SYSCONF
@@ -334,9 +335,9 @@ set(CPACK_PACKAGE_CONTACT "paolo.bosetti@unitn.it")
 set(CMAKE_PROJECT_HOMEPAGE_URL "https://github.com/pbosetti/MADS")
 set(CPACK_PACKAGE_DESCRIPTION "MADS installer: Multi-Agent Distributed System")
 if(APPLE)
-  set(CPACK_GENERATOR "TGZ")
+  set(CPACK_GENERATOR "STGZ")
 elseif(MSVC)
-  set(CPACK_GENERATOR "ZIP")
+  set(CPACK_GENERATOR "ZIP;STGZ")
   set(CPACK_INSTALLED_DIRECTORIES 
     ${CMAKE_INSTALL_PREFIX}/lib ./lib
     ${CMAKE_INSTALL_PREFIX}/include ./include
