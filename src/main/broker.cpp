@@ -13,9 +13,9 @@ Author(s): Paolo Bosetti
 */
 #include "../keypress.hpp"
 #include "../mads.hpp"
+#include "../exec_path.hpp"
 #include <cstring>
 #include <cxxopts.hpp>
-#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <rang.hpp>
@@ -168,8 +168,6 @@ int main(int argc, char **argv) {
   Options options(argv[0]);
   string nic = "lo0";
   string ip = "127.0.0.1";
-  auto bin_dir =
-      filesystem::weakly_canonical(filesystem::path(argv[0])).parent_path();
   vector<string> desc{"FRONTEND msg in   ", "FRONTEND bytes in ",
                       "FRONTEND msg out  ", "FRONTEND bytes out",
                       "BACKEND msg in    ", "BACKEND bytes in  ",
@@ -193,7 +191,7 @@ int main(int argc, char **argv) {
   } else {
     struct stat buf;
     if (stat(settings_path.c_str(), &buf) != 0)
-      settings_path = bin_dir.generic_string() + "/../etc/" + settings_path;
+      settings_path = Mads::exec_dir("../etc/" SETTINGS_PATH);
   }
   cout << style::italic << "Reading settings from " << style::bold
        << settings_path << style::reset << endl;
@@ -373,7 +371,7 @@ int main(int argc, char **argv) {
     cout << "Done." << fg::reset << endl;
     if (reload) {
       cout << fg::yellow << "Restarting..." << fg::reset << endl;
-      execv(argv[0], argv);
+      execv(Mads::exec_path().c_str(), argv);
     }
   }
   return 0;

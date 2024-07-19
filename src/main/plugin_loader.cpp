@@ -12,6 +12,7 @@ Author(s): Paolo Bosetti
 */
 #include "../agent.hpp"
 #include "../mads.hpp"
+#include "../exec_path.hpp"
 #include <cxxopts.hpp>
 #include <filesystem>
 #include <pugg/Kernel.h>
@@ -84,8 +85,7 @@ int main(int argc, char *argv[]) {
     plugin_file = options_parsed["plugin"].as<string>();
   }
   if (!fs::exists(plugin_file)) {
-    fs::path parent_dir = THIS_EXEC_DIR.parent_path();
-    plugin_file = (parent_dir / "lib" / plugin_file).string();
+    plugin_file = Mads::exec_dir("../lib/" + plugin_file);
   }
   plugin_name = fs::path(plugin_file).stem().string();
   if (options_parsed.count("name") != 0) {
