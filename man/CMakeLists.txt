@@ -9,7 +9,7 @@ macro(create_man target)
 endmacro()
 
 if(LOWDOWN_EXECUTABLE)
-  set(man_pages "mads" "mads-broker" "mads-logger" "mads-source" "mads-filter" "mads-sink")
+  set(man_pages "mads" "mads-broker" "mads-logger" "mads-source" "mads-filter" "mads-sink" "mads-dealer" "mads-worker")
   foreach(page ${man_pages})
     create_man(${page})
   endforeach()
