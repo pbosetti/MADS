@@ -372,6 +372,10 @@ public:
         out << t << " ";
     }
     out << style::reset << endl;
+    if (!_agent_id.empty()) {
+      out << "  agent-id:         " << style::bold << _agent_id << style::reset
+          << endl;
+    }
     out << "  Compression:      " << style::bold;
     if (_compress)
       out << "enabled" << style::reset << endl;

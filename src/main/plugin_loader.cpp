@@ -131,8 +131,8 @@ int main(int argc, char *argv[]) {
   // Copy agent settings as plugin parameters
   json settings = agent.get_settings();
   if (options_parsed.count("agent-id")) {
-    settings["agent_id"] = options_parsed["agent_id"].as<string>();
-    agent.set_agent_id(options_parsed["agent_id"].as<string>());
+    settings["agent_id"] = options_parsed["agent-id"].as<string>();
+    agent.set_agent_id(options_parsed["agent-id"].as<string>());
   }
 #if defined(PLUGIN_LOADER_SOURCE)
   cerr << "  Sampling period:  " << style::bold;
@@ -204,7 +204,7 @@ int main(int argc, char *argv[]) {
     if (type == message_type::json && agent.last_topic() != "control") {
       json in = json::parse(get<1>(msg));
       json out;
-      double timecode = in["timecode"];
+      double timecode = in.value("timecode", 0.0);
       plugin->load_data(in, agent.last_topic());
       return_type processed = plugin->process(out);
       if (processed != return_type::success) {

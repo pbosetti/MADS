@@ -34,7 +34,8 @@ public:
 
   return_type load_data(json const &input, string topic) override {
     json out;
-    out["topic"] = topic;
+    if (!topic.empty())
+      out["topic"] = topic;
     out["input"] = input;
     cout << out.dump() << endl;
     return return_type::success;

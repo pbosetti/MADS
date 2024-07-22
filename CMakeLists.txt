@@ -226,6 +226,8 @@ endif()
 create_exec(filter SRCS plugin_loader.cpp LIBS pugg ${DLOPEN_LIB} DEFS "PLUGIN_LOADER_FILTER")
 create_exec(source SRCS plugin_loader.cpp LIBS  pugg ${DLOPEN_LIB} DEFS "PLUGIN_LOADER_SOURCE")
 create_exec(sink SRCS plugin_loader.cpp LIBS  pugg ${DLOPEN_LIB} DEFS "PLUGIN_LOADER_SINK")
+create_exec(dealer SRCS dealer.cpp)
+create_exec(worker SRCS worker.cpp LIBS pugg)
 
 # Conditionally built targets
 
