@@ -115,18 +115,24 @@ if (options_parsed.count("plugin") == 0) {
   cout << fg::green << "Filter plugin process started" << fg::reset << endl;
   agent.loop([&]() {
     json payload = agent.pull();
+    return_type rt;
     if (payload.empty() && !Mads::running) return;
     message_type type = agent.receive();
     agent.remote_control();
     json out;
     double timecode = payload.value("timecode", 0);
-    filter->load_data(payload, agent.last_topic());
-    return_type processed = filter->process(out);
-    if (processed != return_type::success) {
+    rt = filter->load_data(payload, agent.last_topic());
+    if (rt != return_type::success) {
       out = {{"error", filter->error()}};
       count_err++;
+    } else {
+      rt = filter->process(out);
+      if (rt != return_type::success) {
+        out = {{"error", filter->error()}};
+        count_err++;
+      }
+      out["timecode"] = timecode;
     }
-    out["timecode"] = timecode;
     agent.publish(out);
     cout << "\r\x1b[0KMessages processed: " << fg::green << count++
           << fg::reset << " total, " << fg::red << count_err << fg::reset
