@@ -7,7 +7,7 @@
 #                                                  |_|   |_|              
 # MADS wraper for all "mads-" prefixed commands
 CMD_PREFIX="mads-"
-AVAILABLE_COMMANDS=("broker" "logger" "source" "filter" "sink" "feedback")
+AVAILABLE_COMMANDS=("broker" "logger" "source" "filter" "sink" "feedback", "dealer" "worker")
 USR_PATH="$(dirname "$(dirname "$(readlink -f "$0")")")"
 SYSTEMD_PATH="/etc/systemd/system"
 
