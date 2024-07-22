@@ -40,7 +40,7 @@ int main(int argc, char *argv[]) {
     dealer.set_agent_id(options_parsed["agent-id"].as<string>());
   }
 
-  dealer.info();
+  dealer.info(cerr);
   dealer.register_event(event_type::startup);
   dealer.loop([&]() {
     json j;
@@ -66,7 +66,7 @@ int main(int argc, char *argv[]) {
       count_err++;
       break;
     }
-    cerr << "\r\x1b[0KMessages processed: " << fg::green << count++ << fg::reset
+    cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count << fg::reset
          << " total, " << fg::red << count_err << fg::reset << " with errors ";
     cerr.flush();
   });

@@ -373,7 +373,7 @@ public:
     }
     out << style::reset << endl;
     if (!_agent_id.empty()) {
-      out << "  agent-id:         " << style::bold << _agent_id << style::reset
+      out << "  Agent ID:         " << style::bold << _agent_id << style::reset
           << endl;
     }
     out << "  Compression:      " << style::bold;
