@@ -35,6 +35,9 @@ public:
   string kind() override { return PLUGIN_NAME; }
 
   return_type load_data(json const &input, string topic = "") override {
+    if (topic == "logger_status") {
+      return return_type::retry;
+    }
     if (_print_width > 0) {
       cout << topic << ": " << input.dump().substr(0, _print_width) << "..."
            << endl;
