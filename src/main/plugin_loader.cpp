@@ -204,14 +204,20 @@ int main(int argc, char *argv[]) {
     if (type == message_type::json && agent.last_topic() != "control") {
       json in = json::parse(get<1>(msg));
       json out;
+      return_type rt;
       double timecode = in.value("timecode", 0.0);
-      plugin->load_data(in, agent.last_topic());
-      return_type processed = plugin->process(out);
-      if (processed != return_type::success) {
+      rt = plugin->load_data(in, agent.last_topic());
+      if (rt != return_type::success) {
         out = {{"error", plugin->error()}};
         count_err++;
+      } else {
+        rt = plugin->process(out);
+        if (rt != return_type::success) {
+          out = {{"error", plugin->error()}};
+          count_err++;
+        }
+        out["timecode"] = timecode;
       }
-      out["timecode"] = timecode;
       agent.publish(out);
       cerr << "\r\x1b[0KMessages processed: " << fg::green << count++
            << fg::reset << " total, " << fg::red << count_err << fg::reset
