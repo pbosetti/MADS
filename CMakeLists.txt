@@ -308,10 +308,16 @@ install(TARGETS ${TARGET_LIST}
 install(FILES ${CMAKE_CURRENT_LIST_DIR}/mads.ini
   TYPE SYSCONF
 )
-file(GLOB SCRIPTS_FILES "${CMAKE_CURRENT_LIST_DIR}/scripts/*")
-install(PROGRAMS ${SCRIPTS_FILES}
-  TYPE BIN
-)
+if(NOT WIN32)
+  set(SCRIPTS_FILES 
+    ${CMAKE_CURRENT_LIST_DIR}/scripts/mads
+    ${CMAKE_CURRENT_LIST_DIR}/scripts/mads-logging
+    ${CMAKE_CURRENT_LIST_DIR}/scripts/mads-command
+  )
+  install(PROGRAMS ${SCRIPTS_FILES}
+    TYPE BIN
+  )
+endif()
 
 
 #   _____           _               _             
