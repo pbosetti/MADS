@@ -27,6 +27,7 @@ Author(s): Paolo Bosetti
 #include <zmqpp/proxy.hpp>
 #include <zmqpp/proxy_steerable.hpp>
 #include <zmqpp/zmqpp.hpp>
+#include <filesystem>
 #ifdef _WIN32
 #include <WinSock2.h>
 #include <iphlpapi.h>
@@ -197,8 +198,10 @@ int main(int argc, char **argv) {
        << settings_path << style::reset << endl;
 
   // Configurations
-  string name = argv[0];
-  name = name.substr(name.find_last_of("/") + 1);
+  filesystem::path executable(argv[0]);
+  string name = executable.stem().string();
+  name = name.substr(name.find_last_of("-") + 1);
+  cout << "agent name is " << style::bold << name << style::reset << endl;
   toml::table config;
 
   try {
@@ -371,7 +374,8 @@ int main(int argc, char **argv) {
     cout << "Done." << fg::reset << endl;
     if (reload) {
       cout << fg::yellow << "Restarting..." << fg::reset << endl;
-      execv(Mads::exec_path().c_str(), argv);
+      const char *cmd = Mads::exec_path().string().c_str();
+      execv(cmd, argv);
     }
   }
   return 0;

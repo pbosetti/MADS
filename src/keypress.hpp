@@ -12,11 +12,10 @@ Read a single key press in a portable way.
 #include <iostream>
 #include <string>
 #include <thread> // contains <chrono>
-using namespace std;
 
 static void kpsleep(const double t) {
   if (t > 0.0)
-    this_thread::sleep_for(chrono::milliseconds((int)(1E3 * t + 0.5)));
+    std::this_thread::sleep_for(std::chrono::milliseconds((int)(1E3 * t + 0.5)));
 }
 
 // ASCII codes (key>0): 8 backspace, 9 tab, 10 newline, 27 escape, 127 delete,
