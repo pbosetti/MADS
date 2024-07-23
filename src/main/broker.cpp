@@ -194,14 +194,13 @@ int main(int argc, char **argv) {
     if (stat(settings_path.c_str(), &buf) != 0)
       settings_path = Mads::exec_dir("../etc/" SETTINGS_PATH);
   }
-  cout << style::italic << "Reading settings from " << style::bold
-       << settings_path << style::reset << endl;
-
-  // Configurations
   filesystem::path executable(argv[0]);
   string name = executable.stem().string();
   name = name.substr(name.find_last_of("-") + 1);
-  cout << "agent name is " << style::bold << name << style::reset << endl;
+  cout << style::italic << "Reading settings from " << style::bold
+       << settings_path << " [" << name << "]" << style::reset << endl;
+
+  // Configurations
   toml::table config;
 
   try {
@@ -374,8 +373,7 @@ int main(int argc, char **argv) {
     cout << "Done." << fg::reset << endl;
     if (reload) {
       cout << fg::yellow << "Restarting..." << fg::reset << endl;
-      const char *cmd = Mads::exec_path().string().c_str();
-      execv(cmd, argv);
+      execv(Mads::exec_path().string().c_str(), argv);
     }
   }
   return 0;

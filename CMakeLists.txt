@@ -126,7 +126,7 @@ FetchContent_Declare(rang
 
 FetchContent_Declare(pugg 
   GIT_REPOSITORY https://github.com/pbosetti/pugg.git
-  GIT_TAG        1.0.2
+  GIT_TAG        1.0.3
   GIT_SHALLOW    TRUE
 )
 
@@ -312,12 +312,6 @@ file(GLOB SCRIPTS_FILES "${CMAKE_CURRENT_LIST_DIR}/scripts/*")
 install(PROGRAMS ${SCRIPTS_FILES}
   TYPE BIN
 )
-# Install custom built OpenBLAS provided by armadillo
-if(WIN32)
-  install(FILES ${EXTERNAL_DIR}/armadillo/examples/lib_win64/libopenblas.dll 
-    TYPE BIN
-  )
-endif()
 
 
 #   _____           _               _             
@@ -341,7 +335,10 @@ set(CPACK_PACKAGE_DESCRIPTION "MADS installer: Multi-Agent Distributed System")
 if(APPLE)
   set(CPACK_GENERATOR "STGZ")
 elseif(MSVC)
-  set(CPACK_GENERATOR "ZIP;STGZ")
+  set(CPACK_GENERATOR "ZIP;INNOSETUP")
+  set(CPACK_PACKAGE_INSTALL_DIRECTORY "MADS")
+  set(CPACK_INNOSETUP_IGNORE_LICENSE_PAGE ON)
+  set(CPACK_INNOSETUP_IGNORE_README_PAGE ON)
   set(CPACK_INSTALLED_DIRECTORIES 
     ${CMAKE_INSTALL_PREFIX}/lib ./lib
     ${CMAKE_INSTALL_PREFIX}/include ./include
