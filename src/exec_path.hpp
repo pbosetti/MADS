@@ -17,7 +17,7 @@
 #include <Shlwapi.h>
 #include <io.h>
 #include <windows.h>
-
+#define PATH_MAX MAX_PATH
 #define access _access_s
 #endif
 
@@ -60,9 +60,9 @@ std::filesystem::path exec_path() {
 std::string exec_dir(std::string relative = "") {
   std::string path = exec_path().parent_path().string();
   if (relative != "") {
-    return std::filesystem::weakly_canonical(path + "/" + relative);
+    return std::filesystem::weakly_canonical(path + "/" + relative).string();
   } else {
-    return std::filesystem::weakly_canonical(path);
+    return std::filesystem::weakly_canonical(path).string();
   }
 }
 
