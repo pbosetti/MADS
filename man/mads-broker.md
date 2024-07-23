@@ -40,3 +40,7 @@ The upstream bug tracker can be found at https://github.com/pbosetti/MADS/issues
 # AUTHOR
 
 **mads-broker** was written by Paolo Bosetti <paolo.bosetti@unitn.it>.
+
+# LICENSE
+
+https://creativecommons.org/licenses/by-sa/4.0/

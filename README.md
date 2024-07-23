@@ -218,3 +218,18 @@ To develop a plugin follow these steps:
 4. in developing the plugin you must also add a `main()` function, which is used to test the plugin. This function is not used in the final plugin, but it is useful to test the plugin in isolation
 5. once the plugin is ready, compile it and copy it on the target system where the Miroscic agent is supposed to run
 6. the Mads agent is `source`, `filter`, or `sink`: it takes the name of the plugin as a key for loading the proper settings section and as a publishing topic. Settings are passed to the plugin as a JSON object on loading, the name of the section being the name of the plugin file (no extension).
+
+# License
+
+![CC BY-SA](https://licensebuttons.net/l/by-sa/4.0/88x31.png)
+
+The project is distributed under [CC BY-SA license](https://creativecommons.org/licenses/by-sa/4.0/).
+
+# Authors
+
+Main author: 
+Paolo Bosetti (University of Trento)
+
+Contributors:
+Anna-Carla Araujo (INSA Toulouse),
+Guillaume Cohen (INSA Toulouse)
