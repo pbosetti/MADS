@@ -1,6 +1,6 @@
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-    if CurStep = ssPostInstall 
+    if (CurStep = ssPostInstall) and IsTaskSelected('envPath')
     then EnvAddPath(ExpandConstant('{app}') +'\usr\local\bin');
 end;
 

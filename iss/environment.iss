@@ -42,3 +42,6 @@ begin
     then Log(Format('The [%s] removed from PATH: [%s]', [Path, Paths]))
     else Log(Format('Error while removing the [%s] from PATH: [%s]', [Path, Paths]));
 end;
+
+[Tasks]
+Name: envPath; Description: "Add to system PATH variable" 
