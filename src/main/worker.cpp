@@ -94,7 +94,6 @@ if (options_parsed.count("plugin") == 0) {
   }
   agent.enable_remote_control();
   agent.connect();
-  agent.info();
   cout << "  Plugin:           " << style::bold << plugin_file << " (loaded as "
        << agent_name << ")" << style::reset << endl;
 
@@ -104,6 +103,7 @@ if (options_parsed.count("plugin") == 0) {
     settings["agent_id"] = options_parsed["agent_id"].as<string>();
     agent.set_agent_id(options_parsed["agent_id"].as<string>());
   }
+  agent.info(cerr);
   filter->set_params((void *)&settings);
   for (auto &[k, v] : filter->info()) {
     cout << "  " << left << setw(18) << k << style::bold << v << style::reset 
@@ -115,22 +115,28 @@ if (options_parsed.count("plugin") == 0) {
   cout << fg::green << "Filter plugin process started" << fg::reset << endl;
   agent.loop([&]() {
     json payload = agent.pull();
+    return_type rt;
     if (payload.empty() && !Mads::running) return;
     message_type type = agent.receive();
     agent.remote_control();
     json out;
     double timecode = payload.value("timecode", 0);
-    filter->load_data(payload, agent.last_topic());
-    return_type processed = filter->process(out);
-    if (processed != return_type::success) {
+    rt = filter->load_data(payload, agent.last_topic());
+    if (rt != return_type::success) {
       out = {{"error", filter->error()}};
       count_err++;
+    } else {
+      rt = filter->process(out);
+      if (rt != return_type::success) {
+        out = {{"error", filter->error()}};
+        count_err++;
+      }
+      out["timecode"] = timecode;
     }
-    out["timecode"] = timecode;
     agent.publish(out);
-    cout << "\r\x1b[0KMessages processed: " << fg::green << count++
-          << fg::reset << " total, " << fg::red << count_err << fg::reset
-          << " with errors";
+    cout << "\r\x1b[0KMessages processed: " << fg::green << ++count
+         << fg::reset << " total, " << fg::red << count_err << fg::reset
+         << " with errors";
     cout.flush();
   });
   cout << fg::green << "Filter plugin process stopped" << fg::reset << endl;

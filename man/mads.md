@@ -37,6 +37,12 @@ In addition, the **mads** command allows to create systemd services for running 
 **filter**
 :  Start a MADS filter. Wraps **mads-filter**.
 
+**dealer**
+:  Start a MADS dealer. Wraps **mads-dealer**.
+
+**worker**
+:  Start a MADS worker. Wraps **mads-worker**.
+
 **service**
 :  Create a systemd service for a MADS agent. The service is created in /etc/systemd/system and can be started, stopped, enabled and disabled using the systemctl command. See below for more details.
 

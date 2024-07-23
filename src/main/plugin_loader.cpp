@@ -124,7 +124,6 @@ int main(int argc, char *argv[]) {
   }
   agent.enable_remote_control();
   agent.connect();
-  agent.info(cerr);
   cerr << "  Plugin:           " << style::bold << plugin_file << " (loaded as "
        << agent_name << ")" << style::reset << endl;
 
@@ -134,6 +133,7 @@ int main(int argc, char *argv[]) {
     settings["agent_id"] = options_parsed["agent-id"].as<string>();
     agent.set_agent_id(options_parsed["agent-id"].as<string>());
   }
+  agent.info(cerr);
 #if defined(PLUGIN_LOADER_SOURCE)
   cerr << "  Sampling period:  " << style::bold;
   if (options_parsed.count("p") != 0) {
@@ -189,8 +189,7 @@ int main(int argc, char *argv[]) {
     } else if (result == return_type::retry) {
       return;
     }
-    count++;
-    cerr << "\r\x1b[0KMessages processed: " << fg::green << count
+    cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
           << fg::reset << " total, " << fg::red << count_err << fg::reset
           << " with errors ";
     cerr.flush();
@@ -204,16 +203,22 @@ int main(int argc, char *argv[]) {
     if (type == message_type::json && agent.last_topic() != "control") {
       json in = json::parse(get<1>(msg));
       json out;
+      return_type rt;
       double timecode = in.value("timecode", 0.0);
-      plugin->load_data(in, agent.last_topic());
-      return_type processed = plugin->process(out);
-      if (processed != return_type::success) {
+      rt = plugin->load_data(in, agent.last_topic());
+      if (rt != return_type::success) {
         out = {{"error", plugin->error()}};
         count_err++;
+      } else {
+        rt = plugin->process(out);
+        if (rt != return_type::success) {
+          out = {{"error", plugin->error()}};
+          count_err++;
+        }
+        out["timecode"] = timecode;
       }
-      out["timecode"] = timecode;
       agent.publish(out);
-      cerr << "\r\x1b[0KMessages processed: " << fg::green << count++
+      cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
            << fg::reset << " total, " << fg::red << count_err << fg::reset
            << " with errors ";
       cerr.flush();
@@ -228,11 +233,13 @@ int main(int argc, char *argv[]) {
       json in = json::parse(get<1>(msg));
       json out;
       return_type processed = plugin->load_data(in, agent.last_topic());
-      if (processed != return_type::success) {
+      if (processed == return_type::retry) {
+        return;
+      } else if (processed != return_type::success) {
         out = {{"error", plugin->error()}};
         count_err++;
       }
-      cerr << "\r\x1b[0KMessages processed: " << fg::green << count++
+      cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
            << fg::reset << " total, " << fg::red << count_err << fg::reset
            << " with errors ";
       cerr.flush();
