@@ -85,7 +85,11 @@ int main(int argc, char *argv[]) {
     plugin_file = options_parsed["plugin"].as<string>();
   }
   if (!fs::exists(plugin_file)) {
+#ifdef _WIN32
+    plugin_file = Mads::exec_dir("../bin/" + plugin_file);
+#else
     plugin_file = Mads::exec_dir("../lib/" + plugin_file);
+#endif
   }
   plugin_name = fs::path(plugin_file).stem().string();
   if (options_parsed.count("name") != 0) {
