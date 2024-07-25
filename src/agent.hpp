@@ -236,12 +236,13 @@ public:
       _raw_settings = read_settings(_settings_uri, _name, _settings_timeout);
       chrono::system_clock::time_point now = chrono::system_clock::now();
       broker_tc = get_broker_timecode(_settings_uri, _settings_timeout);
-      _timecode_offset = broker_tc - timecode(now, MADS_FPS);
+      _timecode_offset = broker_tc - timecode(now, timecode_fps);
       _config = (toml::table)toml::parse(_raw_settings);
     }
 
     // member variables
     auto all_cfg = _config["agents"];
+    timecode_fps = all_cfg["timecode_fps"].value_or(MADS_FPS);
     _compress = all_cfg["compress"].value_or(false);
     dummy = all_cfg["dummy"].value_or(false);
 
@@ -381,6 +382,8 @@ public:
       out << "enabled" << style::reset << endl;
     else
       out << fg::red << "disabled" << fg::reset << style::reset << endl;
+    out << "  Timecode FPS:     " << style::bold << timecode_fps << style::reset
+        << endl;
     out << "  Timecode offset:  " << style::bold << _timecode_offset
         << " s" << style::reset << endl;
   }
@@ -556,7 +559,7 @@ public:
     payload["hostname"] = _hostname;
     payload["timestamp"]["$date"] = get_ISODate_time(now, -offset);
     if (!payload.contains("timecode")) {
-      payload["timecode"] = timecode(now, MADS_FPS) - offset;
+      payload["timecode"] = timecode(now, timecode_fps) - offset;
     }
     str = payload.dump();
     if (topic.empty())
@@ -588,7 +591,7 @@ public:
     message message;
     chrono::system_clock::time_point now = chrono::system_clock::now();
     meta["timestamp"]["$date"] = get_ISODate_time(now);
-    meta["timecode"] = timecode(now, MADS_FPS);
+    meta["timecode"] = timecode(now, timecode_fps);
     if (topic.empty())
       topic = _pub_topic;
     message << topic << meta.dump();
@@ -854,6 +857,8 @@ public:
    */
   bool restart() { return _restart; }
 
+
+  double timecode_fps = MADS_FPS;
 
   /*
     ____       _            _

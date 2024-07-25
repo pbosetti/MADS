@@ -212,6 +212,8 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
+  double timecode_fps = config["agents"]["timecode_fps"].value_or(MADS_FPS);
+
   string frontend_address, backend_address, settings_address;
   frontend_address = config[name]["frontend_address"].value_or(BROKER_FRONTEND);
   backend_address = config[name]["backend_address"].value_or(BROKER_BACKEND);
@@ -268,7 +270,7 @@ int main(int argc, char **argv) {
           settings.send(content);
         } else if (cmd == "timecode") {
           chrono::system_clock::time_point now = chrono::system_clock::now();
-          settings.send(to_string(Mads::timecode(now, MADS_FPS)));
+          settings.send(to_string(Mads::timecode(now, timecode_fps)));
         } else {
           settings.send("{\"error\": \"Unknown command\"}");
         }
@@ -276,6 +278,10 @@ int main(int argc, char **argv) {
     }
     settings.close();
   });
+
+  cout << "Timecode FPS: " << style::bold << timecode_fps << style::reset 
+       << endl;
+  
   // print settings URI for clients
   string port = settings_address.substr(settings_address.find_last_of(":") + 1);
   cout << "Settings are provided via " << style::bold << "tcp://" << ip << ":"
