@@ -178,12 +178,17 @@ int main(int argc, char **argv) {
     ("n,nic", "Network interface name (-n list to list them all)", value<string>())
     ("s,settings", "Settings file path", value<string>())
     ("d,daemon", "Run as daemon")
+    ("v,version", "Print version")
     ("h,help", "Print usage");
   auto options_parsed = options.parse(argc, argv);
 
   if (options_parsed.count("help")) {
     cout << argv[0] << " ver. " << LIB_VERSION << endl;
     cout << options.help() << endl;
+    return 0;
+  }
+  if (options_parsed.count("version")) {
+    cout << LIB_VERSION << endl;
     return 0;
   }
 

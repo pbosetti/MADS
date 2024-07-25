@@ -11,6 +11,7 @@
   [**\-d, \-\-delay** *delay in ms*]
   [**\-s, \-\-settings** *URI*]
   [**\-S, \-\-save-settings** *filename*]
+  [**\-v, \-\-version**]
   [**\-h, \-\-help**]
   [*plugin*]
 
@@ -39,6 +40,9 @@
 
 **\-S**, **\-\-save-settings** *filename*
 :  Save the settings (loaded by the broker or via **\-s** option) to the given file (ini format).
+
+**\-v**, **\-\-version**
+: show version information.
 
 **\-h**, **\-\-help**
 :  show summary of options.

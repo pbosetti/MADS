@@ -15,6 +15,7 @@
   [**\-x, \-\-cross**]
   [**\-s, \-\-settings** *arg*]
   [**\-S, \-\-save-settings** *arg*]
+  [**\-v, \-\-version**]
   [**\-h, \-\-help**]
 
 # DESCRIPTION
@@ -49,6 +50,9 @@
 
 **\-S**, **\-\-save-settings** *filename.ini*
 :  Save the settings (loaded by the broker or via **\-s** option) to the given file (ini format).
+
+**\-v**, **\-\-version**
+: show version information.
 
 **\-h**, **\-\-help**
 :  show summary of options.

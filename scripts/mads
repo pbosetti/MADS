@@ -77,6 +77,11 @@ WantedBy=multi-user.target
 EOF
 }
 
+if [ "$1" = "-v" ] || [ "$1" = "--version" ]; then
+  mads-broker -v
+  exit 0
+fi
+
 # Check if the program argument is provided
 if [ -z "$1" ]; then
   usage
