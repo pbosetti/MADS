@@ -208,7 +208,6 @@ int main(int argc, char *argv[]) {
       json in = json::parse(get<1>(msg));
       json out;
       return_type rt;
-      double timecode = in.value("timecode", 0.0);
       rt = plugin->load_data(in, agent.last_topic());
       if (rt != return_type::success) {
         out = {{"error", plugin->error()}};
@@ -219,7 +218,6 @@ int main(int argc, char *argv[]) {
           out = {{"error", plugin->error()}};
           count_err++;
         }
-        out["timecode"] = timecode;
       }
       agent.publish(out);
       cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count

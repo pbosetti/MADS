@@ -120,7 +120,6 @@ if (options_parsed.count("plugin") == 0) {
     message_type type = agent.receive();
     agent.remote_control();
     json out;
-    double timecode = payload.value("timecode", 0);
     rt = filter->load_data(payload, agent.last_topic());
     if (rt != return_type::success) {
       out = {{"error", filter->error()}};
@@ -131,7 +130,6 @@ if (options_parsed.count("plugin") == 0) {
         out = {{"error", filter->error()}};
         count_err++;
       }
-      out["timecode"] = timecode;
     }
     agent.publish(out);
     cout << "\r\x1b[0KMessages processed: " << fg::green << ++count
