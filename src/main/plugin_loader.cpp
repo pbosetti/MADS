@@ -58,6 +58,7 @@ int main(int argc, char *argv[]) {
   string settings_uri = SETTINGS_URI;
   string plugin_name, plugin_file, agent_name;
   size_t count = 0, count_err = 0;
+  size_t delay = 0;
   chrono::milliseconds time{0};
 
   // CLI options
@@ -65,7 +66,8 @@ int main(int argc, char *argv[]) {
   options.add_options()
     ("plugin", "Plugin to load", value<string>())
     ("n,name", "Agent name (default to plugin name)", value<string>())
-    ("i,agent-id", "Agent ID to be added to JSON frames", value<string>());
+    ("i,agent-id", "Agent ID to be added to JSON frames", value<string>())
+    ("d,delay", "Initial delay before forst message in ms (default 0)", value<size_t>());
   #if defined(PLUGIN_LOADER_SOURCE)
   options.add_options()
     ("p,period", "Sampling period (default 100 ms)", value<size_t>());
@@ -96,6 +98,9 @@ int main(int argc, char *argv[]) {
     agent_name = options_parsed["name"].as<string>();
   } else {
     agent_name = plugin_name;
+  }
+  if (options_parsed.count("delay") != 0) {
+    delay = options_parsed["delay"].as<size_t>();
   }
 
   // Loading plugin
@@ -164,6 +169,11 @@ int main(int argc, char *argv[]) {
   cerr << "  Blob format:      " << style::bold << out_format << style::reset
        << endl;
 #endif
+
+  // Initial delay
+  if (delay > 0) {
+    this_thread::sleep_for(chrono::milliseconds(delay));
+  }
 
   // Main loop
   agent.register_event(event_type::startup);

@@ -8,6 +8,7 @@
 **mads-source** 
   [**\-n, \-\-name** *agent_name*] 
   [**\-i, \-\-agent-id** *agent-id*]
+  [**\-d, \-\-delay** *delay in ms*]
   [**\-p, \-\-period** *sampling_period*]
   [**\-s, \-\-settings** *URI*]
   [**\-S, \-\-save-settings** *filename*]
@@ -33,6 +34,9 @@
 
 **\-p**, **\-\-period** *sampling_period*
 :  Sampling period in milliseconds. Default is 0, meaning free run. If the sampling period is set to a value greater than 0, the source agent will send a message every *sampling_period* milliseconds.
+
+**\-d**, **\-\-delay** *delay in ms*
+:  if larger than 0, waits that amount of ms before sending the first message. This is useful to deal with ZeroMQ slow joiner problem, i.e. when the agent starts sending PUB messages before fully establishing the connection, with the result that those messages are lost. The delay is applied only at the beginning of the agent's life; the agent already waits a small amount of time to take care about this problem, but this option allows to increase it in case of excessive network latency.
 
 **\-s**, **\-\-settings** *URI*
 :  Path to the settings file (ini format). It can be a valid ZeroMQ url in the form tcp://host:port.
