@@ -140,6 +140,7 @@ int main(int argc, char **argv) {
 
   data["class_name"] = ucfirst(data["name"]) + "Plugin";
   data["parent_header"] = string(data["type"]) + ".hpp";
+  data["source_template"] = string(data["type"]) + ".cpp";
   data["type"] = ucfirst(data["type"]);
   data["parent"] = ucfirst(data["type"]);
   data["driver_name"] = uppercase(data["type"]);
@@ -163,11 +164,11 @@ int main(int argc, char **argv) {
 
   string cmake_file = dir + "CMakeLists.txt";
   string source_file = dir + "src/" + string(data["source_file"]);
-  string source_template = string(data["type"]) + ".cpp";
   
   cout << "Creating plugin " << style::bold << data["name"] << style::reset 
        <<" of type " << style::bold << data["type"] << " in " 
        << style::bold << dir << style::reset << endl;
+       
   cout << "==> " << style::bold << cmake_file << style::reset << ": ";
   if (!overwrite && filesystem::exists(cmake_file)) {
     cout << fg::red << " already exists, skipped; use -o to overwrite" 
@@ -176,14 +177,16 @@ int main(int argc, char **argv) {
     env_cmake.write("CMakeLists.txt", data, "CMakeLists.txt");
     cout << fg::green << "created" << fg::reset << endl;
   }
+
   cout << "==> " << style::bold << source_file << style::reset << ": ";
   if (!overwrite && filesystem::exists(source_file)) {
     cerr << fg::red << " already exists, skipped; use -o to overwrite" 
     << fg::reset << endl;
   } else {
-    env_src.write(source_template, data, data["source_file"]);
+    env_src.write(data["source_template"], data, data["source_file"]);
     cout << fg::green << "created" << fg::reset << endl;
   }
+
   cout << "To build: "  << style::bold << "cd " << dir 
        << " && cmake -Bbuild && cmake --build build" << style::reset << endl;
   return 0;
