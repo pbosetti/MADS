@@ -118,7 +118,7 @@ int main(int argc, char **argv) {
            << data["type"] << fg::reset << endl;
   }
 
-  if (find(types.begin(), types.end(), data["type"]) == types.end()) {
+  if (find(types.begin(), types.end(), string(data["type"])) == types.end()) {
     cerr << fg::red << "Invalid plugin type: " << data["type"] << fg::reset 
          << endl;
     exit(1);
@@ -189,5 +189,6 @@ int main(int argc, char **argv) {
 
   cout << "To build: "  << style::bold << "cd " << dir 
        << " && cmake -Bbuild && cmake --build build" << style::reset << endl;
+
   return 0;
 }
