@@ -98,7 +98,10 @@ int make_ini(int argc, char **argv) {
   }
   if (options_parsed.count("install")) {
     if (!filesystem::exists(etc_dir)) {
-      filesystem::create_directory(etc_dir);
+      if (!filesystem::create_directory(etc_dir)) {
+        cerr << fg::red << "Cannot create directory " << etc_dir 
+             << "(need sudo?)"<< fg::reset << endl;
+        return -1;}
     }
     Environment env{template_dir + "/", etc_dir + "/"};
     env.write("mads.ini", data, "mads.ini");
