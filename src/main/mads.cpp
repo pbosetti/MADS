@@ -125,10 +125,9 @@ int make_service(int argc, char **argv) {
     args += argv[i];
     args += " ";
   }
-  data["service_name"] = argv[1];
+  data["service_name"] = string(MADS_PREFIX) + argv[1];
   argv++;
   argc--;
-  cerr << "Make service " << argv[1] << endl;
   if (argc < 2) {
     cerr << fg::red << "No service name provided" << fg::reset << endl;
     return -1;
@@ -159,7 +158,9 @@ int make_service(int argc, char **argv) {
   data["args"] = args;
   Environment env{template_dir + "/", "."};
   if (getuid() == 0) {
-    env.write("service.tpl", data, string(SYSTEMD_PATH) + "/" + data["name"].get<string>() + ".service");
+    string dest = string(SYSTEMD_PATH) + "/" + data["service_name"].get<string>() + ".service"
+    env.write("service.tpl", data, dest);
+    cout << "Service file written to " << dest << endl;
   } else {
     cout << env.render_file("service.tpl", data) << endl;
   }
