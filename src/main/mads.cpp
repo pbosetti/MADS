@@ -1,4 +1,15 @@
-
+/*
+  __  __    _    ____  ____  
+ |  \/  |  / \  |  _ \/ ___| 
+ | |\/| | / _ \ | | | \___ \ 
+ | |  | |/ ___ \| |_| |___) |
+ |_|  |_/_/   \_\____/|____/ 
+                             
+Command line interface for Mads
+Wraps all mads-* comands
+Also provides ini and service internal commands
+Author: Paolo Bosetti, July 2024
+*/
 
 #include <iostream>
 #include <inja/inja.hpp>
@@ -22,19 +33,28 @@ using json = nlohmann::json;
 using namespace cxxopts;
 using namespace rang;
 
-
-// const vector<string> ext_commands = {
-//   "broker", "logger",
-//   "source", "filter", "sink",
-//   "dealer", "worker",
-//   "command", "logging",
-//   "plugin",
-// };
-
+/*
+  _   _ _   _ _     
+ | | | | |_(_) |___ 
+ | | | | __| | / __|
+ | |_| | |_| | \__ \
+  \___/ \__|_|_|___/
+                    
+*/
 
 bool includes(vector<string> const &commands, string const &command) {
   return find(commands.begin(), commands.end(), command) != commands.end();
 }
+
+
+/*
+  _       _                                                 _ 
+ (_)_ __ (_)   ___ ___  _ __ ___  _ __ ___   __ _ _ __   __| |
+ | | '_ \| |  / __/ _ \| '_ ` _ \| '_ ` _ \ / _` | '_ \ / _` |
+ | | | | | | | (_| (_) | | | | | | | | | | | (_| | | | | (_| |
+ |_|_| |_|_|  \___\___/|_| |_| |_|_| |_| |_|\__,_|_| |_|\__,_|
+                                                              
+*/
 
 int make_ini(int argc, char **argv) {
   string template_dir = Mads::exec_dir("../share/templates/");
@@ -127,6 +147,16 @@ int make_ini(int argc, char **argv) {
   return 0;
 }
 
+
+/*
+                      _                               _ 
+  ___  ___ _ ____   _(_) ___ ___    ___ _ __ ___   __| |
+ / __|/ _ \ '__\ \ / / |/ __/ _ \  / __| '_ ` _ \ / _` |
+ \__ \  __/ |   \ V /| | (_|  __/ | (__| | | | | | (_| |
+ |___/\___|_|    \_/ |_|\___\___|  \___|_| |_| |_|\__,_|
+                                                        
+*/
+
 int make_service(int argc, char **argv) {
   auto template_dir = Mads::exec_dir("../share/templates/");
   string this_exe = Mads::exec_path().stem().string();
@@ -193,6 +223,14 @@ int make_service(int argc, char **argv) {
 }
 
 
+/*
+  __  __       _       
+ |  \/  | __ _(_)_ __  
+ | |\/| |/ _` | | '_ \ 
+ | |  | | (_| | | | | |
+ |_|  |_|\__,_|_|_| |_|
+                       
+*/
 
 int main(int argc, char **argv) {
   string exec_dir = Mads::exec_dir();
