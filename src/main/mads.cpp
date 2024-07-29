@@ -7,6 +7,12 @@
 #include <rang.hpp>
 #include "../mads.hpp"
 #include "../exec_path.hpp"
+#ifdef _WIN32
+#include <process.h>
+#define execv(cmd, argv) _execv(cmd, argv)
+// disable root operations on Windows
+#define getuid() 1
+#endif
 
 #define SYSTEMD_PATH "/etc/systemd/system"
 
@@ -44,7 +50,9 @@ int make_ini(int argc, char **argv) {
     "Create INI file template, version " + Mads::version());
   options.add_options()
     ("o,output", "Output file", value<string>())
+  #ifndef _WIN32
     ("i,install", "Install INI file to " + etc_dir, value<bool>())
+  #endif
     ("b,broker", "broker hostname or IP", value<string>())
     ("F,frontend", "frontend port", value<int>())
     ("B,backend", "backend port", value<int>())
@@ -96,6 +104,7 @@ int make_ini(int argc, char **argv) {
     cout << fg::green << "INI file written to " << output << fg::reset << endl;
     return 0;
   }
+#ifndef _WIN32
   if (options_parsed.count("install")) {
     if (!filesystem::exists(etc_dir)) {
       try {
@@ -112,6 +121,7 @@ int make_ini(int argc, char **argv) {
          << fg::reset << endl;
     return 0;
   }
+#endif
   Environment env{template_dir + "/", "."};
   cout << env.render_file("mads.ini", data) << endl;
   return 0;
