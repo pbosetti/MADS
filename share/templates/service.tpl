@@ -21,7 +21,7 @@ StartLimitIntervalSec=0
 Type=simple
 Restart=always
 RestartSec=1
-User=${USER}
+User=root
 ExecStart={{command}}
 
 [Install]

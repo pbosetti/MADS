@@ -91,9 +91,9 @@ int make_ini(int argc, char **argv) {
     data["mongo_uri"] = options_parsed["mongo"].as<string>();
   }
   if (output != "") {
-    Environment env{template_dir + "/", "."};
+    Environment env{template_dir + "/", "./"};
     env.write("mads.ini", data, output);
-    cout << "INI file written to " << output << endl;
+    cout << fg::green << "INI file written to " << output << fg::reset << endl;
     return 0;
   }
   if (options_parsed.count("install")) {
@@ -102,7 +102,8 @@ int make_ini(int argc, char **argv) {
     }
     Environment env{template_dir + "/", etc_dir + "/"};
     env.write("mads.ini", data, "mads.ini");
-    cout << "INI file installed to " << etc_dir << "/mads.ini" << endl;
+    cout << fg::green << "INI file installed to " << etc_dir << "/mads.ini" 
+         << fg::reset << endl;
     return 0;
   }
   Environment env{template_dir + "/", "."};
@@ -158,14 +159,24 @@ int make_service(int argc, char **argv) {
   data["args"] = args;
   Environment env{template_dir + "/", "."};
   if (getuid() == 0) {
-    string dest = string(SYSTEMD_PATH) + "/" + data["service_name"].get<string>() + ".service"
-    env.write("service.tpl", data, dest);
-    cout << "Service file written to " << dest << endl;
+    string dest = string(SYSTEMD_PATH) + "/" + data["service_name"].get<string>() + ".service";
+    ofstream file(dest);
+    file << env.render_file("service.tpl", data) << endl;
+    file.close();
+    cout << fg::green << "Service file written to " << dest << fg::reset 
+         << endl;
+    cout << "Start it with " << style::bold << "sudo systemctl start " 
+         << data["service_name"].get<string>() << style::reset << endl;
+    cout << "Enable it permanently with " << style::bold 
+         << "sudo systemctl enable " << data["service_name"].get<string>() 
+         << style::reset << endl;
   } else {
     cout << env.render_file("service.tpl", data) << endl;
   }
   return 0;
 }
+
+
 
 int main(int argc, char **argv) {
   string exec_dir = Mads::exec_dir();
@@ -226,13 +237,16 @@ int main(int argc, char **argv) {
          << Mads::exec_dir("../etc/mads.ini") << style::reset << endl;
     return 0;
   }
-  cout << "Available commands:" << endl;
+  cout << style::bold << "Available commands:" << style::reset << endl;
   for (auto const &cmd: ext_commands) {
-    cout << "  " << cmd << endl;
+    cout << setw(10) << cmd << style::italic << " (wraps " << MADS_PREFIX 
+         << cmd << ")" << style::reset << endl;
   }
-  cout << "  ini" << endl;
+  cout << setw(10) << "ini" << style::italic << " (internal)"  
+       << style::reset << endl;
   #ifdef __linux__
-  cout << "  service" << endl;
+  cout << setw(10) << "service" << style::italic << " (internal)"  
+       << style::reset << endl;
   #endif
 
   return 0;
