@@ -102,13 +102,13 @@ int make_ini(int argc, char **argv) {
         filesystem::create_directory(etc_dir);
       } catch (const filesystem::filesystem_error &e) {
         cerr << fg::red << "Cannot create directory " << etc_dir 
-             << "(need sudo?)"<< fg::reset << endl;
+             << " (need sudo?)"<< fg::reset << endl;
         return -1;
       }      
     }
     Environment env{template_dir + "/", etc_dir + "/"};
     env.write("mads.ini", data, "mads.ini");
-    cout << fg::green << "INI file installed to " << etc_dir << "/mads.ini" 
+    cout << fg::green << "INI file installed to " << etc_dir << "mads.ini" 
          << fg::reset << endl;
     return 0;
   }
