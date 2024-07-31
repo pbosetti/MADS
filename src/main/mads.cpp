@@ -262,6 +262,7 @@ int main(int argc, char **argv) {
     "Mads command line interface version " + Mads::version());
   options.add_options()
     ("i,info", "Print information on MADS installation")
+    ("p,prefix", "Print MADS linstall prefix")
     ("v,version", "Print version")
     ("h,help", "Print help");
   ParseResult options_parsed;
@@ -283,12 +284,18 @@ int main(int argc, char **argv) {
   if (options_parsed.count("info")) {
     cout << "Mads version: " << style::bold << Mads::version() << style::reset
          << endl;
-    cout << "Mads installation directory: " << style::bold << exec_dir
+    cout << "Mads binary directory: " << style::bold << exec_dir
          << style::reset << endl;
+    cout << "Mads plugins directory: " << style::bold 
+         << Mads::exec_dir("../lib") << style::reset << endl;
     cout << "Mads template directory: " << style::bold << template_dir
          << style::reset << endl;
     cout << "Mads INI file: " << style::bold
          << Mads::exec_dir("../etc/mads.ini") << style::reset << endl;
+    return 0;
+  }
+  if (options_parsed.count("prefix")) {
+    cout << Mads::exec_dir("../") << endl;
     return 0;
   }
   cout << style::bold << "Available commands:" << style::reset << endl;
