@@ -161,9 +161,12 @@ int main(int argc, char **argv) {
   filesystem::create_directory(dir + "src/");
   Environment env_cmake{template_dir + "/", dir};
   Environment env_src{template_dir + "/", dir + "src/"};
+  Environment env_md(template_dir + "/", dir);
+  env_md.set_line_statement("%%");
 
   string cmake_file = dir + "CMakeLists.txt";
   string source_file = dir + "src/" + string(data["source_file"]);
+  string readme_file = dir + "README.md";
   
   cout << "Creating plugin " << style::bold << data["name"] << style::reset 
        <<" of type " << style::bold << data["type"] << " in " 
@@ -184,6 +187,15 @@ int main(int argc, char **argv) {
     << fg::reset << endl;
   } else {
     env_src.write(data["source_template"], data, data["source_file"]);
+    cout << fg::green << "created" << fg::reset << endl;
+  }
+
+  cout << "==> " << style::bold << readme_file << style::reset << ": ";
+  if (!overwrite && filesystem::exists(readme_file)) {
+    cerr << fg::red << " already exists, skipped; use -o to overwrite" 
+    << fg::reset << endl;
+  } else {
+    env_md.write("README.md", data, "README.md");
     cout << fg::green << "created" << fg::reset << endl;
   }
 
