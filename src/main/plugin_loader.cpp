@@ -142,6 +142,7 @@ int main(int argc, char *argv[]) {
     settings["agent_id"] = options_parsed["agent-id"].as<string>();
     agent.set_agent_id(options_parsed["agent-id"].as<string>());
   }
+  settings["prefix"] = Mads::prefix();
   agent.info(cerr);
 #if defined(PLUGIN_LOADER_SOURCE)
   cerr << "  Sampling period:  " << style::bold;

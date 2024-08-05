@@ -295,7 +295,7 @@ int main(int argc, char **argv) {
     return 0;
   }
   if (options_parsed.count("prefix")) {
-    cout << Mads::exec_dir("../") << endl;
+    cout << Mads::prefix() << endl;
     return 0;
   }
   cout << style::bold << "Available commands:" << style::reset << endl;
