@@ -143,6 +143,7 @@ int main(int argc, char *argv[]) {
     agent.set_agent_id(options_parsed["agent-id"].as<string>());
   }
   settings["prefix"] = Mads::prefix();
+  bool silent = settings.value("silent", false);
   agent.info(cerr);
 #if defined(PLUGIN_LOADER_SOURCE)
   cerr << "  Sampling period:  " << style::bold;
@@ -204,15 +205,23 @@ int main(int argc, char *argv[]) {
     } else if (result == return_type::retry) {
       return;
     }
-    cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
-          << fg::reset << " total, " << fg::red << count_err << fg::reset
-          << " with errors ";
-    cerr.flush();
+    if (!silent) {
+      cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
+            << fg::reset << " total, " << fg::red << count_err << fg::reset
+            << " with errors ";
+      cerr.flush();
+    }
   }, time);
   
 #elif defined(PLUGIN_LOADER_FILTER)
   agent.loop([&]() {
-    message_type type = agent.receive();
+    message_type type;
+    try {
+      type = agent.receive();
+    } catch (const AgentError &e) {
+      cerr << fg::red << "Error receiving message: " << e.what() << fg::reset
+           << endl;
+    }
     auto msg = agent.last_message();
     agent.remote_control();
     if (type == message_type::json && agent.last_topic() != "control") {
@@ -231,15 +240,23 @@ int main(int argc, char *argv[]) {
         }
       }
       agent.publish(out);
-      cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
-           << fg::reset << " total, " << fg::red << count_err << fg::reset
-           << " with errors ";
-      cerr.flush();
+      if (!silent) {
+        cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
+            << fg::reset << " total, " << fg::red << count_err << fg::reset
+            << " with errors ";
+        cerr.flush();
+      }
     }
   });
 #elif defined(PLUGIN_LOADER_SINK)
   agent.loop([&]() {
-    message_type type = agent.receive();
+    message_type type;
+    try {
+      type = agent.receive();
+    } catch (const AgentError &e) {
+      cerr << fg::red << "Error receiving message: " << e.what() << fg::reset
+           << endl;
+    }
     auto msg = agent.last_message();
     agent.remote_control();
     if (type == message_type::json && agent.last_topic() != "control") {
@@ -252,10 +269,12 @@ int main(int argc, char *argv[]) {
         out = {{"error", plugin->error()}};
         count_err++;
       }
-      cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
-           << fg::reset << " total, " << fg::red << count_err << fg::reset
-           << " with errors ";
-      cerr.flush();
+      if (!silent) {
+        cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
+            << fg::reset << " total, " << fg::red << count_err << fg::reset
+            << " with errors ";
+        cerr.flush();
+      }
     }
   });
 #endif
