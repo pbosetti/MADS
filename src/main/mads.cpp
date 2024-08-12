@@ -275,8 +275,8 @@ bool compare_versions(const string &version1, const string &version2) {
 }
 
 int update() {
-  cout << "Checking MADS updates for version v" << Mads::version() << "..."
-       << endl;
+  cout << "Checking MADS updates for version " << style::bold << "v"
+       << Mads::version() << style::reset << "..." << endl;
   httplib::Client cli(GH_URL);
   auto res = cli.Get(GH_PATH);
   if (res && res->status == 200) {
@@ -284,29 +284,35 @@ int update() {
     try {
       response = json::parse(res->body);
     } catch (json::parse_error &e) {
-      cerr << "Cannot parse JSON response from " GH_URL GH_PATH << endl;
+      cerr << fg::red << "Cannot parse JSON response from " GH_URL GH_PATH
+           << fg::reset << endl;
       return -1;
     }
-    string last_ver = string("v"); 
+    string last_ver = string("v");
     try {
       last_ver += split_name(response["assets"][0]["name"]).first;
     } catch (json::exception &e) {
-      cerr << "Cannot parse remote object " << response["assets"][0]["name"] << endl;
+      cerr << fg::red << "Cannot parse remote object "
+           << response["assets"][0]["name"] << fg::reset << endl;
       return -1;
     }
     if (!compare_versions(Mads::version(), last_ver)) {
-      cout << "You are already up to date (most recent version " << last_ver << ")" << endl;
+      cout << fg::green << "You are already up to date (most recent version "
+           << last_ver << ")" << fg::reset << endl;
       return 0;
     }
-    cout << "A newer release is available: " << last_ver << endl;
+    cout << fg::yellow << "A newer release is available: " << last_ver
+         << fg::reset << endl;
     for (auto &asset : response["assets"]) {
       auto p = split_name(asset["name"]);
-      cout << setw(20) << p.second << " -> "
-           << asset.value("browser_download_url", "<missing URL>") << endl;
+      cout << setw(20) << p.second << " -> " << style::bold
+           << asset.value("browser_download_url", "<missing URL>")
+           << style::reset << endl;
     }
     return 0;
   } else {
-    cerr << "Cannot get latest release from " GH_URL GH_PATH << endl;
+    cerr << fg::red << "Cannot get latest release from " GH_URL GH_PATH
+         << fg::reset << endl;
     return -1;
   }
 }
