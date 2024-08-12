@@ -378,7 +378,7 @@ if(${MADS_SKIP_EXTERNALS})
       ${CMAKE_INSTALL_PREFIX}/include ./include
     )
   else()
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libzstd1, libssl3")
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libzstd1, libssl3, openssl")
     set(CPACK_DEBIAN_PACKAGE_NAME MADS)
     set(CPACK_GENERATOR "DEB")
   endif()
