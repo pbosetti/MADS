@@ -136,15 +136,18 @@ FetchContent_Declare(plugin
   GIT_SHALLOW    TRUE
 )
 
-FetchContent_Declare(httplib
-  GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+set(BUILD_LIBCURL_DOCS OFF)
+set(BUILD_SHARED_LIBS OFF)
+set(BUILD_STATIC_LIBS ON)
+set(BUILD_STATIC_CURL ON)
+FetchContent_Declare(cpr
+  GIT_REPOSITORY https://github.com/libcpr/cpr.git
   GIT_TAG        HEAD
   GIT_SHALLOW    TRUE
 )
 
-FetchContent_MakeAvailable(tomlplusplus nlohmann_json cxxopts rang pugg httplib)
+FetchContent_MakeAvailable(tomlplusplus nlohmann_json cxxopts rang pugg cpr)
 FetchContent_Populate(plugin)
-# FetchContent_Populate(httplib)
 
 FetchContent_Declare(inja
   GIT_REPOSITORY https://github.com/pantor/inja.git
@@ -241,7 +244,7 @@ endif()
 
 # Main command
 add_executable(mads ${MAIN_DIR}/mads.cpp)
-target_link_libraries(mads httplib::httplib)
+target_link_libraries(mads cpr::cpr)
 list(APPEND TARGET_LIST mads)
 
 create_exec(filter SRCS plugin_loader.cpp LIBS pugg ${DLOPEN_LIB} DEFS "PLUGIN_LOADER_FILTER")

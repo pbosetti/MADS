@@ -15,7 +15,7 @@ Author: Paolo Bosetti, July 2024
 #include "../exec_path.hpp"
 #include <cxxopts.hpp>
 #include <filesystem>
-#include <httplib.h>
+#include <cpr/cpr.h>
 #include <inja/inja.hpp>
 #include <iostream>
 #include <nlohmann/json.hpp>
@@ -277,12 +277,11 @@ bool compare_versions(const string &version1, const string &version2) {
 int update() {
   cout << "Checking MADS updates for version " << style::bold << "v"
        << Mads::version() << style::reset << "..." << endl;
-  httplib::Client cli(GH_URL);
-  auto res = cli.Get(GH_PATH);
-  if (res && res->status == 200) {
+  cpr::Response res = cpr::Get(cpr::Url{GH_URL GH_PATH});
+  if (res.status_code == 200) {
     json response;
     try {
-      response = json::parse(res->body);
+      response = json::parse(res.text);
     } catch (json::parse_error &e) {
       cerr << fg::red << "Cannot parse JSON response from " GH_URL GH_PATH
            << fg::reset << endl;
