@@ -14,6 +14,7 @@ Author(s): Paolo Bosetti
 #include "../keypress.hpp"
 #include "../mads.hpp"
 #include "../exec_path.hpp"
+#include "../watcher.hpp"
 #include <cstring>
 #include <cxxopts.hpp>
 #include <iomanip>
@@ -47,6 +48,15 @@ using namespace std::string_view_literals;
 using namespace std;
 using namespace cxxopts;
 using namespace rang;
+
+/*
+  _   _ _   _ _ _ _         
+ | | | | |_(_) (_) |_ _   _ 
+ | | | | __| | | | __| | | |
+ | |_| | |_| | | | |_| |_| |
+  \___/ \__|_|_|_|\__|\__, |
+                      |___/ 
+*/
 
 bool get_nic_ip(string &ip, const string nic) {
 #ifdef _WIN32
@@ -162,6 +172,33 @@ void proxy(zmqpp::socket &frontend, zmqpp::socket &backend,
            zmqpp::socket &ctrl) {
   zmqpp::proxy_steerable(frontend, backend, ctrl);
 }
+
+void send_char(char c) {
+  #ifdef _WIN32
+  INPUT ip;
+  ip.type = INPUT_KEYBOARD;
+  ip.ki.wScan = 0;
+  ip.ki.time = 0;
+  ip.ki.dwExtraInfo = 0;
+  ip.ki.wVk = c;
+  ip.ki.dwFlags = 0;
+  SendInput(1, &ip, sizeof(INPUT));
+  ip.ki.dwFlags = KEYEVENTF_KEYUP;
+  SendInput(1, &ip, sizeof(INPUT));
+  #else
+  ioctl(0, TIOCSTI, &c);
+  #endif
+}
+
+
+/*
+  __  __       _       
+ |  \/  | __ _(_)_ __  
+ | |\/| |/ _` | | '_ \ 
+ | |  | | (_| | | | | |
+ |_|  |_|\__,_|_|_| |_|
+                       
+*/
 
 int main(int argc, char **argv) {
   bool running = true, reload = false;
@@ -305,6 +342,17 @@ int main(int argc, char **argv) {
     controlled.bind("inproc://broker-ctrl");
     zmqpp::socket controller(context, zmqpp::socket_type::req);
     controller.connect("inproc://broker-ctrl");
+
+    Mads::Watcher watcher(settings_path);
+    auto main_thread = this_thread::get_id();
+    thread watcher_thread([&]() {
+      watcher.watch([&](const std::string &file_name) {
+        cout << fg::yellow << "Settings file " << file_name
+            << " has been modified, reloading..." << fg::reset << endl;
+        char cmd[2] = "x";
+        send_char('x');
+      });
+    });
 
     thread proxy_thread(proxy, ref(frontend), ref(backend), ref(controlled));
     cout << style::italic << "CTRL-C to immediate exit" << style::reset << endl;
