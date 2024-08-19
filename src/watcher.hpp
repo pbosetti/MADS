@@ -1,5 +1,7 @@
+#include <chrono>
 #include <filesystem>
 #include <functional>
+#include <future>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -18,13 +20,22 @@
 #endif
 
 namespace fs = std::filesystem;
+using namespace std::chrono_literals;
 
 namespace Mads {
 class Watcher {
 public:
-  Watcher(const std::string &file_names) : _file_name(file_names) {
+  Watcher(const std::string &file_names, std::chrono::duration<float> to = 0s)
+      : _file_name(file_names), _timeout(to) {
 #if defined(__APPLE__)
     _fd = open(_file_name.c_str(), O_EVTONLY);
+    _ts.tv_sec =
+        std::chrono::duration_cast<std::chrono::seconds>(_timeout).count();
+    _ts.tv_nsec =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(_timeout).count() %
+        1000000000;
+    EV_SET(&_change, _fd, EVFILT_VNODE, EV_ADD | EV_ENABLE | EV_CLEAR,
+           NOTE_WRITE, 0, (void *)_file_name.c_str());
 #endif
   }
 
@@ -35,14 +46,27 @@ public:
 #endif
   }
 
-  void watch(const std::function<void(const std::string &)> &callback) {
-    if (file_modified() > 0) {
-      callback(_file_name);
+  static int getAnswer() {
+    std::string answer;
+    std::cin >> answer;
+    return 0;
+  }
+
+  void watch(bool *running,
+             const std::function<void(const std::string &)> &callback) {
+    while (file_modified() == 0) {
+      if (!*running) {
+        break;
+      }
     }
+    if (*running)
+      callback(_file_name);
   }
 
 private:
   std::string _file_name;
+  std::chrono::duration<float> _timeout;
+  struct timespec _ts;
 #if defined(__linux__)
   char _buffer[BUF_LEN];
   int _inotify_fd;
@@ -59,21 +83,18 @@ private:
   int file_modified() {
 #if defined(__linux__)
     // Use inotify to monitor file changes on Linux
-    _inotify_fd = inotify_init();
+    _inotify_fd = inotify_init1(IN_NONBLOCK);
     _watch = inotify_add_watch(_inotify_fd, _file_name.c_str(), IN_MODIFY);
-    if (read(_inotify_fd, _buffer, BUF_LEN) < 0) {
-      perror("Read error");
-      return -1;
-    }
+    int rc = read(_inotify_fd, _buffer, BUF_LEN) < 0);
     inotify_rm_watch(_inotify_fd, _watch);
     close(_inotify_fd);
-    return 1;
+    return rc;
 #elif defined(__APPLE__)
-    // Use kqueue to monitor file changes on macOS
-    EV_SET(&_change, _fd, EVFILT_VNODE, EV_ADD | EV_ENABLE | EV_CLEAR,
-           NOTE_WRITE, 0, (void *)_file_name.c_str());
-    int rv = kevent(_kq, &_change, 1, &_event, 1, NULL);
-    return rv;
+    if (_timeout > 0s) { // non-blocking
+      return kevent(_kq, &_change, 1, &_event, 1, &_ts);
+    } else {             // blocking
+      return kevent(_kq, &_change, 1, &_event, 1, NULL);
+    }
 #elif defined(_WIN32)
     // Use FindFirstChangeNotification to monitor file changes on Win32
     HANDLE hDir = FindFirstChangeNotification(fileName.c_str(), FALSE,
