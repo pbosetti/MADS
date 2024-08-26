@@ -418,7 +418,7 @@ int main(int argc, char **argv) {
   }
   cout << style::bold << "Available mads subcommands:" << style::reset << endl;
 #else
-#define FIELD_WIDTH 10
+#define FIELD_WIDTH 11
   cout << style::bold << "Available mads subcommands:" << style::reset << endl;
   for (auto const &cmd : ext_commands) {
     cout << setw(FIELD_WIDTH) << cmd << style::italic << " (wraps "
