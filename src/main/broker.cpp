@@ -11,8 +11,10 @@ The endpoints are defined in the settings file.
 
 Author(s): Paolo Bosetti
 */
+// clang-format off
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #endif
 #include "../exec_path.hpp"
 #include "../keypress.hpp"
@@ -48,6 +50,7 @@ Author(s): Paolo Bosetti
 #elif defined(__APPLE__)
 #include <net/if.h>
 #endif
+// clang-format on
 
 using namespace std::string_view_literals;
 using namespace std;
@@ -164,7 +167,7 @@ bool get_nic_ip(string &ip, const string nic) {
 
 #ifdef __linux__
 #include <algorithm> // std::reverse()
-#include <endian.h>  // __BYTE_ORDER __LITTLE_ENDIAN
+#include <endian.h> // __BYTE_ORDER __LITTLE_ENDIAN
 
 template <typename T> constexpr unsigned long long htonll(T value) noexcept {
 #if __BYTE_ORDER == __LITTLE_ENDIAN
@@ -381,18 +384,29 @@ int main(int argc, char **argv) {
 
     thread proxy_thread(proxy, ref(frontend), ref(backend), ref(controlled));
     cout << style::italic << "CTRL-C to immediate exit" << style::reset << endl;
+#ifdef _WIN32
     cout << fg::green
-         << "Type P to pause, R to resume, I for information, Q to clean quit, "
-            "X to restart and reload settings"
+         << "Type P to pause, R to resume, I for information, Q to clean "
+            "quit"
          << fg::reset << endl;
+#else
+    cout << fg::green
+         << "Type P to pause, R to resume, I for information, Q to clean "
+            "quit, X to restart and reload settings"
+         << fg::reset << endl;
+#endif
 
     while (running) {
       zmqpp::message msg;
       char c = key_press();
       switch (c) {
+#ifndef _WIN32
+      // On Windows, the execv() function detaches from terminal and the
+      // key_press() function does not work anymore
       case 'x':
       case 'X':
         reload = true;
+#endif
       case 'q':
       case 'Q':
         controller.send("TERMINATE");
@@ -438,10 +452,17 @@ int main(int argc, char **argv) {
         break;
       }
       default:
+#ifdef _WIN32
+        cout << fg::green
+             << "Type P to pause, R to resume, I for information, Q to clean "
+                "quit"
+             << fg::reset << endl;
+#else
         cout << fg::green
              << "Type P to pause, R to resume, I for information, Q to clean "
                 "quit, X to restart and reload settings"
              << fg::reset << endl;
+#endif
         break;
       }
     }

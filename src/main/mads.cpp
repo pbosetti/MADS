@@ -13,13 +13,14 @@ Author: Paolo Bosetti, July 2024
 
 #include "../mads.hpp"
 #include "../exec_path.hpp"
+#include <cpr/cpr.h>
 #include <cxxopts.hpp>
 #include <filesystem>
-#include <cpr/cpr.h>
 #include <inja/inja.hpp>
 #include <iostream>
 #include <nlohmann/json.hpp>
 #include <rang.hpp>
+
 #ifdef _WIN32
 #include <process.h>
 #define execv(cmd, argv) _execv(cmd, argv)
@@ -71,17 +72,20 @@ int make_ini(int argc, char **argv) {
   data["mongo_uri"] = "mongodb://localhost:27017";
   Options options("mads ini",
                   "Create INI file template, version " + Mads::version());
-  options.add_options()("o,output", "Output file", value<string>())
+  // clang-format off
+  options.add_options()
+    ("o,output", "Output file", value<string>())
 #ifndef _WIN32
-      ("i,install", "Install INI file to " + etc_dir, value<bool>())
+    ("i,install", "Install INI file to " + etc_dir, value<bool>())
 #endif
-          ("b,broker", "broker hostname or IP",
-           value<string>())("F,frontend", "frontend port", value<int>())(
-              "B,backend", "backend port",
-              value<int>())("s,settings", "settings port", value<int>())(
-              "f,fps", "Frames per second",
-              value<int>())("m,mongo", "MongoDB URI",
-                            value<string>())("h,help", "Print help");
+    ("b,broker", "broker hostname or IP", value<string>())
+    ("F,frontend", "frontend port", value<int>())
+    ("B,backend", "backend port", value<int>())
+    ("s,settings", "settings port", value<int>())
+    ("f,fps", "Frames per second", value<int>())
+    ("m,mongo", "MongoDB URI", value<string>())
+    ("h,help", "Print help");
+  // clang-format on
   ParseResult options_parsed;
   try {
     options_parsed = options.parse(argc, argv);
@@ -125,7 +129,7 @@ int make_ini(int argc, char **argv) {
     env.write("mads.ini", data, output);
     cout << fg::green << "INI file written to " << output << fg::reset << endl;
     return 0;
-  }
+  } 
 #ifndef _WIN32
   if (options_parsed.count("install")) {
     if (!filesystem::exists(etc_dir)) {
@@ -339,8 +343,15 @@ int main(int argc, char **argv) {
 
   if (argc > 1) {
     if (includes(ext_commands, argv[1])) {
+#ifdef _WIN32
+      cerr << "On Windows, please use the command " << style::bold << fg::green
+           << MADS_PREFIX << argv[1] << style::reset << fg::reset << " directly"
+           << endl;
+      return -1;
+#else
       string cmd = exec_dir + "/" + string(MADS_PREFIX) + argv[1];
       execv(cmd.c_str(), argv + 1);
+#endif
     } else if (strncmp(argv[1], "ini", 3) == 0) {
       return make_ini(argc - 1, argv + 1);
     }
@@ -398,15 +409,26 @@ int main(int argc, char **argv) {
     cout << Mads::prefix() << endl;
     return 0;
   }
-  cout << style::bold << "Available commands:" << style::reset << endl;
+#ifdef _WIN32
+#define FIELD_WIDTH 15
+  cout << style::bold << "Available executables:" << style::reset << endl;
   for (auto const &cmd : ext_commands) {
-    cout << setw(10) << cmd << style::italic << " (wraps " << MADS_PREFIX << cmd
-         << ")" << style::reset << endl;
+    cout << setw(FIELD_WIDTH) << string(MADS_PREFIX + cmd) << style::italic
+         << " (external executable)" << style::reset << endl;
   }
-  cout << setw(10) << "ini" << style::italic << " (internal)" << style::reset
-       << endl;
+  cout << style::bold << "Available mads subcommands:" << style::reset << endl;
+#else
+#define FIELD_WIDTH 10
+  cout << style::bold << "Available mads subcommands:" << style::reset << endl;
+  for (auto const &cmd : ext_commands) {
+    cout << setw(FIELD_WIDTH) << cmd << style::italic << " (wraps "
+         << MADS_PREFIX << cmd << ")" << style::reset << endl;
+  }
+#endif
+  cout << setw(FIELD_WIDTH) << "ini" << style::italic << " (internal)"
+       << style::reset << endl;
 #ifdef __linux__
-  cout << setw(10) << "service" << style::italic << " (internal)"
+  cout << setw(FIELD_WIDTH) << "service" << style::italic << " (internal)"
        << style::reset << endl;
 #endif
 
