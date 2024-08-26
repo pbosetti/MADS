@@ -4,8 +4,8 @@
 #include <future>
 #include <iostream>
 #include <string>
-#include <vector>
 #include <thread>
+#include <vector>
 
 #if defined(__linux__)
 #include <limits.h>
@@ -18,6 +18,7 @@
 #include <unistd.h>
 #elif defined(_WIN32)
 #include <windows.h>
+#include <fileapi.h>
 #endif
 
 namespace fs = std::filesystem;
@@ -41,6 +42,10 @@ public:
     _inotify_fd = inotify_init1(IN_NONBLOCK);
     _watch = inotify_add_watch(_inotify_fd, _file_name.c_str(), IN_MODIFY);
 #elif defined(_WIN32)
+    _to =
+        std::chrono::duration_cast<std::chrono::milliseconds>(_timeout).count();
+    _change_handle = FindFirstChangeNotificationA(
+        _file_name.c_str(), FALSE, FILE_NOTIFY_CHANGE_LAST_WRITE);
 #endif
   }
 
@@ -52,6 +57,7 @@ public:
     inotify_rm_watch(_inotify_fd, _watch);
     close(_inotify_fd);
 #elif defined(_WIN32)
+    FindCloseChangeNotification(_change_handle);
 #endif
   }
 
@@ -86,7 +92,8 @@ private:
   struct kevent _change;
   struct kevent _event;
 #elif defined(_WIN32)
-
+  DWORD _to;
+  HANDLE _change_handle;
 #endif
 
   int file_modified() {
@@ -104,16 +111,15 @@ private:
 #elif defined(__APPLE__)
     if (_timeout > 0s) { // non-blocking
       return kevent(_kq, &_change, 1, &_event, 1, &_ts);
-    } else {             // blocking
+    } else { // blocking
       return kevent(_kq, &_change, 1, &_event, 1, NULL);
     }
 #elif defined(_WIN32)
-    // Use FindFirstChangeNotification to monitor file changes on Win32
-    HANDLE hDir = FindFirstChangeNotification(fileName.c_str(), FALSE,
-                                              FILE_NOTIFY_CHANGE_LAST_WRITE);
-    WaitForSingleObject(hDir, INFINITE);
-    FindCloseChangeNotification(hDir);
-    return true;
+    if (WaitForSingleObject(_change_handle, _to > 0 ? _to : INFINITE) == WAIT_OBJECT_0) {
+      return 1;
+    } else {
+      return 0;
+    }
 #endif
   }
 };

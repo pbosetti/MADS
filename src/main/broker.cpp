@@ -11,6 +11,9 @@ The endpoints are defined in the settings file.
 
 Author(s): Paolo Bosetti
 */
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include "../exec_path.hpp"
 #include "../keypress.hpp"
 #include "../mads.hpp"
@@ -32,11 +35,13 @@ Author(s): Paolo Bosetti
 #ifdef _WIN32
 #include <WinSock2.h>
 #include <iphlpapi.h>
+#include <signal.h>
 #else
 #include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <sys/ioctl.h>
 #endif
+
 
 #if defined(__linux__)
 #include <linux/if.h>
@@ -329,6 +334,7 @@ int main(int argc, char **argv) {
   cout << "Settings are provided via " << style::bold << "tcp://" << ip << ":"
        << port << style::reset << endl;
   
+#ifndef _WIN32
   thread watcher_thread;
   // Run as a daemon
   if (options_parsed.count("daemon") != 0) {
@@ -345,6 +351,13 @@ int main(int argc, char **argv) {
     zmqpp::proxy(frontend, backend);
     cerr << "Proxy exited" << endl;
   }
+#else
+  if (options_parsed.count("daemon") != 0) {
+    cout << "Running as daemon with PID " << getpid << endl;
+    zmqpp::proxy(frontend, backend);
+    cerr << "Proxy exited" << endl;
+  }
+#endif
 
   // Run interactively as a steerable proxy
   else {
@@ -353,6 +366,7 @@ int main(int argc, char **argv) {
     zmqpp::socket controller(context, zmqpp::socket_type::req);
     controller.connect("inproc://broker-ctrl");
 
+#ifndef _WIN32
     // to stop this thread on Q, need implementing
     // https://stackoverflow.com/questions/60718561/clean-way-to-stop-terminating-a-thread-waiting-on-stdin-in-c
     watcher_thread = thread([&]() {
@@ -363,6 +377,7 @@ int main(int argc, char **argv) {
         send_char('x');
       });
     });
+#endif
 
     thread proxy_thread(proxy, ref(frontend), ref(backend), ref(controlled));
     cout << style::italic << "CTRL-C to immediate exit" << style::reset << endl;
@@ -435,7 +450,9 @@ int main(int argc, char **argv) {
     running = false;
     proxy_thread.join();
     settings_thread.join();
+#ifndef _WIN32
     watcher_thread.join();
+#endif
     frontend.close();
     backend.close();
     controller.close();
