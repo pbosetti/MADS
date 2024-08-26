@@ -11,11 +11,17 @@ The endpoints are defined in the settings file.
 
 Author(s): Paolo Bosetti
 */
+// clang-format off
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+#include "../exec_path.hpp"
 #include "../keypress.hpp"
 #include "../mads.hpp"
-#include "../exec_path.hpp"
 #include <cstring>
 #include <cxxopts.hpp>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <rang.hpp>
@@ -27,7 +33,7 @@ Author(s): Paolo Bosetti
 #include <zmqpp/proxy.hpp>
 #include <zmqpp/proxy_steerable.hpp>
 #include <zmqpp/zmqpp.hpp>
-#include <filesystem>
+
 #ifdef _WIN32
 #include <WinSock2.h>
 #include <iphlpapi.h>
@@ -42,6 +48,7 @@ Author(s): Paolo Bosetti
 #elif defined(__APPLE__)
 #include <net/if.h>
 #endif
+// clang-format on
 
 using namespace std::string_view_literals;
 using namespace std;
@@ -106,7 +113,7 @@ bool get_nic_ip(string &ip, const string nic) {
     auto result = getifaddrs(&ptr_ifaddrs);
     if (result != 0) {
       cout << fg::red << "`getifaddrs()` failed: " << strerror(errno)
-                << fg::reset << endl;
+           << fg::reset << endl;
       return false;
     }
     cout << fg::yellow << "Available network adapters:" << fg::reset << endl;
@@ -114,7 +121,9 @@ bool get_nic_ip(string &ip, const string nic) {
          ptr_entry = ptr_entry->ifa_next) {
       string ipaddress_human_readable_form;
       string interface_name = string(ptr_entry->ifa_name);
-      if (!ptr_entry->ifa_addr) { continue; }
+      if (!ptr_entry->ifa_addr) {
+        continue;
+      }
       sa_family_t address_family = ptr_entry->ifa_addr->sa_family;
       if (address_family == AF_INET) {
         if (ptr_entry->ifa_addr != nullptr) {
@@ -126,7 +135,7 @@ bool get_nic_ip(string &ip, const string nic) {
         }
 
         cout << "[" << fg::yellow << setw(10) << interface_name << fg::reset
-                  << "] - " << ipaddress_human_readable_form << endl;
+             << "] - " << ipaddress_human_readable_form << endl;
       }
     }
     freeifaddrs(ptr_ifaddrs);
@@ -147,7 +156,7 @@ bool get_nic_ip(string &ip, const string nic) {
 
 #ifdef __linux__
 #include <algorithm> // std::reverse()
-#include <endian.h>  // __BYTE_ORDER __LITTLE_ENDIAN
+#include <endian.h> // __BYTE_ORDER __LITTLE_ENDIAN
 
 template <typename T> constexpr unsigned long long htonll(T value) noexcept {
 #if __BYTE_ORDER == __LITTLE_ENDIAN
@@ -174,12 +183,11 @@ int main(int argc, char **argv) {
                       "BACKEND msg in    ", "BACKEND bytes in  ",
                       "BACKEND msg out   ", "BACKEND bytes out "};
 
-  options.add_options()
-    ("n,nic", "Network interface name (-n list to list them all)", value<string>())
-    ("s,settings", "Settings file path", value<string>())
-    ("d,daemon", "Run as daemon")
-    ("v,version", "Print version")
-    ("h,help", "Print usage");
+  options.add_options()(
+      "n,nic", "Network interface name (-n list to list them all)",
+      value<string>())("s,settings", "Settings file path", value<string>())(
+      "d,daemon", "Run as daemon")("v,version", "Print version")("h,help",
+                                                                 "Print usage");
   auto options_parsed = options.parse(argc, argv);
 
   if (options_parsed.count("help")) {
@@ -284,9 +292,9 @@ int main(int argc, char **argv) {
     settings.close();
   });
 
-  cout << "Timecode FPS: " << style::bold << timecode_fps << style::reset 
+  cout << "Timecode FPS: " << style::bold << timecode_fps << style::reset
        << endl;
-  
+
   // print settings URI for clients
   string port = settings_address.substr(settings_address.find_last_of(":") + 1);
   cout << "Settings are provided via " << style::bold << "tcp://" << ip << ":"
@@ -308,18 +316,29 @@ int main(int argc, char **argv) {
 
     thread proxy_thread(proxy, ref(frontend), ref(backend), ref(controlled));
     cout << style::italic << "CTRL-C to immediate exit" << style::reset << endl;
+#ifdef _WIN32
     cout << fg::green
-         << "Type P to pause, R to resume, I for information, Q to clean quit, "
-            "X to restart and reload settings"
+         << "Type P to pause, R to resume, I for information, Q to clean "
+            "quit"
          << fg::reset << endl;
+#else
+    cout << fg::green
+         << "Type P to pause, R to resume, I for information, Q to clean "
+            "quit, X to restart and reload settings"
+         << fg::reset << endl;
+#endif
 
     while (running) {
       zmqpp::message msg;
       char c = key_press();
       switch (c) {
+#ifndef _WIN32
+      // On Windows, the execv() function detaches from terminal and the
+      // key_press() function does not work anymore
       case 'x':
       case 'X':
         reload = true;
+#endif
       case 'q':
       case 'Q':
         controller.send("TERMINATE");
@@ -365,9 +384,17 @@ int main(int argc, char **argv) {
         break;
       }
       default:
+#ifdef _WIN32
         cout << fg::green
              << "Type P to pause, R to resume, I for information, Q to clean "
-                 "quit, X to restart and reload settings" << fg::reset << endl;
+                "quit"
+             << fg::reset << endl;
+#else
+        cout << fg::green
+             << "Type P to pause, R to resume, I for information, Q to clean "
+                "quit, X to restart and reload settings"
+             << fg::reset << endl;
+#endif
         break;
       }
     }
