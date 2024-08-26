@@ -336,7 +336,7 @@ int main(int argc, char **argv) {
   string port = settings_address.substr(settings_address.find_last_of(":") + 1);
   cout << "Settings are provided via " << style::bold << "tcp://" << ip << ":"
        << port << style::reset << endl;
-  
+
 #ifndef _WIN32
   thread watcher_thread;
   // Run as a daemon
@@ -386,8 +386,7 @@ int main(int argc, char **argv) {
     cout << style::italic << "CTRL-C to immediate exit" << style::reset << endl;
 #ifdef _WIN32
     cout << fg::green
-         << "Type P to pause, R to resume, I for information, Q to clean "
-            "quit"
+         << "Type P to pause, R to resume, I for information, Q to clean quit"
          << fg::reset << endl;
 #else
     cout << fg::green
@@ -467,7 +466,7 @@ int main(int argc, char **argv) {
       }
     }
 
-    cout << fg::green << "Closing sockets..." << endl;
+    cout << fg::green << "Closing sockets..." << fg::reset << endl;
     running = false;
     proxy_thread.join();
     settings_thread.join();
