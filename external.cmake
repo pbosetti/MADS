@@ -5,7 +5,7 @@ ExternalProject_Add(libzmq
   SOURCE_DIR ${EXTERNAL_DIR}/libzmq
   INSTALL_DIR ${USR_DIR}
   GIT_REPOSITORY https://github.com/zeromq/libzmq.git
-  # GIT_TAG ff231d2
+  GIT_TAG 1f4dd54f94009cb57bb68bfc856edc1c0bd3df06
   GIT_SHALLOW TRUE
   CMAKE_ARGS
     -DCMAKE_BUILD_TYPE=Release
@@ -24,7 +24,7 @@ ExternalProject_Add(zmqpp
   SOURCE_DIR ${EXTERNAL_DIR}/zmqpp
   INSTALL_DIR ${USR_DIR}
   GIT_REPOSITORY https://github.com/zeromq/zmqpp.git
-  GIT_TAG ba4230d
+  GIT_TAG ba4230d5d03d29ced9ca788e3bd1095477db08ae
   GIT_SHALLOW TRUE
   CMAKE_ARGS
     -DCMAKE_BUILD_TYPE=Release
@@ -45,7 +45,7 @@ ExternalProject_Add(snappy
   SOURCE_DIR ${EXTERNAL_DIR}/snappy
   INSTALL_DIR ${USR_DIR}
   GIT_REPOSITORY https://github.com/google/snappy.git
-  GIT_TAG HEAD
+  GIT_TAG 32ded457c0b1fe78ceb8397632c416568d6714a0
   GIT_SHALLOW TRUE
   CMAKE_ARGS
     -DCMAKE_BUILD_TYPE=Release

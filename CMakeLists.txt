@@ -186,15 +186,11 @@ if(WIN32)
     bsoncxx bson-static-1.0 
     Ws2_32 bcrypt Secur32 Crypt32 Dnsapi
   )
-  set(ARMA_LIBS 
-    armadillo 
-    ${EXTERNAL_DIR}/armadillo/examples/lib_win64/libopenblas.lib
-  )
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DZMQ_STATIC")
   set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -DZMQ_STATIC")
+  add_compile_options(/MP)
 else()
   set(LIB_LIST pthread zmqpp-static zmq snappy)
-  set(ARMA_LIBS armadillo)
   set(DLOPEN_LIB dl)
 endif()
 
