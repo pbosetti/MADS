@@ -5,7 +5,7 @@ ExternalProject_Add(libzmq
   SOURCE_DIR ${EXTERNAL_DIR}/libzmq
   INSTALL_DIR ${USR_DIR}
   GIT_REPOSITORY https://github.com/zeromq/libzmq.git
-  GIT_TAG 1f4dd54f94009cb57bb68bfc856edc1c0bd3df06
+  GIT_TAG 64db7d28fea695132834f6d2c5949cfea2f22d01
   GIT_SHALLOW TRUE
   CMAKE_ARGS
     -DCMAKE_BUILD_TYPE=Release

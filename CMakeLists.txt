@@ -99,6 +99,8 @@ endif()
 #             |_|                                                 
 
 # Fetched targets
+# FetchContent_Populate is deprecated: allow it
+cmake_policy(SET CMP0169 OLD)
 include(FetchContent)
 FetchContent_Declare(tomlplusplus
     GIT_REPOSITORY https://github.com/pbosetti/tomlplusplus.git
@@ -394,15 +396,15 @@ endif()
 #  |____/ \___/ \___|\__,_|_| |_| |_|\___|_| |_|\__\__,_|\__|_|\___/|_| |_|
                                                                          
 include(FindDoxygen)
+option(MADS_ENABLE_DOXYGEN "Enable doxygen documentation" OFF)
 find_package(Doxygen)
-if(DOXYGEN_FOUND)
+if(DOXYGEN_FOUND AND MADS_ENABLE_DOXYGEN)
   file(GLOB MARKDOWN_FILES "${CMAKE_CURRENT_LIST_DIR}/*.md")
-  option(MADS_ENABLE_DOXYGEN "Enable doxygen documentation" OFF)
   set(DOXYGEN_OUTPUT_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/doc)
   set(DOXYGEN_USE_MDFILE_AS_MAINPAGE ${CMAKE_CURRENT_LIST_DIR}/README.md)
   doxygen_add_docs(Doxygen
     ${SOURCE_DIR} ${MARKDOWN_FILES}
     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/doc
-    CONFIG_FILE Doxyfile
+    CONFIG_FILE ${CMAKE_CURRENT_LIST_DIR}/doc/Doxyfile
   )
 endif()
