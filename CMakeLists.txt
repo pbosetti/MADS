@@ -99,8 +99,6 @@ endif()
 #             |_|                                                 
 
 # Fetched targets
-# FetchContent_Populate is deprecated: allow it
-cmake_policy(SET CMP0169 OLD)
 include(FetchContent)
 FetchContent_Declare(tomlplusplus
     GIT_REPOSITORY https://github.com/pbosetti/tomlplusplus.git
