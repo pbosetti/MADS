@@ -42,13 +42,14 @@ FetchContent_Declare(json
   GIT_SHALLOW    TRUE
 )
 
-FetchContent_Declare(plugin 
+FetchContent_MakeAvailable(pugg json)
+
+FetchContent_Populate(plugin 
   GIT_REPOSITORY https://github.com/pbosetti/mads_plugin.git
   GIT_TAG        HEAD
   GIT_SHALLOW    TRUE
 )
-FetchContent_MakeAvailable(pugg json)
-FetchContent_Populate(plugin)
+
 
 include_directories(${plugin_SOURCE_DIR}/src)
 

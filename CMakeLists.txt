@@ -9,7 +9,7 @@ cmake_minimum_required(VERSION 3.20)
 set(LIB_NAME mads)
 set(CPACK_PACKAGE_VERSION_MAJOR 1)
 set(CPACK_PACKAGE_VERSION_MINOR 2)
-set(CPACK_PACKAGE_VERSION_PATCH 0)
+set(CPACK_PACKAGE_VERSION_PATCH 1)
 set(LIB_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
 project(${LIB_NAME} VERSION ${LIB_VERSION} LANGUAGES CXX)
 set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
@@ -132,12 +132,6 @@ FetchContent_Declare(pugg
   GIT_SHALLOW    TRUE
 )
 
-FetchContent_Declare(plugin 
-  GIT_REPOSITORY https://github.com/pbosetti/mads_plugin.git
-  GIT_TAG        HEAD
-  GIT_SHALLOW    TRUE
-)
-
 set(BUILD_LIBCURL_DOCS OFF)
 set(BUILD_SHARED_LIBS OFF)
 set(BUILD_STATIC_LIBS ON)
@@ -149,15 +143,19 @@ FetchContent_Declare(cpr
 )
 
 FetchContent_MakeAvailable(tomlplusplus nlohmann_json cxxopts rang pugg cpr)
-FetchContent_Populate(plugin)
 
-FetchContent_Declare(inja
+FetchContent_Populate(plugin 
+  GIT_REPOSITORY https://github.com/pbosetti/mads_plugin.git
+  GIT_TAG        HEAD
+  GIT_SHALLOW    TRUE
+)
+
+FetchContent_Populate(inja
   GIT_REPOSITORY https://github.com/pantor/inja.git
   GIT_TAG        v3.4.0
   GIT_SHALLOW    TRUE
 )
 
-FetchContent_Populate(inja)
 
 #   ____        _ _     _            _   _   _                 
 #  | __ ) _   _(_) | __| |  ___  ___| |_| |_(_)_ __   __ _ ___ 
