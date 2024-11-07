@@ -29,7 +29,7 @@ Author: Paolo Bosetti, July 2024
 #endif
 
 #define SYSTEMD_PATH "/etc/systemd/system"
-#define GH_URL "http://api.github.com"
+#define GH_URL "https://api.github.com"
 #define GH_PATH "/repos/pbosetti/MADS/releases/latest"
 
 using namespace std;
