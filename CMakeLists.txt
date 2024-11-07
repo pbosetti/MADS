@@ -154,6 +154,7 @@ FetchContent_Populate(inja
   GIT_SHALLOW    TRUE
 )
 
+find_package(OpenSSL COMPONENTS Crypto SSL REQUIRED)
 
 #   ____        _ _     _            _   _   _                 
 #  | __ ) _   _(_) | __| |  ___  ___| |_| |_(_)_ __   __ _ ___ 
@@ -284,6 +285,8 @@ add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/src/plugin)
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/share/man)
 
 create_exec(plugin SRCS make_plugin.cpp)
+
+create_exec(gettp SRCS gettp.cpp LIBS ${SECURITY_LIBRARY} ${COREFOUNDATION_LIBRARY} OpenSSL::SSL OpenSSL::Crypto)
 
 #   _____      _                        _     
 #  | ____|_  _| |_ ___ _ __ _ __   __ _| |___ 

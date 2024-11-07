@@ -1,4 +1,6 @@
 include(ExternalProject)
+set(semicolon_smuggle "-+-")
+string(REPLACE ";" "${semicolon_smuggle}" CMAKE_OSX_ARCHITECTURES "${CMAKE_OSX_ARCHITECTURES}")
 
 ExternalProject_Add(libzmq
   PREFIX ${EXTERNAL_DIR}
@@ -7,7 +9,9 @@ ExternalProject_Add(libzmq
   GIT_REPOSITORY https://github.com/zeromq/libzmq.git
   GIT_TAG 90b4f410a07222fa2e9a5f53b454a09d4533e45a
   GIT_SHALLOW TRUE
+  LIST_SEPARATOR ${semicolon_smuggle}
   CMAKE_ARGS
+    -DCMAKE_OSX_ARCHITECTURES:STRING=${CMAKE_OSX_ARCHITECTURES}
     -DCMAKE_BUILD_TYPE=Release
     -DBUILD_TESTS=OFF
     -DWITH_DOCS=OFF
@@ -26,7 +30,9 @@ ExternalProject_Add(zmqpp
   GIT_REPOSITORY https://github.com/zeromq/zmqpp.git
   GIT_TAG ba4230d5d03d29ced9ca788e3bd1095477db08ae
   GIT_SHALLOW TRUE
+  LIST_SEPARATOR ${semicolon_smuggle}
   CMAKE_ARGS
+    -DCMAKE_OSX_ARCHITECTURES:STRING=${CMAKE_OSX_ARCHITECTURES}
     -DCMAKE_BUILD_TYPE=Release
     -DIS_TRAVIS_CI_BUILD=OFF
     -DZMQPP_BUILD_CLIENT=OFF
@@ -47,7 +53,9 @@ ExternalProject_Add(snappy
   GIT_REPOSITORY https://github.com/google/snappy.git
   GIT_TAG 32ded457c0b1fe78ceb8397632c416568d6714a0
   GIT_SHALLOW TRUE
+  LIST_SEPARATOR ${semicolon_smuggle}
   CMAKE_ARGS
+    -DCMAKE_OSX_ARCHITECTURES:STRING=${CMAKE_OSX_ARCHITECTURES}
     -DCMAKE_BUILD_TYPE=Release
     -DSNAPPY_BUILD_BENCHMARKS=OFF
     -DSNAPPY_BUILD_TESTS=OFF
@@ -66,7 +74,9 @@ if(${MADS_ENABLE_LOGGER})
     GIT_REPOSITORY https://github.com/mongodb/mongo-cxx-driver.git
     GIT_TAG r3.9.0
     GIT_SHALLOW TRUE
+    LIST_SEPARATOR ${semicolon_smuggle}
     CMAKE_ARGS 
+      -DCMAKE_OSX_ARCHITECTURES:STRING=${CMAKE_OSX_ARCHITECTURES}
       -DCMAKE_BUILD_TYPE=Release
       -DENABLE_SNAPPY=OFF
       -DCMAKE_CXX_STANDARD=17
