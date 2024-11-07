@@ -136,12 +136,18 @@ FetchContent_Populate(plugin
   GIT_REPOSITORY https://github.com/pbosetti/mads_plugin.git
   GIT_TAG        HEAD
   GIT_SHALLOW    TRUE
+  SUBBUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/_deps/plugin-subbuild
+  SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/_deps/plugin-src
+  BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/_deps/plugin-build
 )
 
 FetchContent_Populate(inja
   GIT_REPOSITORY https://github.com/pantor/inja.git
   GIT_TAG        v3.4.0
   GIT_SHALLOW    TRUE
+  SUBBUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/_deps/inja-subbuild
+  SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/_deps/inja-src
+  BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/_deps/inja-build
 )
 
 find_package(OpenSSL COMPONENTS Crypto SSL REQUIRED)
@@ -276,8 +282,6 @@ add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/share/man)
 
 create_exec(plugin SRCS make_plugin.cpp)
 
-create_exec(gettp SRCS gettp.cpp LIBS ${SECURITY_LIBRARY} ${COREFOUNDATION_LIBRARY} OpenSSL::SSL OpenSSL::Crypto)
-
 #   _____      _                        _     
 #  | ____|_  _| |_ ___ _ __ _ __   __ _| |___ 
 #  |  _| \ \/ / __/ _ \ '__| '_ \ / _` | / __|
@@ -355,6 +359,9 @@ if(${MADS_SKIP_EXTERNALS})
   set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_LIST_DIR}/LICENSE")
   if(APPLE)
     set(CPACK_GENERATOR "STGZ")
+    if(CMAKE_OSX_ARCHITECTURES MATCHES ";")
+      set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${LIB_VERSION}-${CMAKE_SYSTEM_NAME}-universal")
+    endif()
   elseif(MSVC)
     set(CPACK_GENERATOR "ZIP;INNOSETUP")
     set(CPACK_PACKAGE_INSTALL_DIRECTORY "MADS")

@@ -113,6 +113,14 @@ cmake --install build
 
 In the configuration step (`cmake -Bbuild ...`) some of the targets can be explicitly disabled, so that if they are known not to compile on the current platform, they will not be built. For example, to disable the `logger` target, run:
 
+On MacOS, it is possible to build Universal binaries with:
+
+```bash
+cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" 
+cmake --build build -j8
+cmake --install build
+```
+
 ```bash
 cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -DMADS_ENABLE_LOGGER=OFF
 ```
