@@ -150,7 +150,6 @@ FetchContent_Populate(inja
   BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/_deps/inja-build
 )
 
-find_package(OpenSSL COMPONENTS Crypto SSL REQUIRED)
 
 #   ____        _ _     _            _   _   _                 
 #  | __ ) _   _(_) | __| |  ___  ___| |_| |_(_)_ __   __ _ ___ 
@@ -196,6 +195,7 @@ if(APPLE)
   find_library(COREFOUNDATION_LIBRARY CoreFoundation)
   set(MONGO_LIBS mongocxx-static bsoncxx-static mongoc-static-1.0 bson-static-1.0 resolv sasl2 ${SECURITY_LIBRARY} ${COREFOUNDATION_LIBRARY} zstd)
 elseif(UNIX AND NOT APPLE)
+  find_package(OpenSSL COMPONENTS Crypto SSL REQUIRED)
   set(MONGO_LIBS mongocxx-static bsoncxx-static mongoc-static-1.0 bson-static-1.0 resolv)
   if(NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
     # Unexpectedly, these three libraries are not needed on RaspbianOS or aarch64
@@ -235,7 +235,11 @@ endif()
 
 # Main command
 add_executable(mads ${MAIN_DIR}/mads.cpp)
-target_link_libraries(mads OpenSSL::SSL OpenSSL::Crypto)
+if(UNIX AND NOT APPLE)
+  target_link_libraries(mads OpenSSL::Crypto OpenSSL::SSL)
+else()
+  target_link_libraries(mads)
+endif()
 list(APPEND TARGET_LIST mads)
 
 create_exec(filter SRCS plugin_loader.cpp LIBS pugg ${DLOPEN_LIB} DEFS "PLUGIN_LOADER_FILTER")

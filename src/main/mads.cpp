@@ -13,8 +13,11 @@ Author: Paolo Bosetti, July 2024
 
 #include "../mads.hpp"
 #include "../exec_path.hpp"
+#if not defined(_WIN32) and not defined(__APPLE__)
 #define CPPHTTPLIB_OPENSSL_SUPPORT
 #include "../httplib.h"
+#define MADS_ENABLE_UPDATE
+#endif
 #include <cxxopts.hpp>
 #include <filesystem>
 #include <inja/inja.hpp>
@@ -237,7 +240,7 @@ int make_service(int argc, char **argv) {
   \___/| .__/ \__,_|\__,_|\__\___| |_|  |_/_/   \_\____/|____/
        |_|
 */
-
+#ifdef MADS_ENABLE_UPDATE
 pair<string, string> split_name(const string &name) {
   size_t first_dash = name.find("-");
   size_t second_dash = name.find("-", first_dash + 1);
@@ -321,6 +324,7 @@ int update() {
     return -1;
   }
 }
+#endif
 
 /*
   __  __       _
@@ -371,7 +375,9 @@ int main(int argc, char **argv) {
     ("i,info", "Print information on MADS installation")
     ("p,prefix", "Print MADS linstall prefix")
     ("v,version", "Print version")
+  #ifdef MADS_ENABLE_UPDATE
     ("u,update", "Check online for MADS updates")
+  #endif
     ("h,help", "Print help");
   ParseResult options_parsed;
   // clang-format on
@@ -404,9 +410,11 @@ int main(int argc, char **argv) {
          << Mads::exec_dir("../etc/mads.ini") << style::reset << endl;
     return 0;
   }
+#ifdef MADS_ENABLE_UPDATE
   if (options_parsed.count("update")) {
     return update();
   }
+#endif
   if (options_parsed.count("prefix")) {
     cout << Mads::prefix() << endl;
     return 0;
