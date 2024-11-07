@@ -13,7 +13,8 @@ Author: Paolo Bosetti, July 2024
 
 #include "../mads.hpp"
 #include "../exec_path.hpp"
-#include <cpr/cpr.h>
+#define CPPHTTPLIB_OPENSSL_SUPPORT
+#include "../httplib.h"
 #include <cxxopts.hpp>
 #include <filesystem>
 #include <inja/inja.hpp>
@@ -281,11 +282,12 @@ bool compare_versions(const string &version1, const string &version2) {
 int update() {
   cout << "Checking MADS updates for version " << style::bold << "v"
        << Mads::version() << style::reset << "..." << endl;
-  cpr::Response res = cpr::Get(cpr::Url{GH_URL GH_PATH});
-  if (res.status_code == 200) {
+  httplib::Client cli(GH_URL);
+  auto res = cli.Get( GH_PATH);
+  if (res->status == 200) {
     json response;
     try {
-      response = json::parse(res.text);
+      response = json::parse(res->body);
     } catch (json::parse_error &e) {
       cerr << fg::red << "Cannot parse JSON response from " GH_URL GH_PATH
            << fg::reset << endl;

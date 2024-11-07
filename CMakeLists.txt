@@ -130,17 +130,7 @@ FetchContent_Declare(pugg
   GIT_SHALLOW    TRUE
 )
 
-set(BUILD_LIBCURL_DOCS OFF)
-set(BUILD_SHARED_LIBS OFF)
-set(BUILD_STATIC_LIBS ON)
-set(BUILD_STATIC_CURL ON)
-FetchContent_Declare(cpr
-  GIT_REPOSITORY https://github.com/libcpr/cpr.git
-  GIT_TAG        HEAD
-  GIT_SHALLOW    TRUE
-)
-
-FetchContent_MakeAvailable(tomlplusplus nlohmann_json cxxopts rang pugg cpr)
+FetchContent_MakeAvailable(tomlplusplus nlohmann_json cxxopts rang pugg)
 
 FetchContent_Populate(plugin 
   GIT_REPOSITORY https://github.com/pbosetti/mads_plugin.git
@@ -239,7 +229,7 @@ endif()
 
 # Main command
 add_executable(mads ${MAIN_DIR}/mads.cpp)
-target_link_libraries(mads cpr::cpr)
+target_link_libraries(mads OpenSSL::SSL OpenSSL::Crypto)
 list(APPEND TARGET_LIST mads)
 
 create_exec(filter SRCS plugin_loader.cpp LIBS pugg ${DLOPEN_LIB} DEFS "PLUGIN_LOADER_FILTER")
