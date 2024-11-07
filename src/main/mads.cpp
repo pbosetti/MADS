@@ -13,6 +13,7 @@ Author: Paolo Bosetti, July 2024
 
 #include "../mads.hpp"
 #include "../exec_path.hpp"
+#define CPPHTTPLIB_OPENSSL_SUPPORT
 #include "../httplib.h"
 #include <cxxopts.hpp>
 #include <filesystem>
