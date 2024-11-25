@@ -11,7 +11,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "")
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
 endif()
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-  set_property(CACHE CMAKE_INSTALL_PREFIX PROPERTY VALUE "{{install_dir}}")
+  set(CMAKE_INSTALL_PREFIX "{{install_dir}}" CACHE PATH "Install path prefix, prepended onto install directories." FORCE)
 endif()
 message(STATUS "CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}")
 message(STATUS "CMAKE_INSTALL_PREFIX: ${CMAKE_INSTALL_PREFIX}") 
@@ -48,8 +48,10 @@ FetchContent_Populate(plugin
   GIT_REPOSITORY https://github.com/pbosetti/mads_plugin.git
   GIT_TAG        HEAD
   GIT_SHALLOW    TRUE
+  SUBBUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/_deps/plugin-subbuild
+  SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/_deps/plugin-src
+  BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/_deps/plugin-build
 )
-
 
 include_directories(${plugin_SOURCE_DIR}/src)
 
@@ -96,9 +98,6 @@ add_plugin({{name}})
 
 
 # INSTALL ######################################################################
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-  set_property(CACHE CMAKE_INSTALL_PREFIX PROPERTY VALUE ${USR_DIR})
-endif()
 if(APPLE)
   install(TARGETS ${TARGET_LIST}
     LIBRARY DESTINATION lib
