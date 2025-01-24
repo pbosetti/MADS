@@ -78,7 +78,7 @@ int make_ini(int argc, char **argv) {
                   "Create INI file template, version " + Mads::version());
   // clang-format off
   options.add_options()
-    ("o,output", "Output file", value<string>())
+    ("o,output", "Output file on a given path", value<string>())
 #ifndef _WIN32
     ("i,install", "Install INI file to " + etc_dir, value<bool>())
 #endif
@@ -129,8 +129,29 @@ int make_ini(int argc, char **argv) {
     data["mongo_uri"] = options_parsed["mongo"].as<string>();
   }
   if (output != "") {
-    Environment env{template_dir + "/", "./"};
-    env.write("mads.ini", data, output);
+    filesystem::path out_path{output};
+    if (out_path.is_relative()) {
+      out_path = filesystem::absolute(out_path);
+    }
+    auto path = out_path.parent_path();
+    auto file = out_path.filename();
+    auto tmp = filesystem::temp_directory_path();
+    if (!filesystem::exists(path)) {
+      cerr << fg::red << "Path " << path << " does not exist" << fg::reset
+           << endl;
+      return -1;
+    }
+    Environment env{template_dir + "/", tmp.string() + "/"};
+    env.write("mads.ini", data, file.string());
+    try {
+      filesystem::copy(tmp / file, path / file);
+      filesystem::remove(tmp / file);
+    } catch (const filesystem::filesystem_error &e) {
+      filesystem::remove(tmp / file);
+      cerr << fg::red << "Cannot write or overwrite " << path / file
+           << fg::reset << endl;
+      return -1;
+    }
     cout << fg::green << "INI file written to " << output << fg::reset << endl;
     return 0;
   } 
@@ -145,8 +166,19 @@ int make_ini(int argc, char **argv) {
         return -1;
       }
     }
-    Environment env{template_dir + "/", etc_dir + "/"};
+    auto etc = filesystem::absolute(etc_dir);
+    auto tmp = filesystem::temp_directory_path();
+    Environment env{template_dir + "/", tmp.string() + "/"};
     env.write("mads.ini", data, "mads.ini");
+    try {
+      filesystem::copy(tmp / "mads.ini", etc / "mads.ini");
+      filesystem::remove(tmp / "mads.ini");
+    } catch (const filesystem::filesystem_error &e) {
+      filesystem::remove(tmp / "mads.ini");
+      cerr << fg::red << "Cannot write or overwrite " << etc / "mads.ini"
+           << fg::reset << endl;
+      return -1;
+    }
     cout << fg::green << "INI file installed to " << etc_dir << "/mads.ini"
          << fg::reset << endl;
     return 0;
