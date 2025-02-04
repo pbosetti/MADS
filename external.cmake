@@ -72,7 +72,7 @@ if(${MADS_ENABLE_LOGGER})
     SOURCE_DIR ${EXTERNAL_DIR}/mongocxx
     INSTALL_DIR ${USR_DIR}
     GIT_REPOSITORY https://github.com/mongodb/mongo-cxx-driver.git
-    GIT_TAG r3.9.0
+    GIT_TAG r4.0.0
     GIT_SHALLOW TRUE
     LIST_SEPARATOR ${semicolon_smuggle}
     CMAKE_ARGS 

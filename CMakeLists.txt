@@ -174,10 +174,12 @@ link_directories(${USR_DIR}/lib)
 
 if(WIN32)
   file(GLOB LIB_ZMQ "${USR_DIR}/lib/libzmq*.lib")
+  file(GLOB LIB_MONGOCXX "${USR_DIR}/lib/mongocxx-v_noabi*.lib")
+  file(GLOB LIB_BSONCXX "${USR_DIR}/lib/bsoncxx-v_noabi*.lib")
   set(LIB_LIST zmqpp-static ${LIB_ZMQ} snappy Ws2_32 Iphlpapi)
   set(MONGO_LIBS 
-    mongocxx mongoc-static-1.0 
-    bsoncxx bson-static-1.0 
+    ${LIB_MONGOCXX} mongoc-static-1.0 
+    ${LIB_BSONCXX} bson-static-1.0 
     Ws2_32 bcrypt Secur32 Crypt32 Dnsapi
   )
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DZMQ_STATIC")

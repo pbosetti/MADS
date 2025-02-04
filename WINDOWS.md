@@ -26,6 +26,8 @@ Prerequisites:
 - Visual Studio Professional 2022
 - cmake for Windows
 - git for Windows
+- Python3 for Windows
+- `pip install packaging` (needed by the build script for mongocxx)
 
 Proceed as follows:
 
