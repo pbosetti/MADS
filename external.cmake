@@ -51,7 +51,7 @@ ExternalProject_Add(snappy
   SOURCE_DIR ${EXTERNAL_DIR}/snappy
   INSTALL_DIR ${USR_DIR}
   GIT_REPOSITORY https://github.com/google/snappy.git
-  GIT_TAG 32ded457c0b1fe78ceb8397632c416568d6714a0
+  GIT_TAG 1.2.2
   GIT_SHALLOW TRUE
   LIST_SEPARATOR ${semicolon_smuggle}
   CMAKE_ARGS

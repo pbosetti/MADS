@@ -41,6 +41,7 @@ using namespace inja;
 using json = nlohmann::json;
 using namespace cxxopts;
 using namespace rang;
+namespace fs = std::filesystem;
 
 /*
   _   _ _   _ _
@@ -406,11 +407,20 @@ int main(int argc, char **argv) {
   options.add_options()
     ("i,info", "Print information on MADS installation")
     ("p,prefix", "Print MADS linstall prefix")
+    ("plugins", "List plugins in default plugins directory")
     ("v,version", "Print version")
   #ifdef MADS_ENABLE_UPDATE
     ("u,update", "Check online for MADS updates")
   #endif
     ("h,help", "Print help");
+  
+  string plugins_dir = 
+  #ifdef _WIN32
+    Mads::exec_dir("../bin/");
+  #else
+    Mads::exec_dir("../lib/");
+  #endif
+
   ParseResult options_parsed;
   // clang-format on
   try {
@@ -449,6 +459,22 @@ int main(int argc, char **argv) {
 #endif
   if (options_parsed.count("prefix")) {
     cout << Mads::prefix() << endl;
+    return 0;
+  }
+  if (options_parsed.count("plugins")) {
+    cout << "Plugins directory: " << style::bold
+         << plugins_dir << style::reset << endl;
+    cout << "Available plugins:" << endl;
+    if (!fs::exists(plugins_dir)) {
+      cout << "No plugins found" << endl;
+      return 0;
+    }
+    for (auto const &cmd : fs::directory_iterator(plugins_dir)) {
+      if (cmd.path().extension() != ".plugin") {
+        continue;
+      }
+      cout << "  " << cmd.path().filename().string() << endl;
+    }
     return 0;
   }
 #ifdef _WIN32

@@ -87,9 +87,12 @@ int main(int argc, char *argv[]) {
     plugin_file = options_parsed["plugin"].as<string>();
   }
   if (!fs::exists(plugin_file)) {
+    cerr << "Searching for installed plugin in the default location ";
 #ifdef _WIN32
+    cerr << Mads::exec_dir("../bin/") << endl;
     plugin_file = Mads::exec_dir("../bin/" + plugin_file);
 #else
+    cerr << Mads::exec_dir("../lib/") << endl;
     plugin_file = Mads::exec_dir("../lib/" + plugin_file);
 #endif
   }
@@ -101,6 +104,12 @@ int main(int argc, char *argv[]) {
   }
   if (options_parsed.count("delay") != 0) {
     delay = options_parsed["delay"].as<size_t>();
+  }
+
+  if (!fs::exists(plugin_file)) {
+    cerr << fg::red << "Error: plugin file " << plugin_file
+         << " does not exist (extension .plugin is required!)" << fg::reset << endl;
+    exit(1);
   }
 
   // Loading plugin
