@@ -112,7 +112,10 @@
 			"products/include/**"
 		],
 		"C_Cpp.default.defines": [
-			"HAVE_GPIOD=1"
+			"HAVE_GPIOD=1",
+			"PLUGIN_LOADER_FILTER=1",
+			"PLUGIN_LOADER_SOURCE=1",
+			"PLUGIN_LOADER_SINK=1"
 		]
 	}
 }
