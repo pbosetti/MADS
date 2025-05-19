@@ -12,6 +12,8 @@ Author(s): Paolo Bosetti
 #include "../mads.hpp"
 #include "../agent.hpp"
 #include <cxxopts.hpp>
+#include <cppy3/cppy3.hpp>
+#include <cppy3/utilits.hpp>
 
 using namespace std;
 using namespace cxxopts;

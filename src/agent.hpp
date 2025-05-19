@@ -510,7 +510,7 @@ public:
     if (!_init_done)
       throw AgentError("Agent not initialized");
     nlohmann::json settings = get_settings();
-    thread t([=, this]() {
+    thread t([info, event, settings, this]() {
       nlohmann::json payload;
       if (event == event_type::startup)
         this_thread::sleep_for(chrono::milliseconds(STARTUP_SHUTDOWN_DELAY));

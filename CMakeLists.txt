@@ -9,7 +9,7 @@ cmake_minimum_required(VERSION 3.20)
 set(LIB_NAME mads)
 set(CPACK_PACKAGE_VERSION_MAJOR 1)
 set(CPACK_PACKAGE_VERSION_MINOR 2)
-set(CPACK_PACKAGE_VERSION_PATCH 4)
+set(CPACK_PACKAGE_VERSION_PATCH 5)
 set(LIB_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
 project(${LIB_NAME} VERSION ${LIB_VERSION} LANGUAGES CXX)
 set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
@@ -324,11 +324,25 @@ install(TARGETS ${TARGET_LIST}
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
   ARCHIVE DESTINATION lib
+  INCLUDES DESTINATION include
   COMPONENT MADS
 )
-# install(FILES ${CMAKE_CURRENT_LIST_DIR}/mads.ini
-#   TYPE SYSCONF
-# )
+install(FILES 
+  ${SOURCE_DIR}/mads.hpp
+  ${SOURCE_DIR}/agent.hpp
+  ${SOURCE_DIR}/exec_path.hpp
+  TYPE INCLUDE
+)
+install(FILES
+  ${USR_DIR}/lib/libbson-static-1.0.a
+  ${USR_DIR}/lib/libbsoncxx-static.a
+  ${USR_DIR}/lib/libmongoc-static-1.0.a
+  ${USR_DIR}/lib/libmongocxx-static.a
+  ${USR_DIR}/lib/libzmqpp-static.a
+  ${USR_DIR}/lib/libzmq.a
+  ${USR_DIR}/lib/libsnappy.a
+  TYPE LIB
+)
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/templates
   DESTINATION share
   COMPONENT MADS
