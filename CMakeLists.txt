@@ -331,6 +331,14 @@ install(FILES
   ${SOURCE_DIR}/mads.hpp
   ${SOURCE_DIR}/agent.hpp
   ${SOURCE_DIR}/exec_path.hpp
+  ${USR_DIR}/include/snappy.h
+  ${USR_DIR}/include/snappy-stubs-public.h
+  ${USR_DIR}/include/zmq.h
+  ${USR_DIR}/include/zmq_utils.h
+  ${USR_DIR}/include/zmqpp_export.h
+  TYPE INCLUDE
+)
+install(DIRECTORY ${USR_DIR}/include/zmqpp
   TYPE INCLUDE
 )
 install(FILES
