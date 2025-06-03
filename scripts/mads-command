@@ -2,7 +2,7 @@
 # restart all agents
 
 SCRIPT_DIR=$(dirname "$0")
-COMMAND="bridge"
+COMMAND="mads-bridge"
 USAGE="Usage: $0 <stop|restart>"
 
 

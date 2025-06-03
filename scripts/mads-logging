@@ -2,7 +2,7 @@
 # enable/disable logging
 
 SCRIPT_DIR=$(dirname "$0")
-COMMAND="bridge"
+COMMAND="mads-bridge"
 USAGE="Usage: $0 <on|off> [mads bin dir]"
 
 # Check number of arguments
