@@ -219,12 +219,16 @@ int main(int argc, char **argv) {
                       "FRONTEND msg out  ", "FRONTEND bytes out",
                       "BACKEND msg in    ", "BACKEND bytes in  ",
                       "BACKEND msg out   ", "BACKEND bytes out "};
-
-  options.add_options()(
-      "n,nic", "Network interface name (-n list to list them all)",
-      value<string>())("s,settings", "Settings file path", value<string>())(
-      "d,daemon", "Run as daemon")("v,version", "Print version")("h,help",
-                                                                 "Print usage");
+  // clang-format off
+  options.add_options()
+    ("n,nic", "Network interface name (-n list to list'em all)",
+      value<string>())
+    ("s,settings", "Settings file path", value<string>())
+    ("d,daemon", "Run as daemon")
+    ("docker", "Run as in container (don't check for file changes)")
+    ("v,version", "Print version")
+    ("h,help", "Print usage");
+  // clang-format on
   auto options_parsed = options.parse(argc, argv);
 
   if (options_parsed.count("help")) {
