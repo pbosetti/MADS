@@ -342,6 +342,13 @@ int main(int argc, char **argv) {
        << port << style::reset << endl;
 
 #ifndef _WIN32
+  if (options_parsed.count("docker") != 0) {
+    cout << fg::yellow
+         << "Running in container mode, remember to restart if mads.ini changes"
+         << fg::reset << endl;
+    zmqpp::proxy(frontend, backend);
+    exit(EXIT_SUCCESS);
+  }
   thread watcher_thread;
   // Run as a daemon
   if (options_parsed.count("daemon") != 0) {
