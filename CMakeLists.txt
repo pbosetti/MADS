@@ -342,16 +342,24 @@ install(FILES
 install(DIRECTORY ${USR_DIR}/include/zmqpp
   TYPE INCLUDE
 )
-install(FILES
-  ${USR_DIR}/lib/libbson-static-1.0.a
-  ${USR_DIR}/lib/libbsoncxx-static.a
-  ${USR_DIR}/lib/libmongoc-static-1.0.a
-  ${USR_DIR}/lib/libmongocxx-static.a
-  ${USR_DIR}/lib/libzmqpp-static.a
-  ${USR_DIR}/lib/libzmq.a
-  ${USR_DIR}/lib/libsnappy.a
-  TYPE LIB
-)
+if(MSVC)
+  file(GLOB MSVC_LIBS "${USR_DIR}/lib/*.lib")
+  install(FILES
+    ${MSVC_LIBS}
+    TYPE LIB
+  )
+else()
+  install(FILES
+    ${USR_DIR}/lib/libbson-static-1.0.a
+    ${USR_DIR}/lib/libbsoncxx-static.a
+    ${USR_DIR}/lib/libmongoc-static-1.0.a
+    ${USR_DIR}/lib/libmongocxx-static.a
+    ${USR_DIR}/lib/libzmqpp-static.a
+    ${USR_DIR}/lib/libzmq.a
+    ${USR_DIR}/lib/libsnappy.a
+    TYPE LIB
+  )
+endif()
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/templates
   DESTINATION share
   COMPONENT MADS
