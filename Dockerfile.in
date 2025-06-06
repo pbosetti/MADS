@@ -23,8 +23,8 @@ COPY mads.ini ${BUILDDIR}
 COPY share ${BUILDDIR}/share
 COPY scripts ${BUILDDIR}/scripts
 
-ENV CC /usr/bin/clang
-ENV CXX /usr/bin/clang++
+ENV CC=/usr/bin/clang
+ENV CXX=/usr/bin/clang++
 
 RUN cd ${BUILDDIR} && \
     cmake -Bbuild -DMADS_ENABLE_METADATA=OFF -DMADS_ENABLE_LOGGER=ON -DCMAKE_BUILD_TYPE=Release && \
@@ -38,4 +38,4 @@ EXPOSE 9090 9091 9092
 LABEL version=@LIB_VERSION@
 
 ENTRYPOINT ["/usr/local/bin/mads"]
-CMD ["broker"
+CMD ["broker"]
