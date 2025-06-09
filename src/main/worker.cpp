@@ -36,12 +36,14 @@ int main(int argc, char *argv[]) {
 
   // CLI options
   Options options(argv[0]);
+  // clang-format off
   options.add_options()
-    ("plugin", "Plugin to load", value<string>())
+    ("plugin", "Plugin to load (must be a filter!)", value<string>())
     ("n,name", "Agent name (default to plugin name)", value<string>())
     ("i,agent_id", "Agent ID to be added to JSON frames", value<string>());
   options.parse_positional({"plugin"});
-  options.positional_help("plugin");
+  options.positional_help("<Plugin to load (must be a filter!)>");
+  // clang-format on
   SETUP_OPTIONS(options, Agent);
 
 if (options_parsed.count("plugin") == 0) {

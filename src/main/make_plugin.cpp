@@ -67,6 +67,12 @@ int main(int argc, char **argv) {
   string dir = "plugins/";
   auto exec_path = Mads::exec_path();
   auto template_dir = Mads::exec_dir("../share/templates/");
+  auto plugins_dir = 
+  #ifdef _WIN32
+    Mads::exec_dir("../bin/");
+  #else
+    Mads::exec_dir("../lib/");
+  #endif
   bool overwrite = false;
   string cli{argv[0]}; // Name of the executable, used
   for (int i = 1; i < argc; i++) {
@@ -77,15 +83,17 @@ int main(int argc, char **argv) {
   Options options(argv[0]);
 
   options.add_options()
+  // clang-format off
     ("n,name", "Name of the plugin", value<string>())
     ("t,type", "Type of the plugin", value<string>())
     ("d,dir", "Directory of the plugin", value<string>())
-    ("i,install-dir", "Directory where to install the plugin", value<string>())
+    ("i,install-dir", "Directory where to install the plugin (def. " + plugins_dir + ")", value<string>())
     ("o,overwrite", "Overwrite existing files")
     ("v,version", "Print version")
     ("h,help", "Print usage");
   options.parse_positional({"name"});
-  options.positional_help("name");
+  options.positional_help("<name of the plugin>");
+  // clang-format on
 
   auto options_parsed = options.parse(argc, argv);
 
@@ -131,7 +139,7 @@ int main(int argc, char **argv) {
   if (options_parsed.count("install-dir") > 0) {
     data["install_dir"] = options_parsed["install-dir"].as<string>();
   } else {
-    data["install_dir"] = "/usr/local";
+    data["install_dir"] = plugins_dir;
   }
 
   if (options_parsed.count("overwrite") > 0) {

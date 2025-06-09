@@ -32,7 +32,7 @@ int main(int argc, char *argv[]) {
     ("collection", "Collection name", value<string>())
     ("d", "Database URI (default localhost)", value<string>());
   options.parse_positional({"collection"});
-  options.positional_help("collection");
+  options.positional_help("<collection>");
   auto options_parsed = options.parse(argc, argv);
 
   if (options_parsed.count("d")) {

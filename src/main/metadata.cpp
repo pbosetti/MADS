@@ -26,9 +26,11 @@ int main(int argc, char *argv[]) {
 
   // CLI options
   Options options(argv[0]);
+  // clang-format off
   options.add_options()
     ("p", "Sampling period (default 100 ms)", value<size_t>())
     ("c,continuous", "Continuous sampling", value<bool>());
+  // clang-format on
   SETUP_OPTIONS(options, Mads::Metadata);
 
   // Settings

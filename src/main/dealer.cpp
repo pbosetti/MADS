@@ -16,20 +16,20 @@ using namespace cxxopts;
 
 int main(int argc, char *argv[]) {
   string settings_uri = SETTINGS_URI;
-  string agent_name;
+  string agent_name = argv[0];
   size_t count = 0, count_err = 0;
 
   Options options(argv[0]);
+  // clang-format off
   options.add_options()
-    ("n,name", "Agent name (default to plugin name)", value<string>())
+    ("n,name", "Agent name (default to" + agent_name + ")", value<string>())
     ("i,agent-id", "Agent ID to be added to JSON frames", value<string>());
+  // clang-format on
   SETUP_OPTIONS(options, Dealer);
 
   if (options_parsed.count("name") != 0) {
     agent_name = options_parsed["name"].as<string>();
-  } else {
-    agent_name = argv[0];
-  }
+  } 
 
   Dealer dealer(agent_name, settings_uri);
   dealer.init();

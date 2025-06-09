@@ -445,7 +445,7 @@ int main(int argc, char **argv) {
     cout << "Mads binary directory: " << style::bold << exec_dir << style::reset
          << endl;
     cout << "Mads plugins directory: " << style::bold
-         << Mads::exec_dir("../lib") << style::reset << endl;
+         << plugins_dir<< style::reset << endl;
     cout << "Mads template directory: " << style::bold << template_dir
          << style::reset << endl;
     cout << "Mads INI file: " << style::bold
