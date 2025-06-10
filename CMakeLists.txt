@@ -339,7 +339,10 @@ install(FILES
   ${USR_DIR}/include/zmqpp_export.h
   TYPE INCLUDE
 )
-install(DIRECTORY ${USR_DIR}/include/zmqpp
+install(DIRECTORY 
+  ${tomlplusplus_SOURCE_DIR}/include/toml++
+  ${nlohmann_json_SOURCE_DIR}/include/nlohmann
+  ${USR_DIR}/include/zmqpp
   TYPE INCLUDE
 )
 if(MSVC)

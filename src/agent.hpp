@@ -281,7 +281,7 @@ public:
   }
 
   // Destructor
-  ~Agent() {
+  virtual ~Agent() {
     disconnect();
     _publisher.close();
     _subscriber.close();
@@ -413,11 +413,15 @@ public:
   void connect(chrono::milliseconds delay = chrono::milliseconds(0)) {
     if (!_init_done)
       throw AgentError("Agent not initialized");
-    if (!_pub_topic.empty())
+    if (_connected) return;
+    if (!_pub_topic.empty()) {
       connect_pub(delay);
-    if (!_sub_topic.empty())
+      _connected = true;
+    }
+    if (!_sub_topic.empty()) {
       connect_sub();
-    _connected = true;
+      _connected = true;
+    }
   }
 
 
