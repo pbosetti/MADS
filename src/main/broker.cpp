@@ -44,6 +44,8 @@ Author(s): Paolo Bosetti
 #include <sys/ioctl.h>
 #endif
 
+#define VLIB_VERSION "v" LIB_VERSION
+
 
 #if defined(__linux__)
 #include <linux/if.h>
@@ -311,22 +313,51 @@ int main(int argc, char **argv) {
     std::ifstream t(settings_path);
     std::stringstream buffer;
     buffer << t.rdbuf();
-    string content(buffer.str());
+    string ini_table = buffer.str();
     while (running) {
+      zmqpp::message content;
+      content << VLIB_VERSION;
       if (settings.receive(msg)) {
-        string cmd = msg.get(0);
+        string agent_version = msg.get(0);
+        string cmd = msg.get(1);
+        string agent_name = "unknown";
+        if (msg.parts() == 3) {
+          agent_name = msg.get(2);
+        } 
         if (cmd == "settings") {
-          if (msg.parts() == 2) {
-            cout << "Sending settings to agent " << msg.get(1) << endl;
-          } else {
-            cout << "Sending settings to unknown agent" << endl;
+          if (msg.parts() < 2 || agent_version != VLIB_VERSION) {
+            cerr << fg::red << "Received settings request from agent with wrong version: "
+                 << agent_version << fg::reset << endl;
+            settings.send(content);
+            continue;
+          }
+          cout << "Sending settings to agent " << agent_name << endl;
+          content << ini_table;
+          string attachment_path = config[agent_name]["attachment"].value_or("");
+          if (!attachment_path.empty()) {
+            if (filesystem::path(attachment_path).is_relative()) {
+              attachment_path = Mads::exec_dir(attachment_path);
+            }
+            if (!filesystem::exists(attachment_path)) {
+              cerr << fg::red << "attachment path does not exist: "
+                   << attachment_path << fg::reset << endl;
+            } else {
+              ifstream attachment_file(attachment_path, ios::in | ios::binary);
+              stringstream attachment_content;
+              cout << fg::yellow << "  Attaching binary object: "
+                   << style::bold << attachment_path
+                   << " (" << filesystem::file_size(attachment_path) << " bytes)"
+                   << fg::reset << endl;
+              attachment_content << attachment_file.rdbuf();
+              content << attachment_content.str();
+            }
           }
           settings.send(content);
         } else if (cmd == "timecode") {
           chrono::system_clock::time_point now = chrono::system_clock::now();
           settings.send(to_string(Mads::timecode(now, timecode_fps)));
         } else {
-          settings.send("{\"error\": \"Unknown command\"}");
+          settings.send(content);
         }
       }
     }

@@ -110,19 +110,20 @@ public:
    * @param uri The URI of the broker.
    * @param name The name of the agent.
    * @param timeout The timeout in milliseconds (default 2000).
-   * @return The settings as a string.
+   * @return a tuple with the settings and possibly the path of the attachemnt.
    * @throws AgentError if timed out in reading settings from broker.
    */
-  static string read_settings(string uri, string name, int timeout = 2000) {
+  static tuple<string, filesystem::path> read_settings(string uri, string name, int timeout = 2000) {
     zmqpp::context context;
     zmqpp::socket socket(context, zmqpp::socket_type::req);
-    message msg;
+    message msg_out, msg_in;
+    tuple<string, filesystem::path> result;
     if (timeout > 0)
       socket.set(zmqpp::socket_option::receive_timeout, timeout);
     socket.connect(uri);
-    msg << "settings" << name;
-    socket.send(msg);
-    if (!socket.receive(msg)) {
+    msg_out << string("v") + LIB_VERSION << "settings" << name;
+    socket.send(msg_out);
+    if (!socket.receive(msg_in)) {
       socket.disconnect(uri);
       socket.close();
       throw AgentError("Timed out in receiving settings from broker");
@@ -130,7 +131,38 @@ public:
     socket.disconnect(uri);
     socket.close();
     context.terminate();
-    return msg.get(0);
+    if (msg_in.parts() < 2) {
+      throw AgentError("Broker refuses to provide settings, check for version mismatch or "
+                       "missing settings for agent '" + name + "'");
+    }
+    if (msg_in.get(0) != string("v") + LIB_VERSION) {
+      throw AgentError("Received settings from broker with wrong version: " +
+        msg_in.get(0));
+    }
+    if (msg_in.parts() == 3) {
+      cout << fg::yellow << "Received attachment of size " 
+           << msg_in.get(2).size() << " bytes from broker for agent '" 
+           << name << "'" << fg::reset << endl;
+      auto tmp_mads_dir = filesystem::temp_directory_path() / "mads";
+      if (!filesystem::exists(tmp_mads_dir)) {
+        if (!filesystem::create_directory(tmp_mads_dir)) {
+          throw AgentError("Failed to create temporary directory for attachments");
+        }
+      }
+      // Save the attachment to a temporary file
+      auto tmp_file = tmp_mads_dir / (name + ".plugin");
+      ofstream ofs(tmp_file, ios::out | ios::binary);
+      if (!ofs) {
+        throw AgentError("Failed to open temporary file for writing attachment from broker");
+      }
+      ofs.write(msg_in.get(2).data(), msg_in.get(2).size());
+      ofs.close();
+      cout << fg::yellow << "Attachment saved to: " << tmp_file.string() << fg::reset << endl;
+      result = make_tuple(msg_in.get(1), tmp_file);
+    } else {
+      result = make_tuple(msg_in.get(1), filesystem::path());
+    }
+    return result;
   }
 
   static double get_broker_timecode(string uri, int timeout = 2000) {
@@ -140,7 +172,7 @@ public:
     if (timeout > 0)
       socket.set(zmqpp::socket_option::receive_timeout, timeout);
     socket.connect(uri);
-    msg << "timecode";
+    msg << string("v") + LIB_VERSION << "timecode";
     socket.send(msg);
     if (!socket.receive(msg)) {
       socket.disconnect(uri);
@@ -233,13 +265,14 @@ public:
       _config = (toml::table)toml::parse_file(_settings_uri);
     } else {
       double broker_tc;
-      _raw_settings = read_settings(_settings_uri, _name, _settings_timeout);
+      auto received = read_settings(_settings_uri, _name, _settings_timeout);
+      _raw_settings = get<0>(received);
+      _attachment_path = get<1>(received);
       chrono::system_clock::time_point now = chrono::system_clock::now();
       broker_tc = get_broker_timecode(_settings_uri, _settings_timeout);
       _timecode_offset = broker_tc - timecode(now, timecode_fps);
       _config = (toml::table)toml::parse(_raw_settings);
     }
-
     // member variables
     auto all_cfg = _config["agents"];
     timecode_fps = all_cfg["timecode_fps"].value_or(MADS_FPS);
@@ -862,6 +895,19 @@ public:
   bool restart() { return _restart; }
 
 
+  /**
+   * @brief Returns the path to the attachment file.
+   *
+   * This is the file that was sent by the broker when reading settings from
+   * URI. It is used to load additional plugins or resources.
+   *
+   * @return The path to the attachment file.
+   */
+  filesystem::path attachment_path() {
+    return _attachment_path;
+  }
+
+
   double timecode_fps = MADS_FPS;
 
   /*
@@ -946,6 +992,7 @@ protected:
   bool _restart = false;
   chrono::milliseconds _time_step = chrono::milliseconds(0);
   double _timecode_offset = 0.0;
+  filesystem::path _attachment_path;
 public:
   bool dummy = false;
 };

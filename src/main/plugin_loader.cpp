@@ -56,7 +56,7 @@ using PluginDriver = SinkDriver<json>;
 
 int main(int argc, char *argv[]) {
   string settings_uri = SETTINGS_URI;
-  string plugin_name, plugin_file, agent_name;
+  string plugin_name, plugin_file = PLUGIN_DEFAULT, agent_name;
   size_t count = 0, count_err = 0;
   size_t delay = 0;
   chrono::milliseconds time{0};
@@ -78,74 +78,32 @@ int main(int argc, char *argv[]) {
   // clang-format on
   SETUP_OPTIONS(options, Agent);
 
-  if (options_parsed.count("plugin") == 0) {
-    if (string("none") == PLUGIN_DEFAULT) {
-      cerr << options.help() << endl << "No plugin specified" << endl;
-      options.show_positional_help();
-      exit(1);
-    }
-    plugin_file = PLUGIN_DEFAULT;
-  } else {
+  if (options_parsed.count("plugin") != 0) {
     plugin_file = options_parsed["plugin"].as<string>();
-  }
-  if (!fs::exists(plugin_file)) {
-    cerr << "Searching for installed plugin in the default location ";
-#ifdef _WIN32
-    cerr << Mads::exec_dir("../bin/") << endl;
-    plugin_file = Mads::exec_dir("../bin/" + plugin_file);
-#else
-    cerr << Mads::exec_dir("../lib/") << endl;
-    plugin_file = Mads::exec_dir("../lib/" + plugin_file);
-#endif
-  }
-  plugin_name = fs::path(plugin_file).stem().string();
+    agent_name = fs::path(plugin_file).stem().string();
+  } 
   if (options_parsed.count("name") != 0) {
     agent_name = options_parsed["name"].as<string>();
-  } else {
-    agent_name = plugin_name;
   }
   if (options_parsed.count("delay") != 0) {
     delay = options_parsed["delay"].as<size_t>();
   }
 
-  if (!fs::exists(plugin_file)) {
-    cerr << fg::red << "Error: plugin file " << plugin_file
-         << " does not exist (extension .plugin is required!)" << fg::reset << endl;
-    exit(1);
-  }
-
-  // Loading plugin
-  pugg::Kernel kernel;
-  kernel.add_server<PLUGIN_CLASS<>>();
-  kernel.load_plugin(plugin_file);
-  PluginDriver *plugin_driver =
-      kernel.get_driver<PluginDriver>(Plugin::server_name(), plugin_name);
-  if (plugin_driver == nullptr) {
-    cerr << fg::red << "Error: cannot find plugin driver " << plugin_name
-         << " in plugin at " << plugin_file << fg::reset << endl;
-    auto drivers = kernel.get_all_drivers<PluginDriver>(Plugin::server_name());
-    cerr << "Available drivers:" << endl;
-    for (auto &d : drivers) {
-      cerr << "- " << d->name() << endl;
-    }
-    exit(1);
-  }
-  // Create the class from the plugin:
-  Plugin *plugin = plugin_driver->create();
-
   // Core stuff
   Agent agent(agent_name, settings_uri);
   try {
     agent.init();
+  } catch (const AgentError &e) {
+    cerr << fg::red << "Error initializing agent: " << e.what() << fg::reset
+         << endl;
+    exit(EXIT_FAILURE);
   } catch (const std::exception &e) {
-    cerr << fg::red << "Error initializing agent: " << e.what()
+    cerr << fg::red << "Runtime error initializing agent: " << e.what()
          << fg::reset << endl;
     exit(EXIT_FAILURE);
   }
   agent.enable_remote_control();
   agent.connect();
-  cerr << "  Plugin:           " << style::bold << plugin_file << " (loaded as "
-       << agent_name << ")" << style::reset << endl;
 
   // Copy agent settings as plugin parameters
   json settings = agent.get_settings();
@@ -171,6 +129,51 @@ int main(int argc, char *argv[]) {
          << " (default)" << endl;
   }
 #endif
+
+  if (options_parsed.count("plugin") != 0) {
+    plugin_file = options_parsed["plugin"].as<string>();
+    if (!fs::exists(plugin_file)) {
+      cerr << "Searching for installed plugin in the default location ";
+  #ifdef _WIN32
+      cerr << Mads::exec_dir("../bin/") << endl;
+      plugin_file = Mads::exec_dir("../bin/" + plugin_file);
+  #else
+      cerr << Mads::exec_dir("../lib/") << endl;
+      plugin_file = Mads::exec_dir("../lib/" + plugin_file);
+  #endif
+    }
+    if (!fs::exists(plugin_file)) {
+      cerr << fg::red << "Error: cannot find plugin file " << plugin_file
+           << " (extension .plugin is required!)" << fg::reset << endl;
+      exit(1);
+    }
+  } else {
+    plugin_file = agent.attachment_path();
+  }
+  plugin_name = fs::path(plugin_file).stem().string();
+
+  // Loading plugin
+  pugg::Kernel kernel;
+  kernel.add_server<PLUGIN_CLASS<>>();
+  kernel.load_plugin(plugin_file);
+  PluginDriver *plugin_driver =
+      kernel.get_driver<PluginDriver>(Plugin::server_name(), plugin_name);
+  if (plugin_driver == nullptr) {
+    cerr << fg::red << "Error: cannot find plugin driver " << plugin_name
+         << " in plugin at " << plugin_file << fg::reset << endl;
+    auto drivers = kernel.get_all_drivers<PluginDriver>(Plugin::server_name());
+    cerr << "Available drivers:" << endl;
+    for (auto &d : drivers) {
+      cerr << "- " << d->name() << endl;
+    }
+    exit(1);
+  }
+  // Create the class from the plugin:
+  Plugin *plugin = plugin_driver->create();
+
+
+  cerr << "  Plugin:           " << style::bold << plugin_file << " (loaded as "
+       << agent_name << ")" << style::reset << endl;
 
   plugin->set_params((void *)&settings);
   for (auto &[k, v] : plugin->info()) {
