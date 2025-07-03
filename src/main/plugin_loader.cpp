@@ -147,7 +147,7 @@ int main(int argc, char *argv[]) {
            << " (extension .plugin is required!)" << fg::reset << endl;
       exit(1);
     }
-  } else {
+  } else if (!agent.attachment_path().empty()) {
     plugin_file = agent.attachment_path();
   }
   plugin_name = fs::path(plugin_file).stem().string();
