@@ -23,16 +23,19 @@ Author(s): Paolo Bosetti
   #define PLUGIN_CLASS Source
   #define PLUGIN_NAME "Source"
   #define PLUGIN_DEFAULT "publish.plugin"
-#elif defined(PLUGIN_LOADER_FILTER)
+  #define AGENT_NAME_DEFAULT "publish"
+  #elif defined(PLUGIN_LOADER_FILTER)
   #include <filter.hpp>
   #define PLUGIN_CLASS Filter
   #define PLUGIN_NAME "Filter"
   #define PLUGIN_DEFAULT "bridge.plugin"
-#elif defined(PLUGIN_LOADER_SINK)
+  #define AGENT_NAME_DEFAULT "bridge"
+  #elif defined(PLUGIN_LOADER_SINK)
   #include <sink.hpp>
   #define PLUGIN_CLASS Sink
   #define PLUGIN_NAME "Sink"
   #define PLUGIN_DEFAULT "feedback.plugin"
+  #define AGENT_NAME_DEFAULT "feedback"
 #else
   #error "No plugin type defined"
 #endif
@@ -56,7 +59,7 @@ using PluginDriver = SinkDriver<json>;
 
 int main(int argc, char *argv[]) {
   string settings_uri = SETTINGS_URI;
-  string plugin_name, plugin_file = PLUGIN_DEFAULT, agent_name;
+  string plugin_name, plugin_file = PLUGIN_DEFAULT, agent_name = AGENT_NAME_DEFAULT;
   size_t count = 0, count_err = 0;
   size_t delay = 0;
   chrono::milliseconds time{0};
