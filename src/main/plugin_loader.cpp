@@ -151,7 +151,7 @@ int main(int argc, char *argv[]) {
       exit(1);
     }
   } else if (!agent.attachment_path().empty()) {
-    plugin_file = agent.attachment_path();
+    plugin_file = agent.attachment_path().string();
   }
   plugin_name = fs::path(plugin_file).stem().string();
 
