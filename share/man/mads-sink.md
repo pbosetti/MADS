@@ -24,6 +24,29 @@
 *plugin*
 :  The plugin to be loaded. The plugin is a shared library (with the **.plugin** extension) that implements the sink agent. You must provide either a full path to the plugin or the plugin name (without extension) if the plugin is in the standard plugin directory (/usr/local/lib/).
 
+## OTA Plugins
+
+Plugins can also be loaded **Over-The-Air** (OTA): the broker has a local copy of the plugins and provides each agent with the necessary plugin upon launch, as an attachment to the INI file. In this way, deployment of new versions of the plugins can be easily centralized.
+
+For this to work, the INI section of a given agent must have the `attachment` key, set to the local path (in the broker filesystem) of the plugin needed by that agent.
+
+When the agent starts on a remote device, it requests the broker for an copy of the INI file. If the INI section specifies the `attachment`, then the broker also sends a compiled copy of the plugin, which is saved by the agent to a temporary directory and then dynamically loaded.
+
+Pligin loading follows this logic:
+
+1. the command line provides a plugin: that plugin is used (regardless the INI file);
+2. there is no plugin on command line but the INI file has an `attachment`: the latter is used;
+3. no plugin is given on command line and no attachment in the INI file: the default plugin is used.
+
+In case of multiple devices using the same plugin but **on different architectures**:
+
+* the broker needs to have a copy of the same plugin compiled for each architecture;
+* the INI file needs one section for each architecture, e.g. `[my_plugin_x86]` and `[my_plugin_arm64]`;
+* each section has a different `attachment`, pointing to the path of the properly compiled plugins;
+* each agent is launched with custom name: e.g. `mads source -n my_plugin_x86` on X86 linux, `mads source -n my_plugin_arm64` on ARM64 linux;
+* the INI section for each agent specified the same `pub_topic`, so that all plugins publish on the same topic (remember that the default publish topic is the agent name!).
+
+
 # OPTIONS
 
 **\-n**, **\-\-name**
