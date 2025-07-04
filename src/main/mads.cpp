@@ -207,7 +207,7 @@ int make_service(int argc, char **argv) {
   string command_line = Mads::exec_dir() + "/";
   string args = "";
   if (argc < 3) {
-    cerr << fg::red << "No enough arguments provided" << fg::reset
+    cerr << fg::red << "No enough arguments provided" << fg::reset << endl
          << "Usage: mads service <service name> <launch command>" << endl
          << "e.g.:  mads service mads-feedback feedback -s "
             "tcp://broker.local:9092"
