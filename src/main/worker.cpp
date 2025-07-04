@@ -19,6 +19,7 @@ Author(s): Paolo Bosetti
 #include <filter.hpp>
 #define PLUGIN_NAME "Filter"
 #define PLUGIN_DEFAULT "bridge.plugin"
+#define AGENT_NAME_DEFAULT "bridge"
 
 using namespace std;
 using namespace cxxopts;
@@ -31,7 +32,7 @@ using FilterDriverJ = FilterDriver<json, json>;
 
 int main(int argc, char *argv[]) {
   string settings_uri = SETTINGS_URI;
-  string plugin_name, plugin_file, agent_name;
+  string plugin_name, plugin_file = PLUGIN_DEFAULT, agent_name = AGENT_NAME_DEFAULT;
   size_t count = 0, count_err = 0;
 
   // CLI options
@@ -40,22 +41,15 @@ int main(int argc, char *argv[]) {
   options.add_options()
     ("plugin", "Plugin to load (must be a filter!)", value<string>())
     ("n,name", "Agent name (default to plugin name)", value<string>())
-    ("i,agent_id", "Agent ID to be added to JSON frames", value<string>());
+    ("i,agent-id", "Agent ID to be added to JSON frames", value<string>());
   options.parse_positional({"plugin"});
   options.positional_help("<Plugin to load (must be a filter!)>");
   // clang-format on
   SETUP_OPTIONS(options, Agent);
-
-if (options_parsed.count("plugin") == 0) {
-    if (string("none") == PLUGIN_DEFAULT) {
-      cerr << options.help() << endl << "No plugin specified" << endl;
-      options.show_positional_help();
-      exit(1);
-    }
-    plugin_file = PLUGIN_DEFAULT;
-  } else {
+  if (options_parsed.count("plugin") != 0) {
     plugin_file = options_parsed["plugin"].as<string>();
-  }
+    agent_name = fs::path(plugin_file).stem().string();
+  } 
   if (!fs::exists(plugin_file)) {
     plugin_file = Mads::exec_dir("../lib/" + plugin_file);
   }
@@ -65,6 +59,51 @@ if (options_parsed.count("plugin") == 0) {
   } else {
     agent_name = plugin_name;
   }
+  
+  // Core stuff
+  Worker agent(agent_name, settings_uri);
+  try {
+    agent.init();
+  } catch (const std::exception &e) {
+    std::cout << fg::red << "Error initializing agent: " << e.what()
+              << fg::reset << endl;
+    exit(EXIT_FAILURE);
+  }
+  agent.enable_remote_control();
+  agent.connect();
+ 
+
+  // Copy agent settings as plugin parameters
+  json settings = agent.get_settings();
+  if (options_parsed.count("agent-id")) {
+    settings["agent_id"] = options_parsed["agent-id"].as<string>();
+    agent.set_agent_id(options_parsed["agent-id"].as<string>());
+  }
+
+  if (options_parsed.count("plugin") != 0) {
+    plugin_file = options_parsed["plugin"].as<string>();
+    if (!fs::exists(plugin_file)) {
+      cerr << "Searching for installed plugin in the default location ";
+  #ifdef _WIN32
+      cerr << Mads::exec_dir("../bin/") << endl;
+      plugin_file = Mads::exec_dir("../bin/" + plugin_file);
+  #else
+      cerr << Mads::exec_dir("../lib/") << endl;
+      plugin_file = Mads::exec_dir("../lib/" + plugin_file);
+  #endif
+    }
+    if (!fs::exists(plugin_file)) {
+      cerr << fg::red << "Error: cannot find plugin file " << plugin_file
+           << " (extension .plugin is required!)" << fg::reset << endl;
+      exit(1);
+    }
+  } else if (!agent.attachment_path().empty()) {
+    plugin_file = agent.attachment_path().string();
+  }
+  plugin_name = fs::path(plugin_file).stem().string();
+
+  agent.info(cerr);
+
 
   // Loading plugin
   pugg::Kernel kernel;
@@ -82,35 +121,17 @@ if (options_parsed.count("plugin") == 0) {
     }
     exit(1);
   }
+  
   // Create the class from the plugin:
   FilterJ *filter = filter_driver->create();
-
-  // Core stuff
-  Worker agent(agent_name, settings_uri);
-  try {
-    agent.init();
-  } catch (const std::exception &e) {
-    std::cout << fg::red << "Error initializing agent: " << e.what()
-              << fg::reset << endl;
-    exit(EXIT_FAILURE);
-  }
-  agent.enable_remote_control();
-  agent.connect();
-  cout << "  Plugin:           " << style::bold << plugin_file << " (loaded as "
-       << agent_name << ")" << style::reset << endl;
-
-  // Copy agent settings as plugin parameters
-  json settings = agent.get_settings();
-  if (options_parsed.count("agent_id")) {
-    settings["agent_id"] = options_parsed["agent_id"].as<string>();
-    agent.set_agent_id(options_parsed["agent_id"].as<string>());
-  }
-  agent.info(cerr);
   filter->set_params((void *)&settings);
   for (auto &[k, v] : filter->info()) {
     cout << "  " << left << setw(18) << k << style::bold << v << style::reset 
          << endl;
   }
+
+  cout << "  Plugin:           " << style::bold << plugin_file << " (loaded as "
+       << agent_name << ")" << style::reset << endl;
 
   // Main loop
   agent.register_event(event_type::startup);
