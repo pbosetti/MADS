@@ -17,7 +17,7 @@ Author(s): Paolo Bosetti
 #include <filesystem>
 #include <pugg/Kernel.h>
 #include <filter.hpp>
-#define PLUGIN_NAME "Filter"
+#define PLUGIN_NAME "worker"
 #define PLUGIN_DEFAULT "bridge.plugin"
 #define AGENT_NAME_DEFAULT "bridge"
 
@@ -169,8 +169,9 @@ int main(int argc, char *argv[]) {
   kernel.clear_drivers();
 
   if (agent.restart()) {
-    cout << "Restarting..." << endl;
-    execvp(argv[0], argv);
+    auto cmd = string(MADS_PREFIX) + argv[0];
+    cout << "Restarting " << cmd << "..." << endl;
+    execvp(cmd.c_str(), argv);
   }
   return 0;
 }

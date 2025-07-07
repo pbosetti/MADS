@@ -60,8 +60,9 @@ int main(int argc, char *argv[]) {
   image.register_event(event_type::shutdown);
   image.disconnect();
   if (image.restart()) {
-    cout << "Restarting..." << endl;
-    execvp(argv[0], argv);
+    auto cmd = string(MADS_PREFIX) + argv[0];
+    cout << "Restarting " << cmd << "..." << endl;
+    execvp(cmd.c_str(), argv);
   }
   return 0;
 }

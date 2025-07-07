@@ -70,7 +70,7 @@ int main(int argc, char *argv[]) {
   if (options_parsed.count("cross") != 0) {
     logger.set_cross(true);
   }
-  // logger.enable_remote_control();
+  logger.enable_remote_control();
   logger.connect();
   logger.register_event(Mads::event_type::startup);
   logger.info();
@@ -138,5 +138,10 @@ int main(int argc, char *argv[]) {
   logger.register_event(Mads::event_type::shutdown);
   logger.disconnect(); // Not necessary, called by destructor
   logger.close_db();      // Not necessary, called by destructor
+  if (logger.restart()) {
+    auto cmd = string(MADS_PREFIX) + argv[0];
+    cout << "Restarting " << cmd << "..." << endl;
+    execvp(cmd.c_str(), argv);
+  }
   return 0;
 }

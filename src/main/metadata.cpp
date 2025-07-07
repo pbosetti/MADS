@@ -68,8 +68,9 @@ int main(int argc, char *argv[]) {
   metadata.register_event(event_type::shutdown);
   metadata.disconnect();
   if (metadata.restart()) {
-    cout << "Restarting..." << endl;
-    execvp(argv[0], argv);
+    auto cmd = string(MADS_PREFIX) + argv[0];
+    cout << "Restarting " << cmd << "..." << endl;
+    execvp(cmd.c_str(), argv);
   }
   return 0;
 }
