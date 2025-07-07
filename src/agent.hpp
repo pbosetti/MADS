@@ -307,6 +307,9 @@ public:
     // rename attachment if not a plugin
     if (!_attachment_path.empty()) {
       string ext = cfg["attachment_ext"].value_or("plugin");
+      if (ext.starts_with('.')) {
+        ext = ext.substr(1); // remove leading dot
+      }
       auto saved_attach = _attachment_path;
       _attachment_path.replace_extension(ext);
       filesystem::rename(saved_attach, _attachment_path);
