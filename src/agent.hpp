@@ -140,9 +140,6 @@ public:
         msg_in.get(0));
     }
     if (msg_in.parts() == 3) {
-      cout << fg::yellow << "Received attachment of size " 
-           << msg_in.get(2).size() << " bytes from broker for agent '" 
-           << name << "'" << fg::reset << endl;
       auto tmp_mads_dir = filesystem::temp_directory_path() / "mads";
       if (!filesystem::exists(tmp_mads_dir)) {
         if (!filesystem::create_directory(tmp_mads_dir)) {
@@ -157,7 +154,6 @@ public:
       }
       ofs.write(msg_in.get(2).data(), msg_in.get(2).size());
       ofs.close();
-      cout << fg::yellow << "Attachment saved to: " << tmp_file.string() << fg::reset << endl;
       result = make_tuple(msg_in.get(1), tmp_file);
     } else {
       result = make_tuple(msg_in.get(1), filesystem::path());
@@ -308,6 +304,14 @@ public:
     }
     _time_step = chrono::milliseconds(cfg["time_step"].value_or(0));
 
+    // rename attachment if not a plugin
+    if (!_attachment_path.empty()) {
+      string ext = cfg["attachment_ext"].value_or("plugin");
+      auto saved_attach = _attachment_path;
+      _attachment_path.replace_extension(ext);
+      filesystem::rename(saved_attach, _attachment_path);
+    }
+
     load_settings();
 
     _init_done = true;
@@ -419,6 +423,10 @@ public:
         << endl;
     out << "  Timecode offset:  " << style::bold << _timecode_offset
         << " s" << style::reset << endl;
+    if (!_attachment_path.empty()) {
+      out << "  Attachment:       " << style::bold
+          << _attachment_path.string() << style::reset << endl;
+    }
   }
 #endif
 
