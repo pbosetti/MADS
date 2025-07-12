@@ -72,9 +72,13 @@ int main(int argc, char *argv[]) {
     ("n,name", "Agent name (default to plugin name)", value<string>())
     ("i,agent-id", "Agent ID to be added to JSON frames", value<string>())
     ("d,delay", "Initial delay before forst message in ms (default 0)", value<size_t>());
-  #if defined(PLUGIN_LOADER_SOURCE)
+  #if defined(PLUGIN_LOADER_SOURCE) or defined(PLUGIN_LOADER_FILTER)
   options.add_options()
     ("p,period", "Sampling period (default 100 ms)", value<size_t>());
+  #endif
+  #if defined(PLUGIN_LOADER_FILTER)
+  options.add_options()
+    ("b,dont-block", "don't block on read");
   #endif
   options.parse_positional({"plugin"});
   options.positional_help("<name.plugin>");
@@ -117,7 +121,7 @@ int main(int argc, char *argv[]) {
   settings["prefix"] = Mads::prefix();
   bool silent = settings.value("silent", false);
   agent.info(cerr);
-#if defined(PLUGIN_LOADER_SOURCE)
+#if defined(PLUGIN_LOADER_SOURCE) or defined(PLUGIN_LOADER_FILTER)
   cerr << "  Sampling period:  " << style::bold;
   if (options_parsed.count("p") != 0) {
     time = chrono::milliseconds(options_parsed["p"].as<size_t>());
@@ -231,30 +235,36 @@ int main(int argc, char *argv[]) {
   }, time);
   
 #elif defined(PLUGIN_LOADER_FILTER)
+  bool dont_block = false;
+  if (options_parsed.count("dont-block") != 0) {
+    cerr << "  Running in non-blocking mode" << endl;
+    dont_block = true;
+  } 
   agent.loop([&]() {
     message_type type;
     try {
-      type = agent.receive();
+      type = agent.receive(dont_block);
     } catch (const AgentError &e) {
       cerr << fg::red << "Error receiving message: " << e.what() << fg::reset
            << endl;
     }
     auto msg = agent.last_message();
     agent.remote_control();
-    if (type == message_type::json && agent.last_topic() != "control") {
+    if (agent.last_topic() != "control") {
       json in = json::parse(get<1>(msg));
       json out;
       return_type rt;
-      rt = plugin->load_data(in, agent.last_topic());
-      if (rt != return_type::success) {
-        out = {{"error", plugin->error()}};
-        count_err++;
-      } else {
-        rt = plugin->process(out);
+      if (type == message_type::json) {
+        rt = plugin->load_data(in, agent.last_topic());
         if (rt != return_type::success) {
           out = {{"error", plugin->error()}};
           count_err++;
         }
+      }
+      rt = plugin->process(out);
+      if (rt != return_type::success) {
+        out = {{"error", plugin->error()}};
+        count_err++;
       }
       agent.publish(out);
       if (!silent) {
@@ -264,7 +274,7 @@ int main(int argc, char *argv[]) {
         cerr.flush();
       }
     }
-  });
+  }, time);
 #elif defined(PLUGIN_LOADER_SINK)
   agent.loop([&]() {
     message_type type;

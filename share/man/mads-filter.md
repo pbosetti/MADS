@@ -58,6 +58,12 @@ In case of multiple devices using the same plugin but **on different architectur
 **\-d**, **\-\-delay** *delay in ms*
 :  if larger than 0, waits that amount of ms before sending the first message. This is useful to deal with ZeroMQ slow joiner problem, i.e. when the agent starts sending PUB messages before fully establishing the connection, with the result that those messages are lost. The delay is applied only at the beginning of the agent's life; the agent already waits a small amount of time to take care about this problem, but this option allows to increase it in case of excessive network latency.
 
+**\-p**, **\-\-period** *period in ms*
+:  The sampling period, i.e. the time between two consecutive messages sent by the agent when the **dont-block** option is set. The default is 100 ms. If the **dont-block** option is not set, this option is ignored and the agent will block until a message is received.
+
+**\-b**, **\-\-dont-block**
+:  If set, the agent will block until a message is received, then pass it to the plugin for processing. If not set, it will not block and ask the plugin for the next output. Typically, this is used wnen a plugin can act both as a filter and as a source, i.e. it can produce messages on its own, depending on circumstances. If the **period** option is set, the agent will block for that amount of time before asking the plugin for the next output (as a source plugin would do).
+
 **\-s**, **\-\-settings** *URI*
 :  Path to the settings file (ini format). It can be a valid ZeroMQ url in the form tcp://host:port.
 

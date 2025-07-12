@@ -36,6 +36,7 @@ Author(s): Paolo Bosetti
 
 #define LIB_NAME "@APP_NAME@"
 #define LIB_VERSION "@PROJECT_VERSION@"
+#define LIB_VERSION_CHECK "@PROJECT_VERSION_CHECK@"
 #define MADS_PREFIX "@PREFIX@"
 
 #define LOGGER_STATUS_TOPIC "logger_status"

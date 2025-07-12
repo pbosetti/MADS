@@ -135,7 +135,12 @@ public:
       throw AgentError("Broker refuses to provide settings, check for version mismatch or "
                        "missing settings for agent '" + name + "'");
     }
-    if (msg_in.get(0) != string("v") + LIB_VERSION) {
+    string version_str = msg_in.get(0);
+    size_t last_dot = version_str.find_last_of('.');
+    if (last_dot != string::npos) {
+      version_str = version_str.substr(0, last_dot);
+    }
+    if (version_str != string("v") + LIB_VERSION_CHECK) {
       throw AgentError("Received settings from broker with wrong version: " +
         msg_in.get(0));
     }
@@ -674,13 +679,15 @@ public:
    * two parts.
    * @throws AgentError if not initialized
    */
-  message_type receive() {
+  message_type receive(bool dont_block = false) {
     if (!_init_done)
       throw AgentError("Agent not initialized");
     message message;
     message_type result = message_type::none;
     string topic, format, payload, *j;
-    if (!_subscriber.receive(message)) {
+    _enable_sleep = false;
+    if (!_subscriber.receive(message, dont_block)) {
+      _enable_sleep = true;
       return result;
     }
     switch (message.parts()) {
@@ -744,7 +751,7 @@ public:
       Mads::running = false;
     });
     while (running) {
-      if (duration > chrono::milliseconds(0)) {
+      if (_enable_sleep && duration > chrono::milliseconds(0)) {
         thread t([&]() { this_thread::sleep_for(duration); });
         lambda();
         t.join();
@@ -999,6 +1006,7 @@ protected:
   int _receive_timeout = 200;
   int _settings_timeout = 2000;
   bool _init_done = false;
+  bool _enable_sleep = false;
   thread *control_thread = nullptr;
   bool _restart = false;
   chrono::milliseconds _time_step = chrono::milliseconds(0);

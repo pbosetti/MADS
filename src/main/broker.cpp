@@ -44,7 +44,8 @@ Author(s): Paolo Bosetti
 #include <sys/ioctl.h>
 #endif
 
-#define VLIB_VERSION "v" LIB_VERSION
+#define VLIB_VERSION_CHECK "v" LIB_VERSION_CHECK  
+#define VLIB_VERSION "v" LIB_VERSION  
 
 
 #if defined(__linux__)
@@ -319,13 +320,17 @@ int main(int argc, char **argv) {
       content << VLIB_VERSION;
       if (settings.receive(msg)) {
         string agent_version = msg.get(0);
+        size_t last_dot = agent_version.find_last_of('.');
+        if (last_dot != string::npos) {
+          agent_version = agent_version.substr(0, last_dot);
+        }
         string cmd = msg.get(1);
         string agent_name = "unknown";
         if (msg.parts() == 3) {
           agent_name = msg.get(2);
         } 
         if (cmd == "settings") {
-          if (msg.parts() < 2 || agent_version != VLIB_VERSION) {
+          if (msg.parts() < 2 || agent_version != VLIB_VERSION_CHECK) {
             cerr << fg::red << "Received settings request from agent with wrong version: "
                  << agent_version << fg::reset << endl;
             settings.send(content);
