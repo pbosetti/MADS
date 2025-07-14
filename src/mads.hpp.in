@@ -35,8 +35,8 @@ Author(s): Paolo Bosetti
 */
 
 #define LIB_NAME "@APP_NAME@"
-#define LIB_VERSION "@PROJECT_VERSION@"
-#define LIB_VERSION_CHECK "@PROJECT_VERSION_CHECK@"
+#define LIB_VERSION "v@LIB_VERSION@"
+#define LIB_VERSION_CHECK "v@LIB_VERSION_CHECK@"
 #define MADS_PREFIX "@PREFIX@"
 
 #define LOGGER_STATUS_TOPIC "logger_status"
@@ -146,6 +146,25 @@ namespace Mads {
  *
  */
 static std::string version() { return LIB_VERSION; }
+
+
+/**
+ * @brief Checks if the given version matches the library version.
+ *
+ * @param version The version string to check.
+ * @return true if the version matches, false otherwise.
+ * @throws std::runtime_error if the version string is invalid.
+ */
+static bool check_version(const std::string &version) {
+  size_t last_dot = version.find_last_of('.');
+  std::string version_cmp;
+  if (last_dot != std::string::npos) {
+    version_cmp = version.substr(0, last_dot);
+    return version_cmp == LIB_VERSION_CHECK;
+  } else {
+    throw std::runtime_error("Invalid version string: " + version);
+  }
+}
 
 /**
  * @brief Global flag for stopping the main loop in Mads agents.

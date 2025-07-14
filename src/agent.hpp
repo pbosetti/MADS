@@ -121,7 +121,7 @@ public:
     if (timeout > 0)
       socket.set(zmqpp::socket_option::receive_timeout, timeout);
     socket.connect(uri);
-    msg_out << string("v") + LIB_VERSION << "settings" << name;
+    msg_out << LIB_VERSION << "settings" << name;
     socket.send(msg_out);
     if (!socket.receive(msg_in)) {
       socket.disconnect(uri);
@@ -132,17 +132,15 @@ public:
     socket.close();
     context.terminate();
     if (msg_in.parts() < 2) {
-      throw AgentError("Broker refuses to provide settings, check for version mismatch or "
-                       "missing settings for agent '" + name + "'");
+      throw AgentError(
+          "Broker refuses to provide settings, check for version mismatch or "
+          "missing settings for agent '" +
+          name + "'");
     }
     string version_str = msg_in.get(0);
-    size_t last_dot = version_str.find_last_of('.');
-    if (last_dot != string::npos) {
-      version_str = version_str.substr(0, last_dot);
-    }
-    if (version_str != string("v") + LIB_VERSION_CHECK) {
+    if (!Mads::check_version(version_str)) {
       throw AgentError("Received settings from broker with wrong version: " +
-        msg_in.get(0));
+        version_str);
     }
     if (msg_in.parts() == 3) {
       auto tmp_mads_dir = filesystem::temp_directory_path() / "mads";
@@ -685,9 +683,7 @@ public:
     message message;
     message_type result = message_type::none;
     string topic, format, payload, *j;
-    _enable_sleep = false;
     if (!_subscriber.receive(message, dont_block)) {
-      _enable_sleep = true;
       return result;
     }
     switch (message.parts()) {
@@ -751,7 +747,7 @@ public:
       Mads::running = false;
     });
     while (running) {
-      if (_enable_sleep && duration > chrono::milliseconds(0)) {
+      if (duration > chrono::milliseconds(0)) {
         thread t([&]() { this_thread::sleep_for(duration); });
         lambda();
         t.join();
@@ -904,6 +900,25 @@ public:
     _settings_timeout = to;
   }
 
+  /**
+   * @brief Returns the value of timeout in receiving messages.
+   *
+   * @return the timeout in ms (default to 2000).
+   */
+  int receive_timeout() { return _receive_timeout; }
+
+  /**
+   * @brief Sets the value of timeout in receiving messages. Set to 0 for no
+   * timeout.
+   *
+   * @param to the timeout in ms.
+   * @throws AgentError if already initialized
+   */
+  void set_receive_timeout(int to) {
+    _receive_timeout = to;
+    _subscriber.set(zmqpp::socket_option::receive_timeout, _receive_timeout);
+  }
+
 
   /**
    * @brief Returns wheter a restart has been requested.
@@ -1003,10 +1018,9 @@ protected:
   bool _compress = false;
   bool _cross = false;
   bool _connected = false;
-  int _receive_timeout = 200;
+  int _receive_timeout = 500;
   int _settings_timeout = 2000;
   bool _init_done = false;
-  bool _enable_sleep = false;
   thread *control_thread = nullptr;
   bool _restart = false;
   chrono::milliseconds _time_step = chrono::milliseconds(0);
