@@ -153,7 +153,11 @@ int main(int argc, char **argv) {
   data["parent"] = ucfirst(data["type"]);
   data["driver_name"] = uppercase(data["type"]);
   data["source_file"] = string(data["name"]) + ".cpp";
-  data["mads_version"] = Mads::version();
+  if (Mads::version().rfind('v', 0) == 0) {
+    data["mads_version"] = Mads::version().substr(1); // remove leading 'v'
+  } else {
+    data["mads_version"] = Mads::version();
+  }
   data["cli"] = cli;
   data["today"] = Mads::get_ISODate_time(chrono::system_clock::now());
   data["cwd"] = filesystem::current_path().string();
