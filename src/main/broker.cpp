@@ -241,6 +241,10 @@ int main(int argc, char **argv) {
     cout << LIB_VERSION << endl;
     return 0;
   }
+  if (options_parsed.count("nic") && options_parsed["nic"].as<string>() == "list") {
+    get_nic_ip(ip, "list");
+    return 0;
+  }
 
   if (options_parsed.count("settings") != 0) {
     settings_path = options_parsed["settings"].as<string>();
