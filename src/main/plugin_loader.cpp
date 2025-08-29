@@ -234,6 +234,8 @@ int main(int argc, char *argv[]) {
           return;
         } else if (result == return_type::error) {
           count_err++;
+          out["error"] = plugin->error();
+          agent.publish(out);
         } else if (result == return_type::retry) {
           return;
         }
@@ -289,7 +291,7 @@ int main(int argc, char *argv[]) {
       time);
 #elif defined(PLUGIN_LOADER_SINK)
   message_type type;
-  json in, out;
+  json in;
   agent.loop([&]() {
     try {
       type = agent.receive();
@@ -305,7 +307,8 @@ int main(int argc, char *argv[]) {
       if (processed == return_type::retry) {
         return;
       } else if (processed != return_type::success) {
-        out = {{"error", plugin->error()}};
+        cerr << fg::red << "Error loading data: " << plugin->error() << fg::reset
+             << endl;
         count_err++;
       }
       if (!silent) {
