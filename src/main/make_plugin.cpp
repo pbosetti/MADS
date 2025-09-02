@@ -142,6 +142,11 @@ int main(int argc, char **argv) {
   } else {
     data["install_dir"] = plugins_dir;
   }
+  #ifdef _WIN32
+  std::string id = data["install_dir"];
+  std::replace(id.begin(), id.end(), '\\', '/');
+  data["install_dir"] = id;
+  #endif
 
   if (options_parsed.count("overwrite") > 0) {
     overwrite = true;
