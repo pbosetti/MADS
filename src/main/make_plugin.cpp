@@ -89,6 +89,7 @@ int main(int argc, char **argv) {
     ("d,dir", "Directory of the plugin", value<string>())
     ("i,install-dir", "Directory where to install the plugin (def. " + plugins_dir + ")", value<string>())
     ("o,overwrite", "Overwrite existing files")
+    ("s,datastore", "Enable Datastore class for persistency")
     ("v,version", "Print version")
     ("h,help", "Print usage");
   options.parse_positional({"name"});
@@ -144,6 +145,12 @@ int main(int argc, char **argv) {
 
   if (options_parsed.count("overwrite") > 0) {
     overwrite = true;
+  }
+
+  if (options_parsed.count("datastore") > 0) {
+    data["datastore"] = true;
+  } else {
+    data["datastore"] = false;
   }
 
   data["class_name"] = ucfirst(data["name"]) + "Plugin";

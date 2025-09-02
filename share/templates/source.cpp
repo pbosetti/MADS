@@ -11,6 +11,9 @@
 #include <{{parent_header}}>
 #include <nlohmann/json.hpp>
 #include <pugg/Kernel.h>
+{% if datastore %}
+#include <datastore.hpp>
+{% endif %}
 // other includes as needed here
 
 // Define the name of the plugin
@@ -57,19 +60,35 @@ public:
     // then merge the defaults with the actually provided parameters
     // params needs to be cast to json
     _params.merge_patch(*(json *)params);
+    {% if datastore %}
+    // prepare the datastore. Change its name if needed, .json ext is added if missing
+    _datastore.prepare(kind());
+
+    // use _datastore.data() to obtain the whole json object
+    // use _datastore["key"] for read/write access a given key
+    // use _datastore.save() for force saving; saving is automatic on destruction.
+    {% endif %}
   }
 
   // Implement this method if you want to provide additional information
   map<string, string> info() override { 
-    // return a map of stringswith additional information about the plugin
+    // return a map of strings with additional information about the plugin
     // it is used to print the information about the plugin when it is loaded
     // by the agent
-    return {}; 
+    {% if datastore %}
+    return {
+      {"Datastore", _datastore.path()}
+    };
+    {% else %}
+    return {};
+    {% endif %}
   };
 
 private:
   // Define the fields that are used to store internal resources
-
+  {% if datastore %}
+  Datastore _datastore;
+  {% endif %}
 };
 
 

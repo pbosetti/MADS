@@ -46,6 +46,11 @@ The plugin supports the following settings in the INI file:
 
 All settings are optional; if omitted, the default values are used.
 
+{% if datastore %}
+## Datastore
+The plugin supports a datastore file `{{ name }}.json` created in a temporary directory for persisting data between runs. Look at the `Datastore` class for more information on how to use it.
+{% endif %}
+
 
 ## Executable demo
 
