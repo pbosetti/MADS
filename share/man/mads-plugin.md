@@ -10,6 +10,7 @@
   [**\-d, \-\-dir** *output directory*]
   [**\-i, \-\-install-dir** *install directory*]
   [**\-o, \-\-overwrite**]
+  [**\-s, \-\-datastore**]
   [**\-v, \-\-version**]
   [**\-h, \-\-help**]
   [*plugin name*]
@@ -36,6 +37,9 @@
 
 **\-o**, **\-\-overwrite** 
 :  Overwrite any already existing file (default: false).
+
+**\-s**, **\-\-datastore**
+:  Enable datastore support (default: false).
 
 **\-v**, **\-\-version**
 : show version information.
