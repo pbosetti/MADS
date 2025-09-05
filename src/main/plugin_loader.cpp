@@ -294,7 +294,8 @@ int main(int argc, char *argv[]) {
                 count_err++;
               }
             }
-            agent.publish(out);
+            if (rt != return_type::retry)
+              agent.publish(out);
             if (!silent) {
               cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
                    << fg::reset << " total, " << fg::red << count_err
