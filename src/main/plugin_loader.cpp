@@ -269,22 +269,38 @@ int main(int argc, char *argv[]) {
           if (type == message_type::json) {
             in = json::parse(get<1>(msg));
             rt = plugin->load_data(in, agent.last_topic());
-            if (rt != return_type::success) {
+            if (rt == return_type::error) {
               out = {{"error", plugin->error()}};
               count_err++;
+            } else if (rt == return_type::critical) {
+              cerr << fg::red
+                   << "Critical error loading data: " << plugin->error()
+                   << fg::reset << endl;
+              out = {{"error", plugin->error()}};
+              count_err++;
+              Mads::running = false;
             }
-          }
-          rt = plugin->process(out);
-          if (rt != return_type::success) {
-            out = {{"error", plugin->error()}};
-            count_err++;
-          }
-          agent.publish(out);
-          if (!silent) {
-            cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
-                 << fg::reset << " total, " << fg::red << count_err << fg::reset
-                 << " with errors ";
-            cerr.flush();
+            if (rt == return_type::success) {
+              rt = plugin->process(out);
+              if (rt == return_type::critical) {
+                cerr << fg::red
+                     << "Critical error processing data: " << plugin->error()
+                     << fg::reset << endl;
+                out = {{"error", plugin->error()}};
+                count_err++;
+                Mads::running = false;
+              } else if (rt != return_type::success) {
+                out = {{"error", plugin->error()}};
+                count_err++;
+              }
+            }
+            agent.publish(out);
+            if (!silent) {
+              cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
+                   << fg::reset << " total, " << fg::red << count_err
+                   << fg::reset << " with errors ";
+              cerr.flush();
+            }
           }
         }
       },
@@ -306,9 +322,12 @@ int main(int argc, char *argv[]) {
       return_type processed = plugin->load_data(in, agent.last_topic());
       if (processed == return_type::retry) {
         return;
-      } else if (processed != return_type::success) {
-        cerr << fg::red << "Error loading data: " << plugin->error() << fg::reset
-             << endl;
+      } else if (processed == return_type::critical) {
+        cerr << fg::red << "Critical error loading data: " << plugin->error()
+             << fg::reset << endl;
+        count_err++;
+        Mads::running = false;
+      } else {
         count_err++;
       }
       if (!silent) {
