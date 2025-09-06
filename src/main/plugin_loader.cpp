@@ -144,7 +144,7 @@ int main(int argc, char *argv[]) {
 #if defined(PLUGIN_LOADER_FILTER)
   bool dont_block = false;
   if (options_parsed.count("dont-block") != 0 ||
-      settings.value("dont_block", false)) {
+      settings.value("dont_block", true)) {
     cerr << fg::yellow << "  Running in non-blocking mode" << fg::reset << endl;
     dont_block = true;
   }
@@ -216,29 +216,44 @@ int main(int argc, char *argv[]) {
 
 #if defined(PLUGIN_LOADER_SOURCE)
   json out;
+  return_type rt;
   agent.loop(
       [&]() {
         vector<unsigned char> blob;
-        return_type result = plugin->get_output(out, &blob);
-        if (return_type::success == result) {
+        rt = plugin->get_output(out, &blob);
+        switch (rt) {
+        case return_type::warning:
+          try {
+            out["warning"] = plugin->error();
+          } catch (...) {
+            cerr << fg::yellow
+                 << "Warning getting data: " << plugin->error() 
+                 << " (could not add to output JSON)"
+                 << fg::reset << endl;
+          }
+          [[fallthrough]];
+        case return_type::success:
           agent.publish(out);
           if (blob.size() > 0) {
             json meta{{"format", out_format}};
             agent.publish(blob, meta);
           }
-        } else if (result == return_type::critical) {
-          Mads::running = false;
-          json msg{{"error", plugin->error()}};
-          this_thread::sleep_for(chrono::milliseconds(1000));
-          agent.register_event(event_type::marker, msg);
+          break;
+        case return_type::retry:
           return;
-        } else if (result == return_type::error) {
+        case return_type::error:
           count_err++;
-          out["error"] = plugin->error();
+          out = {{"error", plugin->error()}};
           agent.publish(out);
-        } else if (result == return_type::retry) {
+          break;
+        case return_type::critical:
+          cerr << fg::red << "Critical error getting data: " << plugin->error()
+               << fg::reset << endl;
+          count_err++;
+          Mads::running = false;
           return;
         }
+
         if (!silent) {
           cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
                << fg::reset << " total, " << fg::red << count_err << fg::reset
@@ -249,66 +264,97 @@ int main(int argc, char *argv[]) {
       time);
 
 #elif defined(PLUGIN_LOADER_FILTER)
-  json in, out;
+  json in, out = {}, err;
   return_type rt;
   message_type type;
+  tuple<string, string> msg;
   agent.loop(
       [&]() {
+        err.clear();
         try {
           type = agent.receive(dont_block);
         } catch (const AgentError &e) {
           cerr << fg::red << "Error receiving message: " << e.what()
                << fg::reset << endl;
         }
-        if (type == message_type::none && !dont_block) {
-          return; // No message received
-        }
-        auto msg = agent.last_message();
         agent.remote_control();
-        if (agent.last_topic() != "control") {
-          if (type == message_type::json) {
-            in = json::parse(get<1>(msg));
-            rt = plugin->load_data(in, agent.last_topic());
-            if (rt == return_type::error) {
-              out = {{"error", plugin->error()}};
-              count_err++;
-            } else if (rt == return_type::critical) {
-              cerr << fg::red
-                   << "Critical error loading data: " << plugin->error()
-                   << fg::reset << endl;
-              out = {{"error", plugin->error()}};
-              count_err++;
-              Mads::running = false;
-            }
-            if (rt == return_type::success) {
-              rt = plugin->process(out);
-              if (rt == return_type::critical) {
-                cerr << fg::red
-                     << "Critical error processing data: " << plugin->error()
-                     << fg::reset << endl;
-                out = {{"error", plugin->error()}};
-                count_err++;
-                Mads::running = false;
-              } else if (rt != return_type::success) {
-                out = {{"error", plugin->error()}};
-                count_err++;
-              }
-            }
-            if (rt != return_type::retry)
-              agent.publish(out);
-            if (!silent) {
-              cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
-                   << fg::reset << " total, " << fg::red << count_err
-                   << fg::reset << " with errors ";
-              cerr.flush();
-            }
+        if (agent.last_topic() == "control") {
+          return; // Control message, already handled
+        }
+        if (type != message_type::json) {
+          return; // Not a JSON message
+        }
+        
+        // loading data into plugin
+        if (type != message_type::none) {
+          msg = agent.last_message();
+          in = json::parse(get<1>(msg));
+          rt = plugin->load_data(in, agent.last_topic());
+        } else {
+          rt = return_type::success;
+        }
+        switch (rt) {
+        case return_type::warning:
+          err = {{"warning_load", plugin->error()}};
+          [[fallthrough]];
+        case return_type::success:
+          break; // next step
+        case return_type::retry:
+          return; // next iteration
+        case return_type::error:
+          err = {{"error_load", plugin->error()}};
+          count_err++;
+          goto status_line;
+        case return_type::critical:
+          cerr << fg::red << "Critical error loading data: " << plugin->error()
+               << fg::reset << endl;
+          json msg = {{"error", plugin->error()}};
+          agent.register_event(event_type::marker, msg);
+          Mads::running = false;
+          return;
+        }
+        // processing data in the plugin
+process_output:
+        rt = plugin->process(out);
+        switch (rt) {
+        case return_type::warning:
+          err["warning_process"] = plugin->error();
+          [[fallthrough]];
+        case return_type::success:
+          if (!err.empty()) {
+            out["error"] = err;
           }
+          break; // next step
+        case return_type::retry:
+          return; // next iteration
+        case return_type::error:
+          out["error"]["error_process"] = plugin->error();
+          count_err++;
+          goto status_line;
+        case return_type::critical:
+          cerr << fg::red
+               << "Critical error processing data: " << plugin->error()
+               << fg::reset << endl;
+          json msg = {{"error", plugin->error()}};
+          agent.register_event(event_type::marker, msg);
+          Mads::running = false;
+          return;
+        }
+        // publishing data
+        agent.publish(out);
+status_line:
+        if (!silent) {
+          cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
+                << fg::reset << " total, " << fg::red << count_err
+                << fg::reset << " with errors ";
+          cerr.flush();
         }
       },
       time);
 #elif defined(PLUGIN_LOADER_SINK)
   message_type type;
   json in;
+  return_type rt;
   agent.loop([&]() {
     try {
       type = agent.receive();
@@ -318,25 +364,42 @@ int main(int argc, char *argv[]) {
     }
     auto msg = agent.last_message();
     agent.remote_control();
-    if (type == message_type::json && agent.last_topic() != "control") {
-      in = json::parse(get<1>(msg));
-      return_type processed = plugin->load_data(in, agent.last_topic());
-      if (processed == return_type::retry) {
-        return;
-      } else if (processed == return_type::critical) {
-        cerr << fg::red << "Critical error loading data: " << plugin->error()
-             << fg::reset << endl;
-        count_err++;
-        Mads::running = false;
-      } else {
-        count_err++;
-      }
-      if (!silent) {
-        cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
-             << fg::reset << " total, " << fg::red << count_err << fg::reset
-             << " with errors ";
-        cerr.flush();
-      }
+    if (agent.last_topic() == "control") {
+      return; // Control message, already handled
+    }
+    if (type != message_type::json) {
+      return; // No message received
+    }
+    in = json::parse(get<1>(msg));
+    rt = plugin->load_data(in, agent.last_topic());
+    switch (rt) {
+    case return_type::warning:
+      cerr << fg::yellow
+           << "Warning loading data: " << plugin->error() << fg::reset << endl;
+      [[fallthrough]];
+    case return_type::success:
+    case return_type::retry:
+      break;
+    case return_type::error:
+      cerr << fg::red << "Error loading data: " << plugin->error() << fg::reset
+           << endl;
+      count_err++;
+      return;
+    case return_type::critical:
+      cerr << fg::red << "Critical error loading data: " << plugin->error()
+           << fg::reset << endl;
+      json msg = {{"error", plugin->error()}};
+      agent.register_event(event_type::marker, msg);
+      count_err++;
+      Mads::running = false;
+      return;
+    }
+
+    if (!silent) {
+      cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
+            << fg::reset << " total, " << fg::red << count_err << fg::reset
+            << " with errors ";
+      cerr.flush();
     }
   });
 #endif
