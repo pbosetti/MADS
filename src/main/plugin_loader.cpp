@@ -281,9 +281,6 @@ int main(int argc, char *argv[]) {
         if (agent.last_topic() == "control") {
           return; // Control message, already handled
         }
-        if (type != message_type::json) {
-          return; // Not a JSON message
-        }
         
         // loading data into plugin
         if (type != message_type::none) {
@@ -292,6 +289,9 @@ int main(int argc, char *argv[]) {
           rt = plugin->load_data(in, agent.last_topic());
         } else {
           goto process_output;
+        }
+        if (type != message_type::json) {
+          return; // Not a JSON message
         }
         switch (rt) {
         case return_type::warning:
