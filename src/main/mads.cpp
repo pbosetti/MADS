@@ -440,7 +440,14 @@ int main(int argc, char **argv) {
     return 0;
   }
   if (options_parsed.count("version")) {
-    cout << Mads::version() << endl;
+    cout << Mads::version();
+    regex ver_regex("^v\\d+\\.\\d+\\.\\d+$");
+    string ver = Mads::version();
+    if (std::regex_match(ver, ver_regex)) {
+      cout << style::italic << " (build " << LIB_GIT_TAG << ")"
+           << style::reset;
+    }
+    cout << endl;
     return 0;
   }
   if (options_parsed.count("info")) {

@@ -8,21 +8,48 @@ cmake_minimum_required(VERSION 3.20)
 #  |____/ \___|\__|\__|_|_| |_|\__, |___/
 #                              |___/     
 set(LIB_NAME mads)
-set(CPACK_PACKAGE_VERSION_MAJOR 1)
-set(CPACK_PACKAGE_VERSION_MINOR 3)
-set(CPACK_PACKAGE_VERSION_PATCH 5)
+# Version from git tags
+# Check if project root is a git repository
+execute_process(
+  COMMAND git rev-parse --is-inside-work-tree
+  WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+  OUTPUT_VARIABLE IS_GIT_REPO
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_QUIET
+)
+if(IS_GIT_REPO STREQUAL "true")
+  # Get the latest tag
+  execute_process(
+    COMMAND git describe --tags --dirty
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+    OUTPUT_VARIABLE GIT_TAG
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  if(GIT_TAG MATCHES "^v([0-9]+)\\.([0-9]+)\\.([0-9]+)(.*)?$")
+    string(REGEX REPLACE "^v([0-9]+)\\.([0-9]+)\\.([0-9]+)(.*)?$" "\\1" CPACK_PACKAGE_VERSION_MAJOR "${GIT_TAG}")
+    string(REGEX REPLACE "^v([0-9]+)\\.([0-9]+)\\.([0-9]+)(.*)?$" "\\2" CPACK_PACKAGE_VERSION_MINOR "${GIT_TAG}")
+    string(REGEX REPLACE "^v([0-9]+)\\.([0-9]+)\\.([0-9]+)(.*)?$" "\\3" CPACK_PACKAGE_VERSION_PATCH "${GIT_TAG}")
+    message(STATUS "Project root is a git repository, using version from latest tag: ${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
+  else()
+    message(WARNING "Latest git tag does not match vMAJOR.MINOR.PATCH format, using default version")
+    set(CPACK_PACKAGE_VERSION_MAJOR 0)
+    set(CPACK_PACKAGE_VERSION_MINOR 0)
+    set(CPACK_PACKAGE_VERSION_PATCH 1)
+  endif()
+else()
+  message(WARNING "Project root is NOT a git repository, using default version")
+  set(CPACK_PACKAGE_VERSION_MAJOR 0)
+  set(CPACK_PACKAGE_VERSION_MINOR 0)
+  set(CPACK_PACKAGE_VERSION_PATCH 1)
+  set(GIT_TAG "vUNKNOWN_GIT_VERSION")
+endif()
+
+# Set variables for project
 set(LIB_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
 set(LIB_VERSION_CHECK "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}")
 project(${LIB_NAME} VERSION ${LIB_VERSION} LANGUAGES CXX)
 set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
-
-# Read VERSION_PATCH from command line -DVERSION_PATCH=... if provided
-if(DEFINED VERSION_PATCH)
-  set(VERSION_PATCH "${VERSION_PATCH}" CACHE STRING "Patch version from command line" FORCE)
-else()
-  set(VERSION_PATCH "" CACHE STRING "Patch version from command line" FORCE)
-endif()
-message(STATUS "MADS version: ${LIB_VERSION}.${VERSION_PATCH}")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -398,7 +425,7 @@ endif()
 #                             |___/         |___/ 
 if(${MADS_SKIP_EXTERNALS})
   set(CPACK_PACKAGE_NAME "${LIB_NAME}")
-  set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${LIB_VERSION}.${VERSION_PATCH}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+  set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${GIT_TAG}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
   set(CPACK_PACKAGE_VENDOR "MADS Consortium")
   set(CPACK_PACKAGE_DIRECTORY ${CMAKE_SOURCE_DIR}/packages)
   set(CPACK_STRIP_FILES TRUE)
@@ -410,7 +437,7 @@ if(${MADS_SKIP_EXTERNALS})
   if(APPLE)
     set(CPACK_GENERATOR "STGZ")
     if(CMAKE_OSX_ARCHITECTURES MATCHES ";")
-      set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${LIB_VERSION}.${VERSION_PATCH}-${CMAKE_SYSTEM_NAME}-universal")
+      set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${GIT_TAG}-${CMAKE_SYSTEM_NAME}-universal")
     endif()
   elseif(MSVC)
     set(CPACK_GENERATOR "ZIP;INNOSETUP")

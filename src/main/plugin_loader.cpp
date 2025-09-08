@@ -291,7 +291,7 @@ int main(int argc, char *argv[]) {
           in = json::parse(get<1>(msg));
           rt = plugin->load_data(in, agent.last_topic());
         } else {
-          rt = return_type::success;
+          goto process_output;
         }
         switch (rt) {
         case return_type::warning:
