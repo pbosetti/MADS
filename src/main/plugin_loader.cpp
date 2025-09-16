@@ -16,6 +16,7 @@ Author(s): Paolo Bosetti
 #include <cxxopts.hpp>
 #include <filesystem>
 #include <pugg/Kernel.h>
+#include <regex>
 
 #if defined(PLUGIN_LOADER_SOURCE)
 #include <chrono>
@@ -57,6 +58,57 @@ using Plugin = Sink<json>;
 using PluginDriver = SinkDriver<json>;
 #endif
 
+#include <cctype>
+#include <locale>
+#include <nlohmann/json.hpp>
+#include <string>
+
+using namespace std;
+using json = nlohmann::json;
+
+json str_to_num(const string &s) {
+  string str = s;
+
+  // Trim leading/trailing whitespace
+  auto ltrim = [](string &s) {
+    s.erase(s.begin(), find_if(s.begin(), s.end(),
+                               [](unsigned char ch) { return !isspace(ch); }));
+  };
+  auto rtrim = [](string &s) {
+    s.erase(find_if(s.rbegin(), s.rend(),
+                    [](unsigned char ch) { return !isspace(ch); })
+                .base(),
+            s.end());
+  };
+  ltrim(str);
+  rtrim(str);
+
+  // Try integer
+  try {
+    size_t pos;
+    long long val = std::stoll(str, &pos);
+    if (pos == str.size()) {
+      return val; // fully parsed as int
+    }
+  } catch (...) {
+    // ignore
+  }
+
+  // Try float/double
+  try {
+    size_t pos;
+    double val = std::stod(str, &pos);
+    if (pos == str.size()) {
+      return val; // fully parsed as float
+    }
+  } catch (...) {
+    // ignore
+  }
+
+  // Fallback: return string
+  return str;
+}
+
 int main(int argc, char *argv[]) {
   string settings_uri = SETTINGS_URI;
   string plugin_name, plugin_file = PLUGIN_DEFAULT,
@@ -72,7 +124,8 @@ int main(int argc, char *argv[]) {
     ("plugin", "Plugin to load", value<string>())
     ("n,name", "Agent name (default to plugin name)", value<string>())
     ("i,agent-id", "Agent ID to be added to JSON frames", value<string>())
-    ("d,delay", "Initial delay before forst message in ms (default 0)", value<size_t>());
+    ("d,delay", "Initial delay before forst message in ms (default 0)", value<size_t>())
+    ("o,options", "Additional plugin options (may be repeated)", value<vector<string>>());
   #if defined(PLUGIN_LOADER_SOURCE) or defined(PLUGIN_LOADER_FILTER)
   options.add_options()
     ("p,period", "Sampling period (default 100 ms)", value<size_t>());
@@ -123,6 +176,15 @@ int main(int argc, char *argv[]) {
   bool silent = settings.value("silent", false);
   if (settings["receive_timeout"].is_number()) {
     agent.set_receive_timeout(settings["receive_timeout"].get<int>());
+  }
+  if (options_parsed.count("options")) {
+    auto re = regex(R"((.+?)=(.*))");
+    smatch match;
+    for (auto &v : options_parsed["options"].as<vector<string>>()) {
+      if (regex_match(v, match, re)) {
+        settings[match[1].str()] = str_to_num(match[2].str());
+      }
+    }
   }
   agent.info(cerr);
 #if defined(PLUGIN_LOADER_SOURCE) or defined(PLUGIN_LOADER_FILTER)
@@ -226,10 +288,8 @@ int main(int argc, char *argv[]) {
           try {
             out["warning"] = plugin->error();
           } catch (...) {
-            cerr << fg::yellow
-                 << "Warning getting data: " << plugin->error() 
-                 << " (could not add to output JSON)"
-                 << fg::reset << endl;
+            cerr << fg::yellow << "Warning getting data: " << plugin->error()
+                 << " (could not add to output JSON)" << fg::reset << endl;
           }
           [[fallthrough]];
         case return_type::success:
@@ -281,7 +341,7 @@ int main(int argc, char *argv[]) {
         if (agent.last_topic() == "control") {
           return; // Control message, already handled
         }
-        
+
         // loading data into plugin
         if (type != message_type::none) {
           msg = agent.last_message();
@@ -314,7 +374,7 @@ int main(int argc, char *argv[]) {
           return;
         }
         // processing data in the plugin
-process_output:
+      process_output:
         rt = plugin->process(out);
         switch (rt) {
         case return_type::warning:
@@ -342,11 +402,11 @@ process_output:
         }
         // publishing data
         agent.publish(out);
-status_line:
+      status_line:
         if (!silent) {
           cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
-                << fg::reset << " total, " << fg::red << count_err
-                << fg::reset << " with errors ";
+               << fg::reset << " total, " << fg::red << count_err << fg::reset
+               << " with errors ";
           cerr.flush();
         }
       },
@@ -374,8 +434,8 @@ status_line:
     rt = plugin->load_data(in, agent.last_topic());
     switch (rt) {
     case return_type::warning:
-      cerr << fg::yellow
-           << "Warning loading data: " << plugin->error() << fg::reset << endl;
+      cerr << fg::yellow << "Warning loading data: " << plugin->error()
+           << fg::reset << endl;
       [[fallthrough]];
     case return_type::success:
     case return_type::retry:
@@ -397,8 +457,8 @@ status_line:
 
     if (!silent) {
       cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
-            << fg::reset << " total, " << fg::red << count_err << fg::reset
-            << " with errors ";
+           << fg::reset << " total, " << fg::red << count_err << fg::reset
+           << " with errors ";
       cerr.flush();
     }
   });
