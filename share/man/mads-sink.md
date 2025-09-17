@@ -11,6 +11,7 @@
   [**\-d, \-\-delay** *delay in ms*]
   [**\-s, \-\-settings** *URI*]
   [**\-S, \-\-save-settings** *filename*]
+  [**\-o, \-\-options** *key=value*]
   [**\-v, \-\-version**]
   [**\-h, \-\-help**]
   [*plugin*]
@@ -63,6 +64,9 @@ In case of multiple devices using the same plugin but **on different architectur
 
 **\-S**, **\-\-save-settings** *filename*
 :  Save the settings (loaded by the broker or via **\-s** option) to the given file (ini format).
+
+**\-o, \-\-options** *key=value*
+:  Override plugin-specific options that are typically set in the `mads.ini` file. Do not put spaces around the `=`. the value is interpretes as a string, an integer or a float, according to standard heuristics. This option can be repeated.
 
 **\-v**, **\-\-version**
 : show version information.

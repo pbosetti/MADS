@@ -125,7 +125,7 @@ int main(int argc, char *argv[]) {
     ("n,name", "Agent name (default to plugin name)", value<string>())
     ("i,agent-id", "Agent ID to be added to JSON frames", value<string>())
     ("d,delay", "Initial delay before forst message in ms (default 0)", value<size_t>())
-    ("o,options", "Additional plugin options (may be repeated)", value<vector<string>>());
+    ("o,option", "Additional plugin options (may be repeated)", value<vector<string>>());
   #if defined(PLUGIN_LOADER_SOURCE) or defined(PLUGIN_LOADER_FILTER)
   options.add_options()
     ("p,period", "Sampling period (default 100 ms)", value<size_t>());
@@ -177,6 +177,7 @@ int main(int argc, char *argv[]) {
   if (settings["receive_timeout"].is_number()) {
     agent.set_receive_timeout(settings["receive_timeout"].get<int>());
   }
+  // settings override
   if (options_parsed.count("options")) {
     auto re = regex(R"((.+?)=(.*))");
     smatch match;
