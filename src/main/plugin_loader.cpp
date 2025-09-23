@@ -83,6 +83,12 @@ json str_to_num(const string &s) {
   ltrim(str);
   rtrim(str);
 
+  // Try bool
+  if (str == "true" || str == "TRUE")
+    return true;
+  else if (str == "false" || str == "FALSE")
+    return false;
+
   // Try integer
   try {
     size_t pos;
@@ -178,10 +184,10 @@ int main(int argc, char *argv[]) {
     agent.set_receive_timeout(settings["receive_timeout"].get<int>());
   }
   // settings override
-  if (options_parsed.count("options")) {
+  if (options_parsed.count("option")) {
     auto re = regex(R"((.+?)=(.*))");
     smatch match;
-    for (auto &v : options_parsed["options"].as<vector<string>>()) {
+    for (auto &v : options_parsed["option"].as<vector<string>>()) {
       if (regex_match(v, match, re)) {
         settings[match[1].str()] = str_to_num(match[2].str());
       }
@@ -216,7 +222,9 @@ int main(int argc, char *argv[]) {
   if (options_parsed.count("plugin") != 0) {
     plugin_file = options_parsed["plugin"].as<string>();
     if (!fs::exists(plugin_file)) {
-      cerr << "Searching for installed plugin in the default location ";
+      cerr << style::italic 
+           << "  Searching for installed plugin in the default location "
+           << style::reset;
 #ifdef _WIN32
       cerr << Mads::exec_dir("../bin/") << endl;
       plugin_file = Mads::exec_dir("../bin/" + plugin_file);
