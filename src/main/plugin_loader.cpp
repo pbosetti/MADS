@@ -278,7 +278,7 @@ int main(int argc, char *argv[]) {
   cerr << fg::green << PLUGIN_NAME " plugin started" << fg::reset << endl;
 
 #if defined(PLUGIN_LOADER_SOURCE)
-  json out;
+  json out, err;
   return_type rt;
   agent.loop(
       [&]() {
@@ -303,9 +303,9 @@ int main(int argc, char *argv[]) {
         case return_type::retry:
           return;
         case return_type::error:
+          err = {{"error", plugin->error()}};
+          agent.register_event(event_type::marker, err);
           count_err++;
-          out = {{"error", plugin->error()}};
-          agent.publish(out);
           break;
         case return_type::critical:
           cerr << fg::red << "Critical error getting data: " << plugin->error()
@@ -356,21 +356,22 @@ int main(int argc, char *argv[]) {
         }
         switch (rt) {
         case return_type::warning:
-          err = {{"warning_load", plugin->error()}};
+          err = {{"warning", "on load:" + plugin->error()}};
           [[fallthrough]];
         case return_type::success:
           break; // next step
         case return_type::retry:
           return; // next iteration
         case return_type::error:
-          err = {{"error_load", plugin->error()}};
+          err = {{"error", "on load: " + plugin->error()}};
+          agent.register_event(event_type::marker, err);
           count_err++;
           goto status_line;
         case return_type::critical:
           cerr << fg::red << "Critical error loading data: " << plugin->error()
                << fg::reset << endl;
-          json msg = {{"error", plugin->error()}};
-          agent.register_event(event_type::marker, msg);
+          err = {{"error", "on load: " + plugin->error()}};
+          agent.register_event(event_type::marker, err);
           Mads::running = false;
           return;
         }
@@ -379,25 +380,23 @@ int main(int argc, char *argv[]) {
         rt = plugin->process(out);
         switch (rt) {
         case return_type::warning:
-          err["warning_process"] = plugin->error();
+          out["warning"] = "on process: " + plugin->error();
           [[fallthrough]];
         case return_type::success:
-          if (!err.empty()) {
-            out["error"] = err;
-          }
           break; // next step
         case return_type::retry:
           return; // next iteration
         case return_type::error:
-          out["error"]["error_process"] = plugin->error();
+          err = {{"error", "on process: " + plugin->error()}};
+          agent.register_event(event_type::marker, err);
           count_err++;
           goto status_line;
         case return_type::critical:
           cerr << fg::red
                << "Critical error processing data: " << plugin->error()
                << fg::reset << endl;
-          json msg = {{"error", plugin->error()}};
-          agent.register_event(event_type::marker, msg);
+          err = {{"error", "on process: " + plugin->error()}};
+          agent.register_event(event_type::marker, err);
           Mads::running = false;
           return;
         }
