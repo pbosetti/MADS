@@ -174,6 +174,7 @@ int main(int argc, char *argv[]) {
 
   // Copy agent settings as plugin parameters
   json settings = agent.get_settings();
+  settings["agent_name"] = agent_name;
   if (options_parsed.count("agent-id")) {
     settings["agent_id"] = options_parsed["agent-id"].as<string>();
     agent.set_agent_id(options_parsed["agent-id"].as<string>());
