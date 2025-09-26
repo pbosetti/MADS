@@ -367,6 +367,8 @@ int main(int argc, char **argv) {
           chrono::system_clock::time_point now = chrono::system_clock::now();
           settings.send(to_string(Mads::timecode(now, timecode_fps)));
         } else {
+          cerr << fg::yellow << "Got unexpected command " << cmd << fg::reset
+               << endl;
           settings.send(content);
         }
       }
