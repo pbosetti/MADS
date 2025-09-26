@@ -118,14 +118,16 @@ public:
     zmqpp::socket socket(context, zmqpp::socket_type::req);
     message msg_out, msg_in;
     tuple<string, filesystem::path> result;
-    if (timeout > 0)
-      socket.set(zmqpp::socket_option::receive_timeout, timeout);
     socket.connect(uri);
+    if (timeout > 0) {
+      socket.set(zmqpp::socket_option::receive_timeout, timeout);
+      socket.set(zmqpp::socket_option::send_timeout, timeout);
+    }
     msg_out << LIB_VERSION << "settings" << name;
-    socket.send(msg_out);
+    if (!socket.send(msg_out)) {
+      throw AgentError("Timed out in sending settings request to broker");
+    }
     if (!socket.receive(msg_in)) {
-      socket.disconnect(uri);
-      socket.close();
       throw AgentError("Timed out in receiving settings from broker");
     }
     socket.disconnect(uri);
@@ -1019,7 +1021,7 @@ protected:
   bool _cross = false;
   bool _connected = false;
   int _receive_timeout = 500;
-  int _settings_timeout = 2000;
+  int _settings_timeout = 0;
   bool _init_done = false;
   thread *control_thread = nullptr;
   bool _restart = false;

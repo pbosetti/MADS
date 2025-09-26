@@ -37,6 +37,9 @@ int main(int argc, char *argv[]) {
   } catch(const std::exception& e) {
     std::cout << fg::red << "Error initializing agent: " << e.what() << fg::reset << endl;
     exit(EXIT_FAILURE);
+  } catch (...) {
+    std::cout << fg::red << "Error initializing agent: Unexpected" << fg::reset << endl;
+    exit(EXIT_FAILURE);
   }
   agent.enable_remote_control();
   agent.connect();
