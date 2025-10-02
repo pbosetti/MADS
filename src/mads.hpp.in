@@ -18,12 +18,12 @@ Author(s): Paolo Bosetti
 #endif
 
 #include <chrono>
+#include <cmath>
 #include <exception>
 #include <iomanip>
 #include <map>
 #include <sstream>
 #include <string>
-#include <cmath>
 
 /*
   ____        __ _
@@ -35,7 +35,10 @@ Author(s): Paolo Bosetti
 */
 
 #define LIB_NAME "@APP_NAME@"
-#define LIB_VERSION "@PROJECT_VERSION@"
+#define LIB_VERSION "v@LIB_VERSION@"
+#define LIB_VERSION_CHECK "v@LIB_VERSION_CHECK@"
+#define LIB_GIT_TAG "@GIT_TAG@"
+#define MADS_PREFIX "@PREFIX@"
 
 #define LOGGER_STATUS_TOPIC "logger_status"
 
@@ -81,11 +84,15 @@ Author(s): Paolo Bosetti
   options.add_options()("s,settings", "Settings file path/URI",                \
                         value<string>())(                                      \
       "S,save-settings", "Save settings to ini file",                          \
-      value<string>())("h,help", "Print usage");                               \
+      value<string>())("v,version", "Print version")("h,help", "Print usage"); \
   auto options_parsed = options.parse(argc, argv);                             \
   if (options_parsed.count("help")) {                                          \
     cout << argv[0] << " ver. " << LIB_VERSION << endl;                        \
     cout << options.help() << endl;                                            \
+    return 0;                                                                  \
+  }                                                                            \
+  if (options_parsed.count("version")) {                                       \
+    cout << LIB_VERSION << endl;                                               \
     return 0;                                                                  \
   }                                                                            \
   if (options_parsed.count("s") != 0) {                                        \
@@ -135,6 +142,30 @@ typedef double data_t;
 namespace Mads {
 
 /**
+ * @brief Library version.
+ *
+ */
+static std::string version() { return LIB_VERSION; }
+
+/**
+ * @brief Checks if the given version matches the library version.
+ *
+ * @param version The version string to check.
+ * @return true if the version matches, false otherwise.
+ * @throws std::runtime_error if the version string is invalid.
+ */
+static bool check_version(const std::string &version) {
+  size_t last_dot = version.find_last_of('.');
+  std::string version_cmp;
+  if (last_dot != std::string::npos) {
+    version_cmp = version.substr(0, last_dot);
+    return version_cmp == LIB_VERSION_CHECK;
+  } else {
+    throw std::runtime_error("Invalid version string: " + version);
+  }
+}
+
+/**
  * @brief Global flag for stopping the main loop in Mads agents.
  *
  */
@@ -144,7 +175,14 @@ static bool running = true;
  * @brief Enumeration of event types for agents.
  *
  */
-enum class event_type { marker = 0, marker_in, marker_out, startup, shutdown };
+enum class event_type {
+  marker = 0,
+  marker_in,
+  marker_out,
+  startup,
+  shutdown,
+  message
+};
 
 /**
  * @brief Enumeration of message types for agents.
@@ -161,13 +199,13 @@ static const std::map<event_type, std::string> event_map = {
     {event_type::marker_in, "marker in"},
     {event_type::marker_out, "marker out"},
     {event_type::startup, "startup"},
-    {event_type::shutdown, "shutdown"}};
+    {event_type::shutdown, "shutdown"},
+    {event_type::message, "message"},
+};
 
 // This results in duplicate definition link error in the GUI
 #ifndef MADS_QAGENT_H
-std::string event_name(event_type type) {
-  return event_map.at(type);
-}
+std::string event_name(event_type type) { return event_map.at(type); }
 #endif // MADS_QAGENT_H
 
 /**
@@ -177,7 +215,8 @@ std::string event_name(event_type type) {
  * @return string
  */
 static std::string
-get_ISODate_time(const std::chrono::system_clock::time_point &time, int32_t offset = 0) {
+get_ISODate_time(const std::chrono::system_clock::time_point &time,
+                 int32_t offset = 0) {
   time_t tt = std::chrono::system_clock::to_time_t(time);
   tm *tt2 = localtime(&tt);
   std::stringstream ss;
@@ -195,7 +234,8 @@ get_ISODate_time(const std::chrono::system_clock::time_point &time, int32_t offs
   return ss.str();
 }
 
-static double timecode(const std::chrono::system_clock::time_point &now, unsigned int fps = 25) {
+static double timecode(const std::chrono::system_clock::time_point &now,
+                       unsigned int fps = 25) {
   time_t now_c = std::chrono::system_clock::to_time_t(now);
   tm *lt = localtime(&now_c);
   double fct = 1000.0 / fps;

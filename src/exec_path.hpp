@@ -66,8 +66,11 @@ std::string exec_dir(std::string relative = "") {
   }
 }
 
+std::string prefix() {
+  return exec_dir("../");
+}
 
-} // namespace MyPaths
+} // namespace Mads
 
 
 #endif // EXEC_PATH_HPP

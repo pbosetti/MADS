@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
+# cmake_minimum_required(VERSION 3.5...3.27)
 
 #   ____       _   _   _                 
 #  / ___|  ___| |_| |_(_)_ __   __ _ ___ 
@@ -7,10 +8,46 @@ cmake_minimum_required(VERSION 3.20)
 #  |____/ \___|\__|\__|_|_| |_|\__, |___/
 #                              |___/     
 set(LIB_NAME mads)
-set(CPACK_PACKAGE_VERSION_MAJOR 0)
-set(CPACK_PACKAGE_VERSION_MINOR 10)
-set(CPACK_PACKAGE_VERSION_PATCH 2)
+# Version from git tags
+# Check if project root is a git repository
+execute_process(
+  COMMAND git rev-parse --is-inside-work-tree
+  WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+  OUTPUT_VARIABLE IS_GIT_REPO
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_QUIET
+)
+if(IS_GIT_REPO STREQUAL "true")
+  # Get the latest tag
+  execute_process(
+    COMMAND git describe --tags --dirty
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+    OUTPUT_VARIABLE GIT_TAG
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  if(GIT_TAG MATCHES "^v([0-9]+)\\.([0-9]+)\\.([0-9]+)(.*)?$")
+    string(REGEX REPLACE "^v([0-9]+)\\.([0-9]+)\\.([0-9]+)(.*)?$" "\\1" CPACK_PACKAGE_VERSION_MAJOR "${GIT_TAG}")
+    string(REGEX REPLACE "^v([0-9]+)\\.([0-9]+)\\.([0-9]+)(.*)?$" "\\2" CPACK_PACKAGE_VERSION_MINOR "${GIT_TAG}")
+    string(REGEX REPLACE "^v([0-9]+)\\.([0-9]+)\\.([0-9]+)(.*)?$" "\\3" CPACK_PACKAGE_VERSION_PATCH "${GIT_TAG}")
+    message(STATUS "Project root is a git repository, using version from latest tag: ${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
+  else()
+    message(WARNING "Latest git tag does not match vMAJOR.MINOR.PATCH format, using default version")
+    set(CPACK_PACKAGE_VERSION_MAJOR 0)
+    set(CPACK_PACKAGE_VERSION_MINOR 0)
+    set(CPACK_PACKAGE_VERSION_PATCH 1)
+  endif()
+else()
+  message(WARNING "Project root is NOT a git repository, using default version")
+  set(CPACK_PACKAGE_VERSION_MAJOR 0)
+  set(CPACK_PACKAGE_VERSION_MINOR 0)
+  set(CPACK_PACKAGE_VERSION_PATCH 1)
+  set(GIT_TAG "vUNKNOWN_GIT_VERSION")
+endif()
+
+# Set variables for project
 set(LIB_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
+set(LIB_VERSION_CHECK "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}")
 project(${LIB_NAME} VERSION ${LIB_VERSION} LANGUAGES CXX)
 set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
 
@@ -67,6 +104,7 @@ foreach(filename ${CONFIG_FILENAMES})
   configure_file(
     ${filename}.in
     ${filename}
+    @ONLY
   )
 endforeach()
 
@@ -85,7 +123,7 @@ endif()
 # Disable some warnings in Visual Studio
 if (MSVC)
   add_definitions(-D_CRT_SECURE_NO_WARNINGS)
-  add_compile_options(/wd4068 /wd4005 /wd4267 /wd4244 /wd4804 /EHsc)
+  add_compile_options(/wd4068 /wd4005 /wd4267 /wd4244 /wd4804 /EHsc /MP)
 else()
   add_compile_options("-Wno-pragmas")
 endif()
@@ -130,14 +168,25 @@ FetchContent_Declare(pugg
   GIT_SHALLOW    TRUE
 )
 
-FetchContent_Declare(plugin 
+FetchContent_MakeAvailable(tomlplusplus nlohmann_json cxxopts rang pugg)
+
+FetchContent_Populate(plugin 
   GIT_REPOSITORY https://github.com/pbosetti/mads_plugin.git
-  GIT_TAG        HEAD
+  GIT_TAG        v1.3.5
   GIT_SHALLOW    TRUE
+  SUBBUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/_deps/plugin-subbuild
+  SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/_deps/plugin-src
+  BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/_deps/plugin-build
 )
 
-FetchContent_MakeAvailable(tomlplusplus nlohmann_json cxxopts rang pugg)
-FetchContent_Populate(plugin)
+FetchContent_Populate(inja
+  GIT_REPOSITORY https://github.com/pantor/inja.git
+  GIT_TAG        v3.4.0
+  GIT_SHALLOW    TRUE
+  SUBBUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/_deps/inja-subbuild
+  SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/_deps/inja-src
+  BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/_deps/inja-build
+)
 
 
 #   ____        _ _     _            _   _   _                 
@@ -157,26 +206,25 @@ include_directories(
   ${rang_SOURCE_DIR}/include
   ${date_SOURCE_DIR}/include
   ${plugin_SOURCE_DIR}/src
+  ${inja_SOURCE_DIR}/include
 )
 link_directories(${USR_DIR}/lib)
 
 if(WIN32)
   file(GLOB LIB_ZMQ "${USR_DIR}/lib/libzmq*.lib")
+  file(GLOB LIB_MONGOCXX "${USR_DIR}/lib/mongocxx-v_noabi*.lib")
+  file(GLOB LIB_BSONCXX "${USR_DIR}/lib/bsoncxx-v_noabi*.lib")
   set(LIB_LIST zmqpp-static ${LIB_ZMQ} snappy Ws2_32 Iphlpapi)
   set(MONGO_LIBS 
-    mongocxx mongoc-static-1.0 
-    bsoncxx bson-static-1.0 
+    ${LIB_MONGOCXX} mongoc-static-1.0 
+    ${LIB_BSONCXX} bson-static-1.0 
     Ws2_32 bcrypt Secur32 Crypt32 Dnsapi
-  )
-  set(ARMA_LIBS 
-    armadillo 
-    ${EXTERNAL_DIR}/armadillo/examples/lib_win64/libopenblas.lib
   )
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DZMQ_STATIC")
   set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -DZMQ_STATIC")
+  add_compile_options(/MP)
 else()
   set(LIB_LIST pthread zmqpp-static zmq snappy)
-  set(ARMA_LIBS armadillo)
   set(DLOPEN_LIB dl)
 endif()
 
@@ -187,6 +235,7 @@ if(APPLE)
   find_library(COREFOUNDATION_LIBRARY CoreFoundation)
   set(MONGO_LIBS mongocxx-static bsoncxx-static mongoc-static-1.0 bson-static-1.0 resolv sasl2 ${SECURITY_LIBRARY} ${COREFOUNDATION_LIBRARY} zstd)
 elseif(UNIX AND NOT APPLE)
+  find_package(OpenSSL COMPONENTS Crypto SSL REQUIRED)
   set(MONGO_LIBS mongocxx-static bsoncxx-static mongoc-static-1.0 bson-static-1.0 resolv)
   if(NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "aarch64")
     # Unexpectedly, these three libraries are not needed on RaspbianOS or aarch64
@@ -198,12 +247,10 @@ endif()
 macro(create_exec target)
   set(multiValueArgs SRCS LIBS DEFS)
   cmake_parse_arguments(ARG "" "" "${multiValueArgs}" ${ARGN})
-  # set(libs ${ARGV})
-  # list(REMOVE_ITEM libs ${target})
   add_executable(${PREFIX}${target} ${MAIN_DIR}/${ARG_SRCS})
+  list(APPEND TARGET_LIST ${PREFIX}${target})
   target_link_libraries(${PREFIX}${target} ${LIB_LIST} ${ARG_LIBS})
   target_compile_definitions(${PREFIX}${target} PRIVATE ${ARG_DEFS})
-  list(APPEND TARGET_LIST ${PREFIX}${target})
 endmacro()
 
 
@@ -225,6 +272,16 @@ if(NOT MADS_MINIMAL)
     create_exec(image SRCS image.cpp)
   endif()
 endif()
+
+# Main command
+add_executable(mads ${MAIN_DIR}/mads.cpp)
+if(UNIX AND NOT APPLE)
+  target_link_libraries(mads OpenSSL::Crypto OpenSSL::SSL)
+else()
+  target_link_libraries(mads)
+endif()
+list(APPEND TARGET_LIST mads)
+
 create_exec(filter SRCS plugin_loader.cpp LIBS pugg ${DLOPEN_LIB} DEFS "PLUGIN_LOADER_FILTER")
 create_exec(source SRCS plugin_loader.cpp LIBS  pugg ${DLOPEN_LIB} DEFS "PLUGIN_LOADER_SOURCE")
 create_exec(sink SRCS plugin_loader.cpp LIBS  pugg ${DLOPEN_LIB} DEFS "PLUGIN_LOADER_SINK")
@@ -265,7 +322,9 @@ endif()
 # Default plugins
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/src/plugin)
 
-add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/man)
+add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/share/man)
+
+create_exec(plugin SRCS make_plugin.cpp)
 
 #   _____      _                        _     
 #  | ____|_  _| |_ ___ _ __ _ __   __ _| |___ 
@@ -303,15 +362,57 @@ install(TARGETS ${TARGET_LIST}
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
   ARCHIVE DESTINATION lib
+  INCLUDES DESTINATION include
   COMPONENT MADS
 )
-install(FILES ${CMAKE_CURRENT_LIST_DIR}/mads.ini
-  TYPE SYSCONF
+install(FILES 
+  ${SOURCE_DIR}/mads.hpp
+  ${SOURCE_DIR}/agent.hpp
+  ${SOURCE_DIR}/exec_path.hpp
+  ${USR_DIR}/include/snappy.h
+  ${USR_DIR}/include/snappy-stubs-public.h
+  ${USR_DIR}/include/zmq.h
+  ${USR_DIR}/include/zmq_utils.h
+  ${USR_DIR}/include/zmqpp_export.h
+  TYPE INCLUDE
 )
-file(GLOB SCRIPTS_FILES "${CMAKE_CURRENT_LIST_DIR}/scripts/*")
-install(PROGRAMS ${SCRIPTS_FILES}
-  TYPE BIN
+install(DIRECTORY 
+  ${tomlplusplus_SOURCE_DIR}/include/toml++
+  ${nlohmann_json_SOURCE_DIR}/include/nlohmann
+  ${USR_DIR}/include/zmqpp
+  TYPE INCLUDE
 )
+if(MSVC)
+  file(GLOB MSVC_LIBS "${USR_DIR}/lib/*.lib")
+  install(FILES
+    ${MSVC_LIBS}
+    TYPE LIB
+  )
+else()
+  install(FILES
+    ${USR_DIR}/lib/libbson-static-1.0.a
+    ${USR_DIR}/lib/libbsoncxx-static.a
+    ${USR_DIR}/lib/libmongoc-static-1.0.a
+    ${USR_DIR}/lib/libmongocxx-static.a
+    ${USR_DIR}/lib/libzmqpp-static.a
+    ${USR_DIR}/lib/libzmq.a
+    ${USR_DIR}/lib/libsnappy.a
+    TYPE LIB
+  )
+endif()
+install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/templates
+  DESTINATION share
+  COMPONENT MADS
+)
+if(NOT WIN32)
+  set(SCRIPTS_FILES 
+    ${CMAKE_CURRENT_LIST_DIR}/scripts/mads-logging
+    ${CMAKE_CURRENT_LIST_DIR}/scripts/mads-command
+  )
+  install(PROGRAMS ${SCRIPTS_FILES}
+    TYPE BIN
+  )
+endif()
 
 
 #   _____           _               _             
@@ -322,34 +423,44 @@ install(PROGRAMS ${SCRIPTS_FILES}
 #  |_|   \__,_|\___|_|\_\__,_|\__, |_|_| |_|\__, |
 #                              __/ |         __/ |
 #                             |___/         |___/ 
-
-set(CPACK_PACKAGE_NAME "${LIB_NAME}")
-set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${LIB_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
-set(CPACK_PACKAGE_VENDOR "MADS Consortium")
-set(CPACK_PACKAGE_DIRECTORY ${CMAKE_SOURCE_DIR}/packages)
-set(CPACK_STRIP_FILES TRUE)
-set(CPACK_PACKAGING_INSTALL_PREFIX "/usr/local")
-set(CPACK_PACKAGE_CONTACT "paolo.bosetti@unitn.it")
-set(CMAKE_PROJECT_HOMEPAGE_URL "https://github.com/pbosetti/MADS")
-set(CPACK_PACKAGE_DESCRIPTION "MADS installer: Multi-Agent Distributed System")
-if(APPLE)
-  set(CPACK_GENERATOR "STGZ")
-elseif(MSVC)
-  set(CPACK_GENERATOR "ZIP;INNOSETUP")
-  set(CPACK_PACKAGE_INSTALL_DIRECTORY "MADS")
-  set(CPACK_INNOSETUP_IGNORE_LICENSE_PAGE ON)
-  set(CPACK_INNOSETUP_IGNORE_README_PAGE ON)
-  set(CPACK_INSTALLED_DIRECTORIES 
-    ${CMAKE_INSTALL_PREFIX}/lib ./lib
-    ${CMAKE_INSTALL_PREFIX}/include ./include
-  )
+if(${MADS_SKIP_EXTERNALS})
+  set(CPACK_PACKAGE_NAME "${LIB_NAME}")
+  set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${GIT_TAG}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+  set(CPACK_PACKAGE_VENDOR "MADS Consortium")
+  set(CPACK_PACKAGE_DIRECTORY ${CMAKE_SOURCE_DIR}/packages)
+  set(CPACK_STRIP_FILES TRUE)
+  set(CPACK_PACKAGING_INSTALL_PREFIX "/usr/local")
+  set(CPACK_PACKAGE_CONTACT "paolo.bosetti@unitn.it")
+  set(CMAKE_PROJECT_HOMEPAGE_URL "https://github.com/pbosetti/MADS")
+  set(CPACK_PACKAGE_DESCRIPTION "MADS installer: Multi-Agent Distributed System")
+  set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_LIST_DIR}/LICENSE")
+  if(APPLE)
+    set(CPACK_GENERATOR "STGZ")
+    if(CMAKE_OSX_ARCHITECTURES MATCHES ";")
+      set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${GIT_TAG}-${CMAKE_SYSTEM_NAME}-universal")
+    endif()
+  elseif(MSVC)
+    set(CPACK_GENERATOR "ZIP;INNOSETUP")
+    set(CPACK_PACKAGE_INSTALL_DIRECTORY "MADS")
+    set(CPACK_INNOSETUP_IGNORE_LICENSE_PAGE OFF)
+    set(CPACK_INNOSETUP_IGNORE_README_PAGE ON)
+    set(CPACK_INNOSETUP_SETUP_ChangesEnvironment ON)
+    set(CPACK_INNOSETUP_EXTRA_SCRIPTS "${CMAKE_CURRENT_LIST_DIR}/iss/environment.iss")
+    set(CPACK_INNOSETUP_CODE_FILES "${CMAKE_CURRENT_LIST_DIR}/iss/events.iss")
+    set(CPACK_INSTALLED_DIRECTORIES 
+      ${CMAKE_INSTALL_PREFIX}/lib ./lib
+      ${CMAKE_INSTALL_PREFIX}/include ./include
+    )
+  else()
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libzstd1, libssl3, openssl")
+    set(CPACK_DEBIAN_PACKAGE_NAME MADS)
+    set(CPACK_GENERATOR "DEB")
+  endif()
+  include(CPack)
+  message(STATUS "Packaging enabled")
 else()
-  set(CPACK_DEBIAN_PACKAGE_DEPENDS "libzstd1, libssl3")
-  set(CPACK_DEBIAN_PACKAGE_NAME MADS)
-  set(CPACK_GENERATOR "DEB")
+  message(STATUS "Packaging not available: to enable it, set MADS_SKIP_EXTERNALS to ON")
 endif()
-include(CPack)
-
 
 #   ____                                        _        _   _             
 #  |  _ \  ___   ___ _   _ _ __ ___   ___ _ __ | |_ __ _| |_(_) ___  _ __  
@@ -358,15 +469,15 @@ include(CPack)
 #  |____/ \___/ \___|\__,_|_| |_| |_|\___|_| |_|\__\__,_|\__|_|\___/|_| |_|
                                                                          
 include(FindDoxygen)
+option(MADS_ENABLE_DOXYGEN "Enable doxygen documentation" OFF)
 find_package(Doxygen)
-if(DOXYGEN_FOUND)
+if(DOXYGEN_FOUND AND MADS_ENABLE_DOXYGEN)
   file(GLOB MARKDOWN_FILES "${CMAKE_CURRENT_LIST_DIR}/*.md")
-  option(MADS_ENABLE_DOXYGEN "Enable doxygen documentation" OFF)
   set(DOXYGEN_OUTPUT_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/doc)
   set(DOXYGEN_USE_MDFILE_AS_MAINPAGE ${CMAKE_CURRENT_LIST_DIR}/README.md)
   doxygen_add_docs(Doxygen
     ${SOURCE_DIR} ${MARKDOWN_FILES}
     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/doc
-    CONFIG_FILE Doxyfile
+    CONFIG_FILE ${CMAKE_CURRENT_LIST_DIR}/doc/Doxyfile
   )
 endif()

@@ -5,7 +5,12 @@
 
 # SYNOPSIS
 
-**mads** [**-h|--help**] *subcommand* [*args*]
+**mads** 
+  [**\-i|\-\-info**]
+  [**\-v|\-\-version**]
+  [**\-h|\-\-help**]
+
+**mads** *subcommand* [*args*]
 
 # DESCRIPTION
 
@@ -46,7 +51,10 @@ In addition, the **mads** command allows to create systemd services for running 
 **service**
 :  Create a systemd service for a MADS agent. The service is created in /etc/systemd/system and can be started, stopped, enabled and disabled using the systemctl command. See below for more details.
 
-## SERVICE SUBCOMMAND
+**info**
+:  Create a base **mads.ini** file.
+
+## SERVICE SUBCOMMAND (LINUX ONLY)
 
 The **service** subcommand has the following syntax:
 
@@ -57,6 +65,22 @@ where *command* is one of **broker**, **logger**, **source**, **sink** or **filt
 This command prints to the console the content of a systemd service file. Inspcet it to check if it is correct, then re-issue the same command with **sudo** to actually create the service.
 
 Then, use **systemctl start** *service_name* to start the service, **systemctl stop** *service_name* to stop it, **systemctl enable** *service_name* to enable it at boot time and **systemctl disable** *service_name* to disable it.
+
+## INI SUBCOMMAND
+
+The **ini** subcommand generates a stub for the **mads.ini** file, allowing some minor configuration on the command line. It has the following syntax:
+
+**mads ini**
+  [**\-o,\-\-output**] *filename*
+  [**\-i,\-\-install**]
+  [**\-b,\-\-broker**] *broker address*
+  [**\-F,\-\-frontend**] *broker frontend port*
+  [**\-B,\-\-backend**] *broker backend port*
+  [**\-s,\-\-settings**] *broker settings port*
+  [**\-f,\-\-fps**] *frames per second*
+  [**\-m,\-\-mongo**] *MongoDB URI*
+  [**\-h,\-\-help**]
+
 
 # BUGS
 
@@ -75,3 +99,7 @@ The upstream bug tracker can be found at https://github.com/pbosetti/MADS/issues
 # AUTHOR
 
 **mads** was written by Paolo Bosetti <paolo.bosetti@unitn.it>.
+
+# LICENSE
+
+https://creativecommons.org/licenses/by-sa/4.0/

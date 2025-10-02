@@ -11,11 +11,18 @@ The endpoints are defined in the settings file.
 
 Author(s): Paolo Bosetti
 */
+// clang-format off
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+#include "../exec_path.hpp"
 #include "../keypress.hpp"
 #include "../mads.hpp"
-#include "../exec_path.hpp"
+#include "../watcher.hpp"
 #include <cstring>
 #include <cxxopts.hpp>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <rang.hpp>
@@ -27,26 +34,38 @@ Author(s): Paolo Bosetti
 #include <zmqpp/proxy.hpp>
 #include <zmqpp/proxy_steerable.hpp>
 #include <zmqpp/zmqpp.hpp>
-#include <filesystem>
 #ifdef _WIN32
 #include <WinSock2.h>
 #include <iphlpapi.h>
+#include <signal.h>
 #else
 #include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <sys/ioctl.h>
 #endif
 
+
+
 #if defined(__linux__)
 #include <linux/if.h>
 #elif defined(__APPLE__)
 #include <net/if.h>
 #endif
+// clang-format on
 
 using namespace std::string_view_literals;
 using namespace std;
 using namespace cxxopts;
 using namespace rang;
+
+/*
+  _   _ _   _ _ _ _
+ | | | | |_(_) (_) |_ _   _
+ | | | | __| | | | __| | | |
+ | |_| | |_| | | | |_| |_| |
+  \___/ \__|_|_|_|\__|\__, |
+                      |___/
+*/
 
 bool get_nic_ip(string &ip, const string nic) {
 #ifdef _WIN32
@@ -106,7 +125,7 @@ bool get_nic_ip(string &ip, const string nic) {
     auto result = getifaddrs(&ptr_ifaddrs);
     if (result != 0) {
       cout << fg::red << "`getifaddrs()` failed: " << strerror(errno)
-                << fg::reset << endl;
+           << fg::reset << endl;
       return false;
     }
     cout << fg::yellow << "Available network adapters:" << fg::reset << endl;
@@ -114,7 +133,9 @@ bool get_nic_ip(string &ip, const string nic) {
          ptr_entry = ptr_entry->ifa_next) {
       string ipaddress_human_readable_form;
       string interface_name = string(ptr_entry->ifa_name);
-      if (!ptr_entry->ifa_addr) { continue; }
+      if (!ptr_entry->ifa_addr) {
+        continue;
+      }
       sa_family_t address_family = ptr_entry->ifa_addr->sa_family;
       if (address_family == AF_INET) {
         if (ptr_entry->ifa_addr != nullptr) {
@@ -126,7 +147,7 @@ bool get_nic_ip(string &ip, const string nic) {
         }
 
         cout << "[" << fg::yellow << setw(10) << interface_name << fg::reset
-                  << "] - " << ipaddress_human_readable_form << endl;
+             << "] - " << ipaddress_human_readable_form << endl;
       }
     }
     freeifaddrs(ptr_ifaddrs);
@@ -147,7 +168,7 @@ bool get_nic_ip(string &ip, const string nic) {
 
 #ifdef __linux__
 #include <algorithm> // std::reverse()
-#include <endian.h>  // __BYTE_ORDER __LITTLE_ENDIAN
+#include <endian.h> // __BYTE_ORDER __LITTLE_ENDIAN
 
 template <typename T> constexpr unsigned long long htonll(T value) noexcept {
 #if __BYTE_ORDER == __LITTLE_ENDIAN
@@ -163,6 +184,32 @@ void proxy(zmqpp::socket &frontend, zmqpp::socket &backend,
   zmqpp::proxy_steerable(frontend, backend, ctrl);
 }
 
+void send_char(char c) {
+#ifdef _WIN32
+  INPUT ip;
+  ip.type = INPUT_KEYBOARD;
+  ip.ki.wScan = 0;
+  ip.ki.time = 0;
+  ip.ki.dwExtraInfo = 0;
+  ip.ki.wVk = c;
+  ip.ki.dwFlags = 0;
+  SendInput(1, &ip, sizeof(INPUT));
+  ip.ki.dwFlags = KEYEVENTF_KEYUP;
+  SendInput(1, &ip, sizeof(INPUT));
+#else
+  ioctl(0, TIOCSTI, &c);
+#endif
+}
+
+/*
+  __  __       _
+ |  \/  | __ _(_)_ __
+ | |\/| |/ _` | | '_ \
+ | |  | | (_| | | | | |
+ |_|  |_|\__,_|_|_| |_|
+
+*/
+
 int main(int argc, char **argv) {
   bool running = true, reload = false;
   string settings_path = SETTINGS_PATH;
@@ -173,17 +220,29 @@ int main(int argc, char **argv) {
                       "FRONTEND msg out  ", "FRONTEND bytes out",
                       "BACKEND msg in    ", "BACKEND bytes in  ",
                       "BACKEND msg out   ", "BACKEND bytes out "};
-
+  // clang-format off
   options.add_options()
-    ("n,nic", "Network interface name (-n list to list them all)", value<string>())
+    ("n,nic", "Network interface name (-n list to list'em all)",
+      value<string>())
     ("s,settings", "Settings file path", value<string>())
     ("d,daemon", "Run as daemon")
+    ("docker", "Run as in container (don't check for file changes)")
+    ("v,version", "Print version")
     ("h,help", "Print usage");
+  // clang-format on
   auto options_parsed = options.parse(argc, argv);
 
   if (options_parsed.count("help")) {
     cout << argv[0] << " ver. " << LIB_VERSION << endl;
     cout << options.help() << endl;
+    return 0;
+  }
+  if (options_parsed.count("version")) {
+    cout << LIB_VERSION << endl;
+    return 0;
+  }
+  if (options_parsed.count("nic") && options_parsed["nic"].as<string>() == "list") {
+    get_nic_ip(ip, "list");
     return 0;
   }
 
@@ -211,6 +270,8 @@ int main(int argc, char **argv) {
          << err << style::reset << endl;
     exit(EXIT_FAILURE);
   }
+
+  double timecode_fps = config["agents"]["timecode_fps"].value_or(MADS_FPS);
 
   string frontend_address, backend_address, settings_address;
   frontend_address = config[name]["frontend_address"].value_or(BROKER_FRONTEND);
@@ -255,38 +316,105 @@ int main(int argc, char **argv) {
     std::ifstream t(settings_path);
     std::stringstream buffer;
     buffer << t.rdbuf();
-    string content(buffer.str());
+    string ini_table = buffer.str();
     while (running) {
+      zmqpp::message content;
+      content << LIB_VERSION;
       if (settings.receive(msg)) {
-        string cmd = msg.get(0);
+        if (msg.parts() < 2) {
+          cerr << fg::red << "Received malformed message from agent, "
+               << "expected at least 2 parts" << fg::reset << endl;
+          continue;
+        }
+        string agent_version = msg.get(0);
+        string cmd = msg.get(1);
+        string agent_name = "unknown";
+        if (msg.parts() == 3) {
+          agent_name = msg.get(2);
+        } 
         if (cmd == "settings") {
-          if (msg.parts() == 2) {
-            cout << "Sending settings to agent " << msg.get(1) << endl;
-          } else {
-            cout << "Sending settings to unknown agent" << endl;
+          if (!Mads::check_version(agent_version)) {
+            cerr << fg::red
+                 << "Received settings request from agent with wrong version: "
+                 << agent_version << " (vs. " << LIB_VERSION << ")" << fg::reset
+                 << endl;
+            continue;
+          }
+          cout << "Sending settings to agent " << agent_name << " ("
+               << agent_version << ")" << endl;
+          content << ini_table;
+          string attachment_path = config[agent_name]["attachment"].value_or("");
+          if (!attachment_path.empty()) {
+            if (filesystem::path(attachment_path).is_relative()) {
+              attachment_path = Mads::exec_dir(attachment_path);
+            }
+            if (!filesystem::exists(attachment_path)) {
+              cerr << fg::red << "attachment path does not exist: "
+                   << attachment_path << fg::reset << endl;
+            } else {
+              ifstream attachment_file(attachment_path, ios::in | ios::binary);
+              stringstream attachment_content;
+              cout << fg::yellow << "  Attaching binary object: "
+                   << style::bold << attachment_path
+                   << " (" << filesystem::file_size(attachment_path) << " bytes)"
+                   << fg::reset << endl;
+              attachment_content << attachment_file.rdbuf();
+              content << attachment_content.str();
+            }
           }
           settings.send(content);
         } else if (cmd == "timecode") {
           chrono::system_clock::time_point now = chrono::system_clock::now();
-          settings.send(to_string(Mads::timecode(now, MADS_FPS)));
+          settings.send(to_string(Mads::timecode(now, timecode_fps)));
         } else {
-          settings.send("{\"error\": \"Unknown command\"}");
+          cerr << fg::yellow << "Got unexpected command " << cmd << fg::reset
+               << endl;
+          settings.send(content);
         }
       }
     }
     settings.close();
   });
+
+  cout << "Timecode FPS: " << style::bold << timecode_fps << style::reset
+       << endl;
+
   // print settings URI for clients
   string port = settings_address.substr(settings_address.find_last_of(":") + 1);
   cout << "Settings are provided via " << style::bold << "tcp://" << ip << ":"
        << port << style::reset << endl;
 
+#ifndef _WIN32
+  if (options_parsed.count("docker") != 0) {
+    cout << fg::yellow
+         << "Running in container mode, remember to restart if mads.ini changes"
+         << fg::reset << endl;
+    zmqpp::proxy(frontend, backend);
+    exit(EXIT_SUCCESS);
+  }
+  thread watcher_thread;
   // Run as a daemon
   if (options_parsed.count("daemon") != 0) {
-    cout << "Running as daemon with PID " << getpid() << endl;
+    thread watcher_thread([&]() {
+      Mads::Watcher watcher(settings_path);
+      watcher.watch(&running, [&](const std::string &file_name) {
+        cout << fg::yellow << "Settings file " << file_name
+             << " has been modified, exiting..." << fg::reset << endl;
+        raise(SIGUSR1);
+      });
+    });
+    cout << "Running as daemon with PID " << getpid()
+         << ", will exit upon changes to " << settings_path << endl;
     zmqpp::proxy(frontend, backend);
     cerr << "Proxy exited" << endl;
   }
+#else
+  if (options_parsed.count("daemon") != 0) {
+    cout << "Running as daemon with PID " << getpid << endl;
+    zmqpp::proxy(frontend, backend);
+    cerr << "Proxy exited" << endl;
+  }
+#endif
 
   // Run interactively as a steerable proxy
   else {
@@ -295,20 +423,43 @@ int main(int argc, char **argv) {
     zmqpp::socket controller(context, zmqpp::socket_type::req);
     controller.connect("inproc://broker-ctrl");
 
+#ifndef _WIN32
+    // to stop this thread on Q, need implementing
+    // https://stackoverflow.com/questions/60718561/clean-way-to-stop-terminating-a-thread-waiting-on-stdin-in-c
+    watcher_thread = thread([&]() {
+      Mads::Watcher watcher(settings_path, 1s);
+      watcher.watch(&running, [&](const std::string &file_name) {
+        cout << fg::yellow << "Settings file " << file_name
+             << " has been modified, reloading..." << fg::reset << endl;
+        send_char('x');
+      });
+    });
+#endif
+
     thread proxy_thread(proxy, ref(frontend), ref(backend), ref(controlled));
     cout << style::italic << "CTRL-C to immediate exit" << style::reset << endl;
+#ifdef _WIN32
     cout << fg::green
-         << "Type P to pause, R to resume, I for information, Q to clean quit, "
-            "X to restart and reload settings"
+         << "Type P to pause, R to resume, I for information, Q to clean quit"
          << fg::reset << endl;
+#else
+    cout << fg::green
+         << "Type P to pause, R to resume, I for information, Q to clean "
+            "quit, X to restart and reload settings"
+         << fg::reset << endl;
+#endif
 
     while (running) {
       zmqpp::message msg;
       char c = key_press();
       switch (c) {
+#ifndef _WIN32
+      // On Windows, the execv() function detaches from terminal and the
+      // key_press() function does not work anymore
       case 'x':
       case 'X':
         reload = true;
+#endif
       case 'q':
       case 'Q':
         controller.send("TERMINATE");
@@ -354,23 +505,33 @@ int main(int argc, char **argv) {
         break;
       }
       default:
+#ifdef _WIN32
         cout << fg::green
              << "Type P to pause, R to resume, I for information, Q to clean "
-                 "quit, X to restart and reload settings" << fg::reset << endl;
+                "quit"
+             << fg::reset << endl;
+#else
+        cout << fg::green
+             << "Type P to pause, R to resume, I for information, Q to clean "
+                "quit, X to restart and reload settings"
+             << fg::reset << endl;
+#endif
         break;
       }
     }
 
-    cout << fg::green << "Closing sockets..." << endl;
+    cout << fg::green << "Closing sockets..." << fg::reset << endl;
     running = false;
     proxy_thread.join();
     settings_thread.join();
+#ifndef _WIN32
+    watcher_thread.join();
+#endif
     frontend.close();
     backend.close();
     controller.close();
     controlled.close();
     context.terminate();
-    cout << "Done." << fg::reset << endl;
     if (reload) {
       cout << fg::yellow << "Restarting..." << fg::reset << endl;
       execv(Mads::exec_path().string().c_str(), argv);

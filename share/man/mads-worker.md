@@ -10,6 +10,7 @@
   [**\-i, \-\-agent-id** *agent-id*]
   [**\-s, \-\-settings** *URI*]
   [**\-S, \-\-save-settings** *filename*]
+  [**\-v, \-\-version**]
   [**\-h, \-\-help**]
   [*plugin*]
 
@@ -38,6 +39,9 @@ For **mads-worker**, the plugin must be of type **filter**, i.e. it must impleme
 **\-S**, **\-\-save-settings** *filename*
 :  Save the settings (loaded by the broker or via **\-s** option) to the given file (ini format).
 
+**\-v**, **\-\-version**
+: show version information.
+
 **\-h**, **\-\-help**
 :  show summary of options.
 
@@ -61,3 +65,7 @@ The upstream bug tracker can be found at https://github.com/pbosetti/MADS/issues
 # AUTHOR
 
 **mads-worker** was written by Paolo Bosetti <paolo.bosetti@unitn.it>.
+
+# LICENSE
+
+https://creativecommons.org/licenses/by-sa/4.0/

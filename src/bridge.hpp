@@ -61,6 +61,7 @@ public:
     string payload, compressed;
     regex re("^(\\w+):\\s*(\\{.*\\})\\s*$");
     smatch match;
+    json j;
     while (getline(cin, payload)) {
       if (payload == "exit") {
         Mads::running = false;
@@ -71,13 +72,13 @@ public:
         payload = match[2];
       }
       cout << "Topic: " << _pub_topic << ", Payload: " << payload << endl;
-      if (_compress) {
-        snappy::Compress(payload.data(), payload.length(), &compressed);
-        message << _pub_topic << compressed;
-      } else {
-        message << _pub_topic << payload;
+      try {
+        j = json::parse(payload);
+        publish(j, _pub_topic);
+      } catch (const std::exception &e) {
+        cerr << "Failed to parse JSON: " << e.what() << endl;
+        continue;
       }
-      _publisher.send(message);
     }
   }
 

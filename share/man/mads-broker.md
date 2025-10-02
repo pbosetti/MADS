@@ -5,7 +5,7 @@
 
 # SYNOPSIS
 
-**mads-broker** [**-n, --nic**] [**-s, --settings** *arg*] [**-d, --daemon**] [**-h, --help**]
+**mads-broker** [**\-n, \-\-nic**] [**\-s, \-\-settings** *arg*] [**\-d, \-\-daemon**]   [**\-v, \-\-version**] [**\-h, \-\-help**]
 
 # DESCRIPTION
 
@@ -21,6 +21,9 @@
 
 **\-d**, **\-\-daemon**
 :  run the broker as a daemon. This suppress the output to the console upon launch and the interactive behavior.
+
+**\-v**, **\-\-version**
+: show version information.
 
 **\-h**, **\-\-help**
 :  show summary of options.
@@ -40,3 +43,7 @@ The upstream bug tracker can be found at https://github.com/pbosetti/MADS/issues
 # AUTHOR
 
 **mads-broker** was written by Paolo Bosetti <paolo.bosetti@unitn.it>.
+
+# LICENSE
+
+https://creativecommons.org/licenses/by-sa/4.0/

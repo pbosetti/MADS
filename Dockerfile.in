@@ -1,7 +1,8 @@
-FROM ubuntu:22.04
-LABEL maintainer="paolo.bosetti@unitn.it"
+FROM ubuntu:24.04
+LABEL org.opencontainers.image.authors="paolo.bosetti@unitn.it"
+ARG DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC
 
-ENV BUILDDIR /build
+ARG BUILDDIR=/build
 
 RUN mkdir ${BUILDDIR}
 WORKDIR /root
@@ -9,6 +10,7 @@ WORKDIR /root
 RUN apt-get update && apt-get install -y \
     clang \
     cmake \
+    libssl-dev \
     git && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* 
@@ -18,9 +20,11 @@ COPY CMakeLists.txt ${BUILDDIR}
 COPY external.cmake ${BUILDDIR}
 COPY Dockerfile.in ${BUILDDIR}
 COPY mads.ini ${BUILDDIR}
+COPY share ${BUILDDIR}/share
+COPY scripts ${BUILDDIR}/scripts
 
-ENV CC /usr/bin/clang
-ENV CXX /usr/bin/clang++
+ENV CC=/usr/bin/clang
+ENV CXX=/usr/bin/clang++
 
 RUN cd ${BUILDDIR} && \
     cmake -Bbuild -DMADS_ENABLE_METADATA=OFF -DMADS_ENABLE_LOGGER=ON -DCMAKE_BUILD_TYPE=Release && \
@@ -29,12 +33,9 @@ RUN cd ${BUILDDIR} && \
     rm -rf build && \
     cp ${BUILDDIR}/products/lib/*.so* /usr/local/lib
 
-COPY scripts ${BUILDDIR}/scripts
-COPY Docker/compose.yml ${BUILDDIR}
-COPY Docker/cmd.sh ${BUILDDIR}
-
 EXPOSE 9090 9091 9092
 
 LABEL version=@LIB_VERSION@
 
-ENTRYPOINT ["/build/cmd.sh"]
+ENTRYPOINT ["/usr/local/bin/mads"]
+CMD ["broker"]

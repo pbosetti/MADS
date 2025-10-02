@@ -26,9 +26,11 @@ int main(int argc, char *argv[]) {
 
   // CLI options
   Options options(argv[0]);
+  // clang-format off
   options.add_options()
     ("p", "Sampling period (default 100 ms)", value<size_t>())
     ("c,continuous", "Continuous sampling", value<bool>());
+  // clang-format on
   SETUP_OPTIONS(options, Mads::Metadata);
 
   // Settings
@@ -66,8 +68,9 @@ int main(int argc, char *argv[]) {
   metadata.register_event(event_type::shutdown);
   metadata.disconnect();
   if (metadata.restart()) {
-    cout << "Restarting..." << endl;
-    execvp(argv[0], argv);
+    auto cmd = string(MADS_PREFIX) + argv[0];
+    cout << "Restarting " << cmd << "..." << endl;
+    execvp(cmd.c_str(), argv);
   }
   return 0;
 }

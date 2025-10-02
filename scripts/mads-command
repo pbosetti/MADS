@@ -1,9 +1,10 @@
 #!/bin/bash
-# enable/disable logging
+# restart all agents
 
 SCRIPT_DIR=$(dirname "$0")
-COMMAND="bridge"
-USAGE="Usage: $0 <on|off> [mads bin dir]"
+COMMAND="mads-bridge"
+USAGE="Usage: $0 <stop|restart>"
+
 
 # Check number of arguments
 if [ $# -eq 0 ]; then
@@ -21,14 +22,13 @@ else
   exit 1
 fi
 
-
-if [ "$1" == "on" ]; then
-  echo "Enabling logging"
-  ${COMMAND} -t metadata -m "{\"pause\":false}"
+if [ "$1" == "stop" ]; then
+  echo "Stopping agents"
+  ${COMMAND} -t control -m "{\"cmd\":\"shutdown\"}"
   exit 0
-elif [ "$1" == "off" ]; then
-  echo "Disabling logging"
-  ${COMMAND} -t metadata -m "{\"pause\":true}"
+elif [ "$1" == "restart" ]; then
+  echo "Restarting agents"
+  ${COMMAND} -t control -m "{\"cmd\":\"restart\"}"
   exit 0
 else
   echo "Unsupported command. ${USAGE}"

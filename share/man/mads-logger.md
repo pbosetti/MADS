@@ -15,6 +15,7 @@
   [**\-x, \-\-cross**]
   [**\-s, \-\-settings** *arg*]
   [**\-S, \-\-save-settings** *arg*]
+  [**\-v, \-\-version**]
   [**\-h, \-\-help**]
 
 # DESCRIPTION
@@ -50,6 +51,9 @@
 **\-S**, **\-\-save-settings** *filename.ini*
 :  Save the settings (loaded by the broker or via **\-s** option) to the given file (ini format).
 
+**\-v**, **\-\-version**
+: show version information.
+
 **\-h**, **\-\-help**
 :  show summary of options.
 
@@ -68,3 +72,7 @@ The upstream bug tracker can be found at https://github.com/pbosetti/MADS/issues
 # AUTHOR
 
 **mads-logger** was written by Paolo Bosetti <paolo.bosetti@unitn.it>.
+
+# LICENSE
+
+https://creativecommons.org/licenses/by-sa/4.0/

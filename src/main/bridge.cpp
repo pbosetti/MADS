@@ -1,10 +1,10 @@
 /*
-  ____       _     _            
- | __ ) _ __(_) __| | __ _  ___ 
+  ____       _     _
+ | __ ) _ __(_) __| | __ _  ___
  |  _ \| '__| |/ _` |/ _` |/ _ \
  | |_) | |  | | (_| | (_| |  __/
  |____/|_|  |_|\__,_|\__, |\___|
-                     |___/      
+                     |___/
 Bridge agent: it is designed to read JSON messages coming from an external
 executable via an input pipe and route them to the broker.
 Run this like:
@@ -30,10 +30,9 @@ int main(int argc, char const *argv[]) {
 
   // Settings
   Options options(argv[0]);
-  options.add_options()
-      ("t,topic", "Topic (default bridge)", value<string>())
-      ("m,message", "Message (default empty)", value<string>())
-      ("p,period", "Sampling period (default 100 ms)", value<size_t>());
+  options.add_options()("t,topic", "Topic (default bridge)", value<string>())(
+      "m,message", "Message (default empty)", value<string>())(
+      "p,period", "Sampling period (default 100 ms)", value<size_t>());
   SETUP_OPTIONS(options, Bridge)
 
   if (options_parsed.count("t") != 0) {
@@ -42,7 +41,7 @@ int main(int argc, char const *argv[]) {
   if (options_parsed.count("p") != 0) {
     sleep_time = chrono::milliseconds(options_parsed["p"].as<size_t>());
   }
-  if(options_parsed.count("m") != 0) {
+  if (options_parsed.count("m") != 0) {
     message = options_parsed["m"].as<string>();
     single_shot = true;
   }
@@ -58,7 +57,8 @@ int main(int argc, char const *argv[]) {
   }
   bridge.set_pub_topic(topic);
   bridge.connect(CONNECT_DELAY);
-  if (!single_shot) bridge.info();
+  if (!single_shot)
+    bridge.info();
 
   if (!message.empty()) {
     // wait_for_connection();
@@ -69,10 +69,9 @@ int main(int argc, char const *argv[]) {
   } else {
     bridge.register_event(event_type::startup);
     // Main loop
-    cout << fg::green << "Bridge process started" << fg::reset << endl;
-    bridge.loop([&]() {
-      bridge.route();
-    }, sleep_time);
+    cout << fg::green << "Bridge process started, send 'exit' to stop"
+         << fg::reset << endl;
+    bridge.loop([&]() { bridge.route(); }, sleep_time);
     cout << fg::green << "Bridge process stopped" << fg::reset << endl;
     bridge.register_event(event_type::shutdown);
   }

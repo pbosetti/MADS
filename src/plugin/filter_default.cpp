@@ -46,7 +46,7 @@ public:
     string line;
     getline(cin, line);
     try{
-     out = json::parse(line);
+      out = json::parse(line);
     } catch (json::parse_error &e) {
       _error = e.what();
       return return_type::error;

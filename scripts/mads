@@ -7,7 +7,7 @@
 #                                                  |_|   |_|              
 # MADS wraper for all "mads-" prefixed commands
 CMD_PREFIX="mads-"
-AVAILABLE_COMMANDS=("broker" "logger" "source" "filter" "sink" "feedback", "dealer" "worker")
+AVAILABLE_COMMANDS=("broker" "logger" "source" "filter" "sink" "feedback", "dealer" "worker" "command" "logging" "plugin")
 USR_PATH="$(dirname "$(dirname "$(readlink -f "$0")")")"
 SYSTEMD_PATH="/etc/systemd/system"
 
@@ -76,6 +76,11 @@ ExecStart=${USR_PATH}/bin/${command}
 WantedBy=multi-user.target
 EOF
 }
+
+if [ "$1" = "-v" ] || [ "$1" = "--version" ]; then
+  mads-broker -v
+  exit 0
+fi
 
 # Check if the program argument is provided
 if [ -z "$1" ]; then

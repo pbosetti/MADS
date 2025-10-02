@@ -12,6 +12,8 @@ Author(s): Paolo Bosetti
 #include "../mads.hpp"
 #include "../agent.hpp"
 #include <cxxopts.hpp>
+#include <cppy3/cppy3.hpp>
+#include <cppy3/utilits.hpp>
 
 using namespace std;
 using namespace cxxopts;
@@ -55,8 +57,9 @@ int main(int argc, char *argv[]) {
   agent.register_event(event_type::shutdown);
   agent.disconnect();
   if (agent.restart()) {
-    cout << "Restarting..." << endl;
-    execvp(argv[0], argv);
+    auto cmd = string(MADS_PREFIX) + argv[0];
+    cout << "Restarting " << cmd << "..." << endl;
+    execvp(cmd.c_str(), argv);
   }
   return 0;
 }
