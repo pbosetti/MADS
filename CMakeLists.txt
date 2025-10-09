@@ -80,6 +80,7 @@ option(MADS_ENABLE_GUI "Compile GUI (requires QT6)" OFF)
 option(MADS_SKIP_EXTERNALS 
        "Skip external targets (assume already compiled)" OFF)
 option(MADS_MINIMAL "Only compile filter and source executables" OFF)
+option(MADS_USE_SYSTEM_LIBS "Use system-installed libs for ZeroMQ, Snappy, and MongoDB" OFF)
 
 #  __     __             
 #  \ \   / /_ _ _ __ ___ 
@@ -196,9 +197,6 @@ FetchContent_Populate(inja
 #                                                    |___/     
 
 include_directories(
-  ${USR_DIR}/include 
-  ${USR_DIR}/include/mongocxx/v_noabi 
-  ${USR_DIR}/include/bsoncxx/v_noabi
   ${tomlplusplus_SOURCE_DIR}/include
   ${nlohmann_json_SOURCE_DIR}/include
   ${cxxopts_SOURCE_DIR}/include
@@ -207,7 +205,15 @@ include_directories(
   ${plugin_SOURCE_DIR}/src
   ${inja_SOURCE_DIR}/include
 )
-link_directories(${USR_DIR}/lib)
+if (NOT MADS_USE_SYSTEM_LIBS)
+  include_directories(
+    ${USR_DIR}/include 
+    ${USR_DIR}/include/mongocxx/v_noabi 
+    ${USR_DIR}/include/bsoncxx/v_noabi
+  )
+  link_directories(${USR_DIR}/lib)
+endif() 
+
 
 if(WIN32)
   file(GLOB LIB_ZMQ "${USR_DIR}/lib/libzmq*.lib")
@@ -223,7 +229,7 @@ if(WIN32)
   set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -DZMQ_STATIC")
   add_compile_options(/MP)
 else()
-  set(LIB_LIST pthread zmqpp-static zmq snappy)
+  set(LIB_LIST pthread libzmqpp.a libzmq.a libsnappy.a)
   set(DLOPEN_LIB dl)
 endif()
 
@@ -364,40 +370,42 @@ install(TARGETS ${TARGET_LIST}
   INCLUDES DESTINATION include
   COMPONENT MADS
 )
-install(FILES 
-  ${SOURCE_DIR}/mads.hpp
-  ${SOURCE_DIR}/agent.hpp
-  ${SOURCE_DIR}/exec_path.hpp
-  ${USR_DIR}/include/snappy.h
-  ${USR_DIR}/include/snappy-stubs-public.h
-  ${USR_DIR}/include/zmq.h
-  ${USR_DIR}/include/zmq_utils.h
-  ${USR_DIR}/include/zmqpp_export.h
-  TYPE INCLUDE
-)
-install(DIRECTORY 
-  ${tomlplusplus_SOURCE_DIR}/include/toml++
-  ${nlohmann_json_SOURCE_DIR}/include/nlohmann
-  ${USR_DIR}/include/zmqpp
-  TYPE INCLUDE
-)
-if(MSVC)
-  file(GLOB MSVC_LIBS "${USR_DIR}/lib/*.lib")
-  install(FILES
-    ${MSVC_LIBS}
-    TYPE LIB
+if(NOT MADS_USE_SYSTEM_LIBS)
+  install(FILES 
+    ${SOURCE_DIR}/mads.hpp
+    ${SOURCE_DIR}/agent.hpp
+    ${SOURCE_DIR}/exec_path.hpp
+    ${USR_DIR}/include/snappy.h
+    ${USR_DIR}/include/snappy-stubs-public.h
+    ${USR_DIR}/include/zmq.h
+    ${USR_DIR}/include/zmq_utils.h
+    ${USR_DIR}/include/zmqpp_export.h
+    TYPE INCLUDE
   )
-else()
-  install(FILES
-    ${USR_DIR}/lib/libbson-static-1.0.a
-    ${USR_DIR}/lib/libbsoncxx-static.a
-    ${USR_DIR}/lib/libmongoc-static-1.0.a
-    ${USR_DIR}/lib/libmongocxx-static.a
-    ${USR_DIR}/lib/libzmqpp-static.a
-    ${USR_DIR}/lib/libzmq.a
-    ${USR_DIR}/lib/libsnappy.a
-    TYPE LIB
+  install(DIRECTORY 
+    ${tomlplusplus_SOURCE_DIR}/include/toml++
+    ${nlohmann_json_SOURCE_DIR}/include/nlohmann
+    ${USR_DIR}/include/zmqpp
+    TYPE INCLUDE
   )
+  if(MSVC)
+    file(GLOB MSVC_LIBS "${USR_DIR}/lib/*.lib")
+    install(FILES
+      ${MSVC_LIBS}
+      TYPE LIB
+    )
+  else()
+    install(FILES
+      ${USR_DIR}/lib/libbson-static-1.0.a
+      ${USR_DIR}/lib/libbsoncxx-static.a
+      ${USR_DIR}/lib/libmongoc-static-1.0.a
+      ${USR_DIR}/lib/libmongocxx-static.a
+      ${USR_DIR}/lib/libzmqpp-static.a
+      ${USR_DIR}/lib/libzmq.a
+      ${USR_DIR}/lib/libsnappy.a
+      TYPE LIB
+    )
+  endif()
 endif()
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/templates
   DESTINATION share
