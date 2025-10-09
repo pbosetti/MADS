@@ -81,7 +81,6 @@ option(MADS_SKIP_EXTERNALS
        "Skip external targets (assume already compiled)" OFF)
 option(MADS_MINIMAL "Only compile filter and source executables" OFF)
 
-
 #  __     __             
 #  \ \   / /_ _ _ __ ___ 
 #   \ \ / / _` | '__/ __|

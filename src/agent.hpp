@@ -42,6 +42,7 @@ Author(s): Paolo Bosetti
 #include <string>
 #include <string_view>
 #include <thread>
+#include <future>
 #include <zmqpp/zmqpp.hpp>
 
 #ifndef HOST_NAME_MAX
@@ -531,7 +532,7 @@ public:
     bool subscriber = !_sub_topic.empty();
     _sub_topic.push_back("control");
     if (!subscriber)
-      control_thread = new thread([&]() {
+      thread([&]() {
         _subscriber.set(zmqpp::socket_option::receive_timeout, 100);
         while (Mads::running) {
           message_type type;
@@ -545,7 +546,7 @@ public:
             continue;
           remote_control();
         }
-      });
+      }).detach();
   }
 
 
@@ -684,7 +685,7 @@ public:
       throw AgentError("Agent not initialized");
     message message;
     message_type result = message_type::none;
-    string topic, format, payload, *j;
+    string topic, format, payload, j;
     if (!_subscriber.receive(message, dont_block)) {
       return result;
     }
@@ -696,13 +697,12 @@ public:
     case 2: // Payload is JSON
       message >> topic >> payload;
       if (_compress) {
-        j = new string;
-        snappy::Uncompress(payload.data(), payload.size(), j);
+        snappy::Uncompress(payload.data(), payload.size(), &j);
       } else {
-        j = &payload;
+        j = payload;
       }
-      _status[topic] = *j;
-      _last_message = make_tuple(topic, *j);
+      _status[topic] = j;
+      _last_message = make_tuple(topic, j);
       result = message_type::json;
       break;
     case 3: // Payload is a binary blob, type is in message[1]
@@ -1023,7 +1023,6 @@ protected:
   int _receive_timeout = 500;
   int _settings_timeout = 0;
   bool _init_done = false;
-  thread *control_thread = nullptr;
   bool _restart = false;
   chrono::milliseconds _time_step = chrono::milliseconds(0);
   double _timecode_offset = 0.0;
