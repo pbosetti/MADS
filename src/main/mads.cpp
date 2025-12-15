@@ -507,6 +507,7 @@ int main(int argc, char **argv) {
     return 0;
   }
   if (options_parsed.count("keypair")) {
+    zmqpp::context context;
     string name = options_parsed["keypair"].as<string>();
     pair<string, string> key_files;
     if (!save_keypair(key_files, fs::current_path(), name, force)) {
