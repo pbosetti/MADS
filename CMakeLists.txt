@@ -167,7 +167,31 @@ FetchContent_Declare(pugg
   GIT_SHALLOW    TRUE
 )
 
-FetchContent_MakeAvailable(tomlplusplus nlohmann_json cxxopts rang pugg)
+FetchContent_Declare(
+  libzmq
+  GIT_REPOSITORY https://github.com/zeromq/libzmq.git
+  GIT_TAG v4.3.5
+  GIT_SHALLOW TRUE
+)
+set(ZMQ_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(WITH_LIBSODIUM ON CACHE BOOL "" FORCE)
+set(WITH_LIBSODIUM_STATIC ON CACHE BOOL "" FORCE)
+set(ENABLE_CURVE ON CACHE BOOL "" FORCE)
+set(BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(BUILD_STATIC ON CACHE BOOL "" FORCE)
+
+FetchContent_Declare(
+  zmqpp
+  GIT_REPOSITORY https://github.com/zeromq/zmqpp.git
+  GIT_TAG HEAD
+  GIT_SHALLOW TRUE
+)
+set(ZMQPP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(ZMQPP_BUILD_CLIENT OFF CACHE BOOL "" FORCE)
+set(ZMQPP_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(ZMQPP_BUILD_STATIC ON CACHE BOOL "" FORCE)
+
+FetchContent_MakeAvailable(tomlplusplus nlohmann_json cxxopts rang pugg libzmq zmqpp)
 
 FetchContent_Populate(plugin 
   GIT_REPOSITORY https://github.com/pbosetti/mads_plugin.git
@@ -206,6 +230,8 @@ include_directories(
   ${date_SOURCE_DIR}/include
   ${plugin_SOURCE_DIR}/src
   ${inja_SOURCE_DIR}/include
+  ${zmqpp_SOURCE_DIR}/src
+  ${libzmq_SOURCE_DIR}/include
 )
 link_directories(${USR_DIR}/lib)
 
@@ -223,7 +249,7 @@ if(WIN32)
   set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -DZMQ_STATIC")
   add_compile_options(/MP)
 else()
-  set(LIB_LIST pthread zmqpp-static zmq snappy)
+  set(LIB_LIST pthread zmqpp-static libzmq-static snappy)
   set(DLOPEN_LIB dl)
 endif()
 
@@ -275,9 +301,9 @@ endif()
 # Main command
 add_executable(mads ${MAIN_DIR}/mads.cpp)
 if(UNIX AND NOT APPLE)
-  target_link_libraries(mads OpenSSL::Crypto OpenSSL::SSL)
+  target_link_libraries(mads OpenSSL::Crypto OpenSSL::SSL libzmq-static zmqpp-static)
 else()
-  target_link_libraries(mads)
+  target_link_libraries(mads libzmq-static zmqpp-static)
 endif()
 list(APPEND TARGET_LIST mads)
 
@@ -336,8 +362,8 @@ if(NOT ${MADS_SKIP_EXTERNALS})
   message(STATUS "Compiling third party libraries")
   include(external.cmake)  
   foreach(t IN ITEMS ${TARGET_LIST})
-    add_dependencies(${t} libzmq)
-    add_dependencies(${t} zmqpp)
+    # add_dependencies(${t} libzmq)
+    # add_dependencies(${t} zmqpp)
     add_dependencies(${t} snappy)
   endforeach()
   if (${MADS_ENABLE_LOGGER})
@@ -370,9 +396,9 @@ install(FILES
   ${SOURCE_DIR}/exec_path.hpp
   ${USR_DIR}/include/snappy.h
   ${USR_DIR}/include/snappy-stubs-public.h
-  ${USR_DIR}/include/zmq.h
-  ${USR_DIR}/include/zmq_utils.h
-  ${USR_DIR}/include/zmqpp_export.h
+  ${libzmq_SOURCE_DIR}/include/zmq.h
+  ${libzmq_SOURCE_DIR}/include/zmq_utils.h
+  ${zmqpp_BINARY_DIR}/zmqpp_export.h
   TYPE INCLUDE
 )
 install(DIRECTORY 
@@ -393,9 +419,9 @@ else()
     ${USR_DIR}/lib/libbsoncxx-static.a
     ${USR_DIR}/lib/libmongoc-static-1.0.a
     ${USR_DIR}/lib/libmongocxx-static.a
-    ${USR_DIR}/lib/libzmqpp-static.a
-    ${USR_DIR}/lib/libzmq.a
     ${USR_DIR}/lib/libsnappy.a
+    ${libzmq_BINARY_DIR}/lib/libzmq.a
+    ${zmqpp_BINARY_DIR}/libzmqpp-static.a
     TYPE LIB
   )
 endif()

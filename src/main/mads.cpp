@@ -24,6 +24,8 @@ Author: Paolo Bosetti, July 2024
 #include <iostream>
 #include <nlohmann/json.hpp>
 #include <rang.hpp>
+#include <zmqpp/zmqpp.hpp>
+#include <zmqpp/curve.hpp>
 
 #ifdef _WIN32
 #include <process.h>
@@ -55,6 +57,33 @@ namespace fs = std::filesystem;
 bool includes(vector<string> const &commands, string const &command) {
   return find(commands.begin(), commands.end(), command) != commands.end();
 }
+
+bool save_keypair(pair<string, string> &key_files, const string &path, const string &name, bool force=false) {
+  zmqpp::curve::keypair keypair = zmqpp::curve::generate_keypair();
+  key_files.first = fs::path(path) / (name + ".key");
+  key_files.second = fs::path(path) / (name + ".pub");
+  if (!force) {
+    if (fs::exists(key_files.first) || fs::exists(key_files.second)) {
+      cerr << fg::red << "Error: key files already exist. Use -f to overwrite."
+           << fg::reset << endl;
+      return false;
+    }
+  }
+  try {
+    ofstream key_file(key_files.first);
+    ofstream pub_file(key_files.second);
+    key_file << keypair.secret_key;
+    pub_file << keypair.public_key;
+    key_file.close();
+    pub_file.close();
+  } catch (const std::exception &e) {
+    cerr << fg::red << "Error: cannot write key files: " << e.what()
+         << fg::reset << endl;
+    return false;
+  }
+  return true;
+}
+
 
 /*
   _       _                                                 _
@@ -375,6 +404,7 @@ int update() {
 int main(int argc, char **argv) {
   string exec_dir = Mads::exec_dir();
   auto template_dir = Mads::exec_dir("../share/templates/");
+  bool force = false;
 
   vector<string> ext_commands;
   for (auto const &item : filesystem::directory_iterator(exec_dir)) {
@@ -412,6 +442,8 @@ int main(int argc, char **argv) {
     ("i,info", "Print information on MADS installation")
     ("p,prefix", "Print MADS linstall prefix")
     ("plugins", "List plugins in default plugins directory")
+    ("keypair", "Generate ZMQ CURVE keypair", value<string>()->implicit_value("mads"))
+    ("f,force", "Force operation (if applicable)")
     ("v,version", "Print version")
   #ifdef MADS_ENABLE_UPDATE
     ("u,update", "Check online for MADS updates")
@@ -432,9 +464,20 @@ int main(int argc, char **argv) {
   } catch (const std::exception &e) {
     cerr << fg::red << "Unknown CLI option" << fg::reset << '\n';
     cerr << options.help() << endl;
-    ;
+  }
+  if (options_parsed.unmatched().size() > 0) {
+    cerr << fg::red << "Unexpected CLI option: ";
+    for (auto const &opt : options_parsed.unmatched()) {
+      cerr << opt << " ";
+    }
+    cerr << fg::reset << endl;
+    cerr << options.help() << endl;
+    return -1;
   }
 
+  if (options_parsed.count("force")) {
+    force = true;
+  }
   if (options_parsed.count("help")) {
     cout << options.help() << endl;
     return 0;
@@ -461,6 +504,28 @@ int main(int argc, char **argv) {
          << style::reset << endl;
     cout << "Mads INI file: " << style::bold
          << Mads::exec_dir("../etc/mads.ini") << style::reset << endl;
+    return 0;
+  }
+  if (options_parsed.count("keypair")) {
+    string name = options_parsed["keypair"].as<string>();
+    pair<string, string> key_files;
+    if (!save_keypair(key_files, fs::current_path(), name, force)) {
+      cerr << fg::red << "Keypair generation failed" << fg::reset << endl;
+      return -1;
+    }
+    cout << fg::green << "Keypair generated:" << fg::reset << endl;
+    cout << "  Secret key: " << style::bold << key_files.first << style::reset
+         << endl;
+    cout << "  Public key: " << style::bold << key_files.second << style::reset
+         << endl;
+    cout << "If this pair is for an agent, save both keys in the agent device."
+         << endl;
+    cout << "If this pair is for the broker, " << style::bold
+         << "distribute only the public key to the clients." << style::reset
+         << endl;
+    cout << "Broker and agents look for the keys in the prefix directory (here "
+         << Mads::prefix() << ") by default." << endl;
+    cout << fg::yellow << "Keep the secret key safe!" << fg::reset << endl;
     return 0;
   }
 #ifdef MADS_ENABLE_UPDATE
