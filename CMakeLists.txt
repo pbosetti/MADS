@@ -167,7 +167,14 @@ FetchContent_Declare(pugg
   GIT_SHALLOW    TRUE
 )
 
-
+set(SNAPPY_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+set(SNAPPY_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(snappy
+  GIT_REPOSITORY https://github.com/google/snappy.git
+  GIT_TAG        1.2.2
+  GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(snappy)
 
 if(MSVC)
   FetchContent_Populate(libsodium
@@ -408,12 +415,17 @@ install(TARGETS ${TARGET_LIST}
   INCLUDES DESTINATION include
   COMPONENT MADS
 )
+file(GLOB ZMQPP_HEADER_FILES "${zmqpp_SOURCE_DIR}/src/zmqpp/*.hpp")
+install(FILES 
+  ${ZMQPP_HEADER_FILES}
+  DESTINATION include/zmqpp
+)
 install(FILES 
   ${SOURCE_DIR}/mads.hpp
   ${SOURCE_DIR}/agent.hpp
   ${SOURCE_DIR}/exec_path.hpp
-  ${USR_DIR}/include/snappy.h
-  ${USR_DIR}/include/snappy-stubs-public.h
+  ${snappy_SOURCE_DIR}/snappy.h
+  ${snappy_BINARY_DIR}/snappy-stubs-public.h
   ${libzmq_SOURCE_DIR}/include/zmq.h
   ${libzmq_SOURCE_DIR}/include/zmq_utils.h
   ${zmqpp_BINARY_DIR}/zmqpp_export.h
@@ -422,7 +434,6 @@ install(FILES
 install(DIRECTORY 
   ${tomlplusplus_SOURCE_DIR}/include/toml++
   ${nlohmann_json_SOURCE_DIR}/include/nlohmann
-  ${USR_DIR}/include/zmqpp
   TYPE INCLUDE
 )
 if(MSVC)
@@ -437,7 +448,7 @@ else()
     ${USR_DIR}/lib/libbsoncxx-static.a
     ${USR_DIR}/lib/libmongoc-static-1.0.a
     ${USR_DIR}/lib/libmongocxx-static.a
-    ${USR_DIR}/lib/libsnappy.a
+    ${snappy_BINARY_DIR}/libsnappy.a
     ${libzmq_BINARY_DIR}/lib/libzmq.a
     ${zmqpp_BINARY_DIR}/libzmqpp-static.a
     TYPE LIB
