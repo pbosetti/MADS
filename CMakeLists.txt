@@ -167,6 +167,7 @@ FetchContent_Declare(pugg
   GIT_SHALLOW    TRUE
 )
 
+list(PREPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/vendor")
 FetchContent_Declare(
   libzmq
   GIT_REPOSITORY https://github.com/zeromq/libzmq.git
@@ -179,6 +180,8 @@ set(WITH_LIBSODIUM_STATIC ON CACHE BOOL "" FORCE)
 set(ENABLE_CURVE ON CACHE BOOL "" FORCE)
 set(BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(BUILD_STATIC ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(libzmq)
+
 
 FetchContent_Declare(
   zmqpp
@@ -186,12 +189,14 @@ FetchContent_Declare(
   GIT_TAG HEAD
   GIT_SHALLOW TRUE
 )
+set(ZEROMQ_INCLUDE "${libzmq_SOURCE_DIR}/include" CACHE INTERNAL "")
+set(ZEROMQ_LIBRARY_STATIC "${libzmq_BINARY_DIR}/lib/libzmq-static.a" CACHE INTERNAL "")
 set(ZMQPP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(ZMQPP_BUILD_CLIENT OFF CACHE BOOL "" FORCE)
 set(ZMQPP_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(ZMQPP_BUILD_STATIC ON CACHE BOOL "" FORCE)
 
-FetchContent_MakeAvailable(tomlplusplus nlohmann_json cxxopts rang pugg libzmq zmqpp)
+FetchContent_MakeAvailable(tomlplusplus nlohmann_json cxxopts rang pugg zmqpp)
 
 FetchContent_Populate(plugin 
   GIT_REPOSITORY https://github.com/pbosetti/mads_plugin.git
@@ -230,16 +235,19 @@ include_directories(
   ${date_SOURCE_DIR}/include
   ${plugin_SOURCE_DIR}/src
   ${inja_SOURCE_DIR}/include
+  ${zmqpp_BINARY_DIR}
   ${zmqpp_SOURCE_DIR}/src
   ${libzmq_SOURCE_DIR}/include
 )
 link_directories(${USR_DIR}/lib)
 
 if(WIN32)
-  file(GLOB LIB_ZMQ "${USR_DIR}/lib/libzmq*.lib")
+  link_directories(${CMAKE_CURRENT_LIST_DIR}/vendor/libsodium/x64/Release/v143/static)
+  file(GLOB LIB_ZMQ "${libzmq_BINARY_DIR}/lib/Release/libzmq*.lib")
+  file(GLOB LIB_ZMQPP "${zmqpp_BINARY_DIR}/Release/zmqpp-static*.lib")
   file(GLOB LIB_MONGOCXX "${USR_DIR}/lib/mongocxx-v_noabi*.lib")
   file(GLOB LIB_BSONCXX "${USR_DIR}/lib/bsoncxx-v_noabi*.lib")
-  set(LIB_LIST zmqpp-static ${LIB_ZMQ} snappy Ws2_32 Iphlpapi)
+  set(LIB_LIST ${LIB_ZMQPP} ${LIB_ZMQ} libsodium snappy Ws2_32 Iphlpapi)
   set(MONGO_LIBS 
     ${LIB_MONGOCXX} mongoc-static-1.0 
     ${LIB_BSONCXX} bson-static-1.0 
@@ -247,7 +255,8 @@ if(WIN32)
   )
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DZMQ_STATIC")
   set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -DZMQ_STATIC")
-  add_compile_options(/MP)
+  add_compile_options(/MP /wd4061)
+  add_link_options(/NODEFAULTLIB:libcmt.lib)
 else()
   set(LIB_LIST pthread zmqpp-static libzmq-static snappy)
   set(DLOPEN_LIB dl)
@@ -301,10 +310,9 @@ endif()
 # Main command
 add_executable(mads ${MAIN_DIR}/mads.cpp)
 if(UNIX AND NOT APPLE)
-  target_link_libraries(mads OpenSSL::Crypto OpenSSL::SSL libzmq-static zmqpp-static)
-else()
-  target_link_libraries(mads libzmq-static zmqpp-static)
+  target_link_libraries(mads OpenSSL::Crypto OpenSSL::SSL)
 endif()
+target_link_libraries(mads ${LIB_LIST})
 list(APPEND TARGET_LIST mads)
 
 create_exec(filter SRCS plugin_loader.cpp LIBS pugg ${DLOPEN_LIB} DEFS "PLUGIN_LOADER_FILTER")

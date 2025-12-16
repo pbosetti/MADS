@@ -14,3 +14,9 @@ src/mads.hpp
 .Rhistory
 
 Dockerfile
+
+vendor/libsodium
+
+*.key
+*.pub
+checks.json

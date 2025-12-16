@@ -60,8 +60,8 @@ bool includes(vector<string> const &commands, string const &command) {
 
 bool save_keypair(pair<string, string> &key_files, const string &path, const string &name, bool force=false) {
   zmqpp::curve::keypair keypair = zmqpp::curve::generate_keypair();
-  key_files.first = fs::path(path) / (name + ".key");
-  key_files.second = fs::path(path) / (name + ".pub");
+  key_files.first = ( fs::path(path) / (name + ".key") ).string();
+  key_files.second = ( fs::path(path) / (name + ".pub") ).string();
   if (!force) {
     if (fs::exists(key_files.first) || fs::exists(key_files.second)) {
       cerr << fg::red << "Error: key files already exist. Use -f to overwrite."
@@ -510,7 +510,7 @@ int main(int argc, char **argv) {
     zmqpp::context context;
     string name = options_parsed["keypair"].as<string>();
     pair<string, string> key_files;
-    if (!save_keypair(key_files, fs::current_path(), name, force)) {
+    if (!save_keypair(key_files, fs::current_path().string(), name, force)) {
       cerr << fg::red << "Keypair generation failed" << fg::reset << endl;
       return -1;
     }
