@@ -167,7 +167,9 @@ FetchContent_Declare(pugg
   GIT_SHALLOW    TRUE
 )
 
-list(PREPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/vendor")
+if(MSVC)
+  list(PREPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/vendor")
+endif()
 FetchContent_Declare(
   libzmq
   GIT_REPOSITORY https://github.com/zeromq/libzmq.git
@@ -189,8 +191,10 @@ FetchContent_Declare(
   GIT_TAG HEAD
   GIT_SHALLOW TRUE
 )
-set(ZEROMQ_INCLUDE "${libzmq_SOURCE_DIR}/include" CACHE INTERNAL "")
-set(ZEROMQ_LIBRARY_STATIC "${libzmq_BINARY_DIR}/lib/libzmq-static.a" CACHE INTERNAL "")
+if(MSVC)
+  set(ZEROMQ_INCLUDE "${libzmq_SOURCE_DIR}/include" CACHE INTERNAL "")
+  set(ZEROMQ_LIBRARY_STATIC "${libzmq_BINARY_DIR}/lib/libzmq-static.a" CACHE INTERNAL "")
+endif()
 set(ZMQPP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(ZMQPP_BUILD_CLIENT OFF CACHE BOOL "" FORCE)
 set(ZMQPP_BUILD_SHARED OFF CACHE BOOL "" FORCE)
