@@ -167,7 +167,13 @@ FetchContent_Declare(pugg
   GIT_SHALLOW    TRUE
 )
 
+
+
 if(MSVC)
+  FetchContent_Populate(libsodium
+    URL https://download.libsodium.org/libsodium/releases/libsodium-1.0.20-msvc.zip
+    SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/vendor/libsodium
+  )
   list(PREPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/vendor")
 endif()
 FetchContent_Declare(
