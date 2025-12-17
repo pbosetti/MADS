@@ -80,6 +80,7 @@ option(MADS_ENABLE_GUI "Compile GUI (requires QT6)" OFF)
 option(MADS_SKIP_EXTERNALS 
        "Skip external targets (assume already compiled)" OFF)
 option(MADS_MINIMAL "Only compile filter and source executables" OFF)
+option(MADS_BUILD_TESTS "Build test programs" OFF)
 
 #  __     __             
 #  \ \   / /_ _ _ __ ___ 
@@ -375,6 +376,10 @@ add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/src/plugin)
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/share/man)
 
 create_exec(plugin SRCS make_plugin.cpp)
+
+if(${MADS_BUILD_TESTS})
+  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/test)
+endif()
 
 #   _____      _                        _     
 #  | ____|_  _| |_ ___ _ __ _ __   __ _| |___ 
