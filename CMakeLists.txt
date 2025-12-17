@@ -356,6 +356,7 @@ endif()
 
 if (${MADS_ENABLE_LOGGER})
   create_exec(logger SRCS logger.cpp LIBS ${MONGO_LIBS})
+  target_link_directories(${PREFIX}logger PRIVATE ${USR_DIR}/lib)
 endif()
   
 
