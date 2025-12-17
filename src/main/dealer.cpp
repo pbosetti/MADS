@@ -51,7 +51,7 @@ int main(int argc, char *argv[]) {
     case message_type::json:
       try {
         j = json::parse(get<1>(msg));
-      } catch (const std::exception &e) {
+      } catch (...) {
         count_err++;
         break;
       }

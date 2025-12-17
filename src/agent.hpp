@@ -603,7 +603,7 @@ public:
       throw AgentError("Agent not initialized");
     message message;
     string str;
-    uint32_t offset = 0;
+    int32_t offset = 0;
     if (payload.contains("event"))
       if (payload["event"] == event_map.at(event_type::shutdown) ||
           payload["event"] == event_map.at(event_type::startup)) {

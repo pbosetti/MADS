@@ -124,6 +124,7 @@ int make_ini(int argc, char **argv) {
   try {
     options_parsed = options.parse(argc, argv);
   } catch (const std::exception &e) {
+    cerr << e.what() << endl;
     cerr << fg::red << "Unknown CLI option" << fg::reset << '\n';
     cerr << options.help() << endl;
     return -1;
@@ -178,6 +179,7 @@ int make_ini(int argc, char **argv) {
       filesystem::remove(tmp / file);
     } catch (const filesystem::filesystem_error &e) {
       filesystem::remove(tmp / file);
+      cerr << e.what() << endl;
       cerr << fg::red << "Cannot write or overwrite " << path / file
            << fg::reset << endl;
       return -1;
@@ -462,6 +464,7 @@ int main(int argc, char **argv) {
   try {
     options_parsed = options.parse(argc, argv);
   } catch (const std::exception &e) {
+    cerr << e.what() << endl;
     cerr << fg::red << "Unknown CLI option" << fg::reset << '\n';
     cerr << options.help() << endl;
   }

@@ -1,4 +1,5 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.5)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 # cmake_minimum_required(VERSION 3.5...3.27)
 
 #   ____       _   _   _                 
@@ -273,7 +274,7 @@ if(WIN32)
   )
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DZMQ_STATIC")
   set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -DZMQ_STATIC")
-  add_compile_options(/MP /wd4061)
+  add_compile_options(/MP /wd4061 /wd4996)
   add_link_options(/NODEFAULTLIB:libcmt.lib)
 else()
   set(LIB_LIST pthread zmqpp-static libzmq-static snappy)
