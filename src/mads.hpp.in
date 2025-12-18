@@ -88,8 +88,8 @@ Author(s): Paolo Bosetti
     ("crypto", "Enable CURVE encryption for broker communication")             \
     ("keys_dir", "Directory where CURVE keys are stored",                      \
      value<string>()->implicit_value(Mads::exec_dir() + "../etc"))             \
-    ("key_server", "Name of the server key file (without .key extension)",     \
-     value<string>()->implicit_value("server"))                                \
+    ("key_broker", "Name of the broker key file (without .key extension)",     \
+     value<string>()->implicit_value("broker"))                                \
     ("key_client", "Name of the client key file (without .key extension)",     \
      value<string>()->implicit_value("client"))                                \
     ("auth_verbose", "Enable verbose authentication messages")                 \

@@ -7,6 +7,10 @@
 
 **mads** 
   [**\-i|\-\-info**]
+  [**\-p|\-\-prefix**]
+  [**\-\-plugins**]
+  [**\-\-keypair[=mads]**]
+  [**\-f|\-\-force**]
   [**\-v|\-\-version**]
   [**\-h|\-\-help**]
 
@@ -19,6 +23,21 @@
 In addition, the **mads** command allows to create systemd services for running MADS agents as services. The services are created in the /etc/systemd/system directory and can be started, stopped, enabled and disabled using the systemctl command.
 
 # OPTIONS
+
+**\-i|\-\-info**
+: provides installation info
+
+**\-p|\-\-prefix**
+: returns the MADS installation prefix
+
+**\-\-plugins**
+: list te available plugins
+
+**\-\-keypair[=mads]**
+: generate a pair of public/private keys, with an optional name (defailt to `mads`). Refuses to overwrite existing files, unless `--force`
+
+**\-f|\-\-force**
+: force overwrite existing files (only in conjunction with `--keypair`)
 
 **-h**, **\-\-help**
 :   Show summary of options.

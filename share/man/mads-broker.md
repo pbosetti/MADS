@@ -5,7 +5,7 @@
 
 # SYNOPSIS
 
-**mads-broker** [**\-n, \-\-nic**] [**\-s, \-\-settings** *arg*] [**\-d, \-\-daemon**]   [**\-v, \-\-version**] [**\-h, \-\-help**]
+**mads-broker** [**\-n, \-\-nic**] [**\-s, \-\-settings** *arg*] [**\-d, \-\-daemon**] [**\-\-docker**] [**\-\-crypto[=arg]**] [**\-\-keys_dir[=arg]**] [**\-v, \-\-version**] [**\-h, \-\-help**]
 
 # DESCRIPTION
 
@@ -21,6 +21,15 @@
 
 **\-d**, **\-\-daemon**
 :  run the broker as a daemon. This suppress the output to the console upon launch and the interactive behavior.
+
+**\-\-docker**
+: use it when it runs within a docker container
+
+**\-\-crypto[=arg]**
+: enable CURVE cryptography. The optional argument sets the name of the keys to be used for encryption (default to `broker`).
+
+**\-\-keys_dir[=arg]**
+: the path of the directory where to search for key files. Default to the `etc` directory under the mads prefix directory (`mads -p`).
 
 **\-v**, **\-\-version**
 : show version information.
