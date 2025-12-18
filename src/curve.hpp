@@ -65,6 +65,9 @@ public:
   void fetch_public_keys(fs::path const &key_dir) {
     _key_dir = key_dir;
     _client_keys.clear();
+    if (!fs::exists(key_dir) || !fs::is_directory(key_dir)) {
+      throw runtime_error("Key directory does not exist: " + key_dir.string());
+    }
     for (const auto &entry : fs::directory_iterator(key_dir)) {
       if (entry.path().extension() == ".pub") {
         _client_keys.push_back(entry.path().stem().string());
@@ -181,7 +184,7 @@ public:
   vector<string> allowed_ips{};
 private:
   zmqpp::auth _authenticator;
-  vector<string> _client_keys;
+  vector<string> _client_keys{};
   fs::path _key_dir;
 };
 

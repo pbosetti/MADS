@@ -215,6 +215,7 @@ int main(int argc, char **argv) {
   bool running = true, reload = false;
   string settings_path = SETTINGS_PATH;
   filesystem::path prefix(Mads::exec_dir(".."));
+  filesystem::path keys_dir = prefix / "etc";
   unique_ptr<Mads::CurveAuth> curve_auth_ptr = nullptr;
   Options options(argv[0]);
   string nic = "lo0";
@@ -232,6 +233,8 @@ int main(int argc, char **argv) {
     ("d,daemon", "Run as daemon")
     ("docker", "Run as in container (don't check for file changes)")
     ("crypto", "Enable CURVE encryption (requires proper setup)", value<string>()->implicit_value("broker"))
+    ("keys_dir", "Directory containing CURVE keypairs",
+      value<string>()->implicit_value(keys_dir.string()))
     ("v,version", "Print version")
     ("h,help", "Print usage");
   // clang-format on
@@ -277,10 +280,13 @@ int main(int argc, char **argv) {
   }
 
   if (options_parsed.count("crypto") != 0) {
+    if (options_parsed.count("keys_dir") != 0) {
+      keys_dir = filesystem::path(options_parsed["keys_dir"].as<string>());
+    }
     cout << fg::magenta << "Enabling CURVE encryption for broker sockets" 
          << endl;
     cout << "Searching for keys in " << style::bold
-         << (prefix / "etc" ).string() << style::reset << fg::reset << endl;
+         << keys_dir.string() << style::reset << fg::reset << endl;
     crypto = true;
   }
 
@@ -310,13 +316,21 @@ int main(int argc, char **argv) {
     bool verbose = config[name]["auth_verbose"].value_or(false);
     string name = options_parsed["crypto"].as<string>();
     curve_auth_ptr = make_unique<Mads::CurveAuth>(context);
-    whitelist->for_each([&](const toml::node& n) {
-      if (toml::is_string<decltype(n)>) {
-        curve_auth_ptr->allowed_ips.push_back(n.as_string()->get());
-      }
-    });
+    if (whitelist) {
+      whitelist->for_each([&](const toml::node& n) {
+        if (toml::is_string<decltype(n)>) {
+          curve_auth_ptr->allowed_ips.push_back(n.as_string()->get());
+        }
+      });
+    }
     curve_auth_ptr->setup_auth(verbose ? Mads::auth_verbose::on : Mads::auth_verbose::off);
-    curve_auth_ptr->fetch_public_keys(prefix / "etc");
+    try {
+      curve_auth_ptr->fetch_public_keys(keys_dir);
+    } catch (const runtime_error &e) {
+      cerr << fg::red << "Error setting up CURVE authentication: " << e.what()
+      << fg::reset << endl;
+      exit(EXIT_FAILURE);
+    }
     curve_auth_ptr->setup_curve_server(frontend, name);
     curve_auth_ptr->setup_curve_server(backend, name);
   }
