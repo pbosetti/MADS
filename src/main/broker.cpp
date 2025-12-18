@@ -20,6 +20,7 @@ Author(s): Paolo Bosetti
 #include "../keypress.hpp"
 #include "../mads.hpp"
 #include "../watcher.hpp"
+#include "../curve.hpp"
 #include <cstring>
 #include <cxxopts.hpp>
 #include <filesystem>
@@ -213,9 +214,12 @@ void send_char(char c) {
 int main(int argc, char **argv) {
   bool running = true, reload = false;
   string settings_path = SETTINGS_PATH;
+  filesystem::path prefix(Mads::exec_dir(".."));
+  unique_ptr<Mads::CurveAuth> curve_auth_ptr = nullptr;
   Options options(argv[0]);
   string nic = "lo0";
   string ip = "127.0.0.1";
+  bool crypto = false;
   vector<string> desc{"FRONTEND msg in   ", "FRONTEND bytes in ",
                       "FRONTEND msg out  ", "FRONTEND bytes out",
                       "BACKEND msg in    ", "BACKEND bytes in  ",
@@ -227,6 +231,7 @@ int main(int argc, char **argv) {
     ("s,settings", "Settings file path", value<string>())
     ("d,daemon", "Run as daemon")
     ("docker", "Run as in container (don't check for file changes)")
+    ("crypto", "Enable CURVE encryption (requires proper setup)", value<string>()->implicit_value("broker"))
     ("v,version", "Print version")
     ("h,help", "Print usage");
   // clang-format on
@@ -271,6 +276,14 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
+  if (options_parsed.count("crypto") != 0) {
+    cout << fg::magenta << "Enabling CURVE encryption for broker sockets" 
+         << endl;
+    cout << "Searching for keys in " << style::bold
+         << (prefix / "etc" ).string() << style::reset << fg::reset << endl;
+    crypto = true;
+  }
+
   double timecode_fps = config["agents"]["timecode_fps"].value_or(MADS_FPS);
 
   string frontend_address, backend_address, settings_address;
@@ -292,6 +305,21 @@ int main(int argc, char **argv) {
   zmqpp::context context;
   zmqpp::socket frontend(context, zmqpp::socket_type::xsub);
   zmqpp::socket backend(context, zmqpp::socket_type::xpub);
+  if (crypto) {
+    auto whitelist = config[name]["ip_whitelist"].as_array();
+    bool verbose = config[name]["auth_verbose"].value_or(false);
+    string name = options_parsed["crypto"].as<string>();
+    curve_auth_ptr = make_unique<Mads::CurveAuth>(context);
+    whitelist->for_each([&](const toml::node& n) {
+      if (toml::is_string<decltype(n)>) {
+        curve_auth_ptr->allowed_ips.push_back(n.as_string()->get());
+      }
+    });
+    curve_auth_ptr->setup_auth(verbose ? Mads::auth_verbose::on : Mads::auth_verbose::off);
+    curve_auth_ptr->fetch_public_keys(prefix / "etc");
+    curve_auth_ptr->setup_curve_server(frontend, name);
+    curve_auth_ptr->setup_curve_server(backend, name);
+  }
 
   try {
     std::cout << "Binding broker frontend (XSUB) at " << style::bold
@@ -307,6 +335,8 @@ int main(int argc, char **argv) {
   }
   // Create Settings socket (Req/Rep)
   zmqpp::socket settings(context, zmqpp::socket_type::rep);
+  if (crypto)
+    curve_auth_ptr->setup_curve_server(settings, "broker");
   settings.bind(settings_address);
   settings.set(zmqpp::socket_option::receive_timeout, 1000);
   cout << "Binding broker shared settings (REP) at " << style::bold
@@ -527,6 +557,7 @@ int main(int argc, char **argv) {
 #ifndef _WIN32
     watcher_thread.join();
 #endif
+    if (crypto) curve_auth_ptr = nullptr;
     frontend.close();
     backend.close();
     controller.close();

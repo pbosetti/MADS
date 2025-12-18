@@ -33,10 +33,10 @@ int main(int argc, char *argv[]) {
   zmqpp::socket publisher(context, zmqpp::socket_type::pub);
 
 #ifdef CURVE_AUTH
-  vector<string> allowed_ips = {"127.0.0.1"};
-  auth authenticator(context);
-  mads::setup_auth(authenticator, allowed_ips, mads::auth_verbose::on);
-  mads::setup_curve_client(publisher, ".", my_key, "server");
+  Mads::CurveAuth curve_auth(context);
+  curve_auth.allowed_ips.push_back("127.0.0.1");
+  curve_auth.setup_auth(Mads::auth_verbose::on);
+  curve_auth.setup_curve_client(publisher, "client", "server");
 #endif
   
   publisher.connect("tcp://127.0.0.1:9000");

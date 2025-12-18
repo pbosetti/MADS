@@ -24,11 +24,11 @@ int main(int argc, char *argv[]) {
 zmqpp::socket subscriber(context, zmqpp::socket_type::sub);
 
 #ifdef CURVE_AUTH
-  vector<string> allowed_ips = {"127.0.0.1"};
-  vector<string> client_keys = {"client", "server", "mads"};
-  auth authenticator(context);
-  mads::setup_auth(authenticator, allowed_ips, mads::auth_verbose::on);
-  mads::setup_curve_server(authenticator, subscriber, ".", "server", client_keys);
+  Mads::CurveAuth curve_auth(context);
+  curve_auth.allowed_ips.push_back("127.0.0.1");
+  curve_auth.setup_auth(Mads::auth_verbose::on);
+  curve_auth.fetch_public_keys(".");
+  curve_auth.setup_curve_server(subscriber, "server");
 #endif
 
   subscriber.bind("tcp://*:9000");
