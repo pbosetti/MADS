@@ -18,6 +18,11 @@ int main(int argc, char *argv[]) {
   string settings_uri = SETTINGS_URI;
   string agent_name = argv[0];
   size_t count = 0, count_err = 0;
+  bool crypto = false;
+  filesystem::path key_dir(Mads::exec_dir() + "/../etc");
+  string client_key_name = "client";
+  string server_key_name = "broker";
+  auth_verbose auth_verbose = auth_verbose::off;
 
   Options options(argv[0]);
   // clang-format off
@@ -31,8 +36,30 @@ int main(int argc, char *argv[]) {
     agent_name = options_parsed["name"].as<string>();
   } 
 
+  if (options_parsed.count("crypto") != 0) {
+    crypto = true;
+    if (options_parsed.count("keys_dir") != 0) {
+      key_dir = options_parsed["keys_dir"].as<string>();
+    }
+    if (options_parsed.count("key_server") != 0) {
+      server_key_name = options_parsed["key_server"].as<string>();
+    }
+    if (options_parsed.count("key_client") != 0) {
+      client_key_name = options_parsed["key_client"].as<string>();
+    }
+    if (options_parsed.count("auth_verbose") != 0) {
+      auth_verbose = auth_verbose::on;
+    }
+  }
+
   Dealer dealer(agent_name, settings_uri);
-  dealer.init();
+  if (crypto) {
+    dealer.set_key_dir(key_dir);
+    dealer.client_key_name = client_key_name;
+    dealer.server_key_name = server_key_name;
+    dealer.auth_verbose = auth_verbose;
+  }
+  dealer.init(crypto);
   dealer.enable_remote_control();
   dealer.connect();
 
