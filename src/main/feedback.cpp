@@ -12,6 +12,7 @@ Author(s): Paolo Bosetti
 #include "../mads.hpp"
 #include "../agent.hpp"
 #include <cxxopts.hpp>
+#include <filesystem>
 
 using namespace std;
 using namespace cxxopts;
@@ -21,6 +22,11 @@ using namespace Mads;
 int main(int argc, char *argv[]) {
   string settings_uri = SETTINGS_URI;
   json payload, params;
+  bool crypto = false;
+  filesystem::path key_dir(Mads::exec_dir() + "/../etc");
+  string client_key_name = "client";
+  string server_key_name = "broker";
+  auth_verbose auth_verbose = auth_verbose::off;
   int width = 65, indent = -1;
 
   // CLI options
@@ -28,12 +34,32 @@ int main(int argc, char *argv[]) {
   SETUP_OPTIONS(options, Agent);
 
   // Settings
-  // none
+  if (options_parsed.count("crypto") != 0) {
+    crypto = true;
+    if (options_parsed.count("keys_dir") != 0) {
+      key_dir = options_parsed["keys_dir"].as<string>();
+    }
+    if (options_parsed.count("key_server") != 0) {
+      server_key_name = options_parsed["key_server"].as<string>();
+    }
+    if (options_parsed.count("key_client") != 0) {
+      client_key_name = options_parsed["key_client"].as<string>();
+    }
+    if (options_parsed.count("auth_verbose") != 0) {
+      auth_verbose = auth_verbose::on;
+    }
+  }
   
   // Core stuff
   Agent agent(argv[0], settings_uri);
+  if (crypto) {
+    agent.set_key_dir(key_dir);
+    agent.client_key_name = client_key_name;
+    agent.server_key_name = server_key_name;
+    agent.auth_verbose = auth_verbose;
+  }
   try {
-    agent.init();
+    agent.init(crypto);
   } catch(const std::exception& e) {
     std::cout << fg::red << "Error initializing agent: " << e.what() << fg::reset << endl;
     exit(EXIT_FAILURE);

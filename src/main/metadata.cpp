@@ -23,6 +23,11 @@ int main(int argc, char *argv[]) {
   size_t i = 0;
   chrono::milliseconds time{100};
   bool continuous = false;
+  bool crypto = false;
+  filesystem::path key_dir(Mads::exec_dir() + "/../etc");
+  string client_key_name = "client";
+  string server_key_name = "broker";
+  auth_verbose auth_verbose = auth_verbose::off;
 
   // CLI options
   Options options(argv[0]);
@@ -39,10 +44,32 @@ int main(int argc, char *argv[]) {
   }
   continuous = (options_parsed.count("c") != 0);
 
+  if (options_parsed.count("crypto") != 0) {
+    crypto = true;
+    if (options_parsed.count("keys_dir") != 0) {
+      key_dir = options_parsed["keys_dir"].as<string>();
+    }
+    if (options_parsed.count("key_server") != 0) {
+      server_key_name = options_parsed["key_server"].as<string>();
+    }
+    if (options_parsed.count("key_client") != 0) {
+      client_key_name = options_parsed["key_client"].as<string>();
+    }
+    if (options_parsed.count("auth_verbose") != 0) {
+      auth_verbose = auth_verbose::on;
+    }
+  }
+
   // Core stuff
   Metadata metadata(argv[0], settings_uri);
+  if (crypto) {
+    metadata.set_key_dir(key_dir);
+    metadata.client_key_name = client_key_name;
+    metadata.server_key_name = server_key_name;
+    metadata.auth_verbose = auth_verbose;
+  }
   try {
-    metadata.init();
+    metadata.init(crypto);
   } catch (const std::exception &e) {
     std::cout << fg::red << "Error initializing agent: " << e.what()
               << fg::reset << endl;

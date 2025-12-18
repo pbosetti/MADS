@@ -44,6 +44,8 @@ Author(s): Paolo Bosetti
 #include <thread>
 #include <future>
 #include <zmqpp/zmqpp.hpp>
+#include "curve.hpp"
+#include "exec_path.hpp"
 
 #ifndef HOST_NAME_MAX
 #define HOST_NAME_MAX 255
@@ -104,19 +106,23 @@ class Agent {
                             
 */
 
-public:
+private:
   /**
    * @brief Static function to read settings from broker.
    *
    * @param uri The URI of the broker.
    * @param name The name of the agent.
+   * @param crypto Whether to use CURVE encryption (default false).
    * @param timeout The timeout in milliseconds (default 2000).
    * @return a tuple with the settings and possibly the path of the attachemnt.
    * @throws AgentError if timed out in reading settings from broker.
    */
-  static tuple<string, filesystem::path> read_settings(string uri, string name, int timeout = 2000) {
-    zmqpp::context context;
-    zmqpp::socket socket(context, zmqpp::socket_type::req);
+  tuple<string, filesystem::path> read_settings(string uri, string name, int timeout = 2000) {
+    zmqpp::socket socket(_context, zmqpp::socket_type::req);
+    if (_curve_auth) {
+      _curve_auth->setup_curve_client(socket, client_key_name, server_key_name);
+    }
+
     message msg_out, msg_in;
     tuple<string, filesystem::path> result;
     socket.connect(uri);
@@ -133,7 +139,7 @@ public:
     }
     socket.disconnect(uri);
     socket.close();
-    context.terminate();
+    // context.terminate();
     if (msg_in.parts() < 2) {
       throw AgentError(
           "Broker refuses to provide settings, check for version mismatch or "
@@ -167,9 +173,12 @@ public:
     return result;
   }
 
-  static double get_broker_timecode(string uri, int timeout = 2000) {
-    zmqpp::context context;
-    zmqpp::socket socket(context, zmqpp::socket_type::req);
+  double get_broker_timecode(string uri, int timeout = 2000) {
+    // zmqpp::context context;
+    zmqpp::socket socket(_context, zmqpp::socket_type::req);
+    if (_curve_auth) {
+      _curve_auth->setup_curve_client(socket, client_key_name, server_key_name);
+    }
     message msg;
     if (timeout > 0)
       socket.set(zmqpp::socket_option::receive_timeout, timeout);
@@ -184,11 +193,11 @@ public:
     double timecode = std::stod(msg.get(0));
     socket.disconnect(uri);
     socket.close();
-    context.terminate();
+    // context.terminate();
     return timecode;
   }
 
-
+public:
 /*
   _     _  __                      _      
  | |   (_)/ _| ___  ___ _   _  ___| | ___ 
@@ -228,6 +237,7 @@ public:
     if (pos != std::string::npos) {
       _name = _name.substr(pos + 1);
     } 
+    _key_dir = filesystem::path(Mads::exec_dir()) / "../etc";
   }
 
 
@@ -238,10 +248,12 @@ public:
    * agent.
    *
    * @param name The name of the agent (as it is).
-   * @param settings_path The path or URI to the settings file for the agent.
+   * @param settings_uri The path or URI to the settings file for the agent.
+   * @param crypto Whether to use CURVE encryption (default false).
+   * @param key_dir The directory where the CURVE keys are stored.
    * @throws AgentError if timed out in reading settings from broker.
    */
-  void init(string name, string settings_uri) {
+  void init(string name, string settings_uri, bool crypto = false, filesystem::path const &key_dir = "") {
     size_t pos = name.rfind('-');
     if (pos != std::string::npos) {
       _name = name.substr(pos + 1);
@@ -249,7 +261,10 @@ public:
       _name = name;
     }
     _settings_uri = settings_uri;
-    init();
+    if (!key_dir.empty()) {
+      _key_dir = key_dir;
+    }
+    init(crypto);
   }
 
 
@@ -259,9 +274,18 @@ public:
    * This function loads the settings file and sets the member variables of the
    * agent.
    *
+   * @param crypto Whether to use CURVE encryption (default false).
    * @throws AgentError if timed out in reading settings from broker.
    */
-  void init() {
+  void init(bool crypto = false) {
+    _crypto = crypto;
+    if (_crypto) {
+      _curve_auth = make_unique<CurveAuth>(_context);
+      _curve_auth->set_key_dir(_key_dir);
+      _curve_auth->setup_auth(auth_verbose);
+      _curve_auth->setup_curve_client(_subscriber, client_key_name, server_key_name);
+      _curve_auth->setup_curve_client(_publisher, client_key_name, server_key_name);
+    }
     // Load config URI/file
     if (settings_are_local()) {
       _config = (toml::table)toml::parse_file(_settings_uri);
@@ -329,6 +353,7 @@ public:
   // Destructor
   virtual ~Agent() {
     disconnect();
+    _curve_auth = nullptr;
     _publisher.close();
     _subscriber.close();
     _context.terminate();
@@ -399,6 +424,13 @@ public:
       throw AgentError("Agent not initialized");
     out << "Agent: " << style::bold << fg::green << _name << fg::reset
         << style::reset << endl;
+    if (_crypto) {
+      out << fg::cyan << "  CURVE encryption enabled" << endl
+          << "    keys dir:         " << _key_dir.string() << endl
+          << "    server key name:  " << server_key_name << "(.pub)" << endl
+          << "    client key name:  " << client_key_name << "(.key|.pub)"
+          << fg::reset << endl;
+    }
     if (_cross)
       out << fg::magenta << "  WARNING:" << style::bold
           << "          Cross-socket operation (no broker)" << style::reset
@@ -942,8 +974,57 @@ public:
     return _attachment_path;
   }
 
+  /**
+   * @brief Returns whether CURVE encryption is enabled.
+   *
+   * @return true if CURVE encryption is enabled, false otherwise.  
+   */
+  bool is_crypto() {
+    return _crypto;
+  }
+
+  /**
+   * @brief Set the use of CURVE encryption and enables authentication.
+   * 
+   * @param verbose 
+   */
+  void set_crypto(auth_verbose verbose = auth_verbose::off) {
+    _crypto = true;
+    _curve_auth = make_unique<CurveAuth>(_context);
+    _curve_auth->setup_auth(verbose);
+  }
+
+  /**
+   * @brief Returns a pointer to the CurveAuth object.
+   * 
+   * @return unique_ptr<CurveAuth>* 
+   */
+  unique_ptr<CurveAuth> *curve_auth() {
+    return &_curve_auth;
+  }
+
+  /**
+   * @brief Returns the path to the etc directory.
+   * 
+   * @return filesystem::path 
+   */
+  filesystem::path key_dir() {
+    return _key_dir;
+  }
+
+  /**
+   * @brief Sets the path to the etc directory.
+   * 
+   * @param path 
+   */
+  void set_key_dir(const filesystem::path &path) {
+    _key_dir = path;
+  }
 
   double timecode_fps = MADS_FPS;
+  auth_verbose auth_verbose = auth_verbose::off;
+  string server_key_name = "broker";
+  string client_key_name = "client";
 
   /*
     ____       _            _
@@ -1027,6 +1108,9 @@ protected:
   chrono::milliseconds _time_step = chrono::milliseconds(0);
   double _timecode_offset = 0.0;
   filesystem::path _attachment_path;
+  bool _crypto = false;
+  unique_ptr<CurveAuth> _curve_auth = nullptr;
+  filesystem::path _key_dir;
 public:
   bool dummy = false;
 };

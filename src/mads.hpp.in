@@ -80,11 +80,21 @@ Author(s): Paolo Bosetti
 #endif
 
 // Used for common CLI options in agent executables
+// clang-format off
 #define SETUP_OPTIONS(options, Klass)                                          \
-  options.add_options()("s,settings", "Settings file path/URI",                \
-                        value<string>())(                                      \
-      "S,save-settings", "Save settings to ini file",                          \
-      value<string>())("v,version", "Print version")("h,help", "Print usage"); \
+  options.add_options()                                                        \
+    ("s,settings", "Settings file path/URI", value<string>())                  \
+    ("S,save-settings", "Save settings to ini file", value<string>())          \
+    ("crypto", "Enable CURVE encryption for broker communication")             \
+    ("keys_dir", "Directory where CURVE keys are stored",                      \
+     value<string>()->implicit_value(Mads::exec_dir() + "../etc"))             \
+    ("key_server", "Name of the server key file (without .key extension)",     \
+     value<string>()->implicit_value("server"))                                \
+    ("key_client", "Name of the client key file (without .key extension)",     \
+     value<string>()->implicit_value("client"))                                \
+    ("auth_verbose", "Enable verbose authentication messages")                 \
+    ("v,version", "Print version")                                             \
+    ("h,help", "Print usage");                                                 \
   auto options_parsed = options.parse(argc, argv);                             \
   if (options_parsed.count("help")) {                                          \
     cout << argv[0] << " ver. " << LIB_VERSION << endl;                        \
@@ -115,6 +125,7 @@ Author(s): Paolo Bosetti
     cout << fg::magenta << "Settings saved to " << fname << fg::reset << endl; \
     return EXIT_SUCCESS;                                                       \
   }
+  // clang-format on
 
 /*
   _____                     _       __

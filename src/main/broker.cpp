@@ -283,7 +283,7 @@ int main(int argc, char **argv) {
     if (options_parsed.count("keys_dir") != 0) {
       keys_dir = filesystem::path(options_parsed["keys_dir"].as<string>());
     }
-    cout << fg::magenta << "Enabling CURVE encryption for broker sockets" 
+    cout << fg::cyan << "Enabling CURVE encryption for broker sockets" 
          << endl;
     cout << "Searching for keys in " << style::bold
          << keys_dir.string() << style::reset << fg::reset << endl;

@@ -122,6 +122,11 @@ int main(int argc, char *argv[]) {
   size_t count = 0, count_err = 0;
   size_t delay = 0;
   chrono::milliseconds time{0};
+  bool crypto = false;
+  filesystem::path key_dir(Mads::exec_dir() + "/../etc");
+  string client_key_name = "client";
+  string server_key_name = "broker";
+  auth_verbose auth_verbose = auth_verbose::off;
 
   // CLI options
   Options options(argv[0]);
@@ -156,10 +161,32 @@ int main(int argc, char *argv[]) {
     delay = options_parsed["delay"].as<size_t>();
   }
 
+  if (options_parsed.count("crypto") != 0) {
+    crypto = true;
+    if (options_parsed.count("keys_dir") != 0) {
+      key_dir = options_parsed["keys_dir"].as<string>();
+    }
+    if (options_parsed.count("key_server") != 0) {
+      server_key_name = options_parsed["key_server"].as<string>();
+    }
+    if (options_parsed.count("key_client") != 0) {
+      client_key_name = options_parsed["key_client"].as<string>();
+    }
+    if (options_parsed.count("auth_verbose") != 0) {
+      auth_verbose = auth_verbose::on;
+    }
+  }
+
   // Core stuff
   Agent agent(agent_name, settings_uri);
+  if (crypto) {
+    agent.set_key_dir(key_dir);
+    agent.client_key_name = client_key_name;
+    agent.server_key_name = server_key_name;
+    agent.auth_verbose = auth_verbose;
+  }
   try {
-    agent.init();
+    agent.init(crypto);
   } catch (const AgentError &e) {
     cerr << fg::red << "Error initializing agent: " << e.what() << fg::reset
          << endl;

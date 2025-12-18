@@ -27,6 +27,11 @@ int main(int argc, char *argv[]) {
   json payload;
   char *buf;
   chrono::milliseconds time{100};
+  bool crypto = false;
+  filesystem::path key_dir(Mads::exec_dir() + "/../etc");
+  string client_key_name = "client";
+  string server_key_name = "broker";
+  auth_verbose auth_verbose = auth_verbose::off;
 
   // CLI options
   Options options(argv[0]);
@@ -43,6 +48,22 @@ int main(int argc, char *argv[]) {
     len = options_parsed["l"].as<size_t>();
   }
 
+  if (options_parsed.count("crypto") != 0) {
+    crypto = true;
+    if (options_parsed.count("keys_dir") != 0) {
+      key_dir = options_parsed["keys_dir"].as<string>();
+    }
+    if (options_parsed.count("key_server") != 0) {
+      server_key_name = options_parsed["key_server"].as<string>();
+    }
+    if (options_parsed.count("key_client") != 0) {
+      client_key_name = options_parsed["key_client"].as<string>();
+    }
+    if (options_parsed.count("auth_verbose") != 0) {
+      auth_verbose = auth_verbose::on;
+    }
+  }
+
   // Core stuff
   // build a random payload of readable characters
   buf = (char *)malloc(len);
@@ -52,8 +73,14 @@ int main(int argc, char *argv[]) {
   buf[len - 1] = 0;  // null-terminate the string
 
   Agent agent(argv[0], settings_uri);
+  if (crypto) {
+    agent.set_key_dir(key_dir);
+    agent.client_key_name = client_key_name;
+    agent.server_key_name = server_key_name;
+    agent.auth_verbose = auth_verbose;
+  }
   try {
-    agent.init();
+    agent.init(crypto);
   } catch (const std::exception &e) {
     std::cout << fg::red << "Error initializing agent: " << e.what()
               << fg::reset << endl;
