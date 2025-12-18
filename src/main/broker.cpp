@@ -329,10 +329,23 @@ int main(int argc, char **argv) {
     } catch (const runtime_error &e) {
       cerr << fg::red << "Error setting up CURVE authentication: " << e.what()
       << fg::reset << endl;
+      curve_auth_ptr = nullptr;
+      frontend.close();
+      backend.close();
+      context.terminate();
       exit(EXIT_FAILURE);
     }
-    curve_auth_ptr->setup_curve_server(frontend, name);
-    curve_auth_ptr->setup_curve_server(backend, name);
+    try {
+      curve_auth_ptr->setup_curve_server(frontend, name);
+      curve_auth_ptr->setup_curve_server(backend, name);
+    } catch (const runtime_error &e) {
+      cerr << fg::red << e.what() << fg::reset << endl;
+      curve_auth_ptr = nullptr;
+      frontend.close();
+      backend.close();
+      context.terminate();
+      exit(EXIT_FAILURE);
+    }
   }
 
   try {
@@ -571,11 +584,11 @@ int main(int argc, char **argv) {
 #ifndef _WIN32
     watcher_thread.join();
 #endif
+    controller.close();
+    controlled.close();
     if (crypto) curve_auth_ptr = nullptr;
     frontend.close();
     backend.close();
-    controller.close();
-    controlled.close();
     context.terminate();
     if (reload) {
       cout << fg::yellow << "Restarting..." << fg::reset << endl;
