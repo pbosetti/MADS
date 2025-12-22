@@ -43,7 +43,7 @@
 
 namespace Mads {
 
-std::filesystem::path exec_path() {
+inline std::filesystem::path exec_path() {
   char raw_path[PATH_MAX];
 #if defined(_WIN32)
   GetModuleFileNameA(NULL, raw_path, MAX_PATH);
@@ -57,7 +57,7 @@ std::filesystem::path exec_path() {
   return std::filesystem::weakly_canonical(raw_path);
 }
 
-std::string exec_dir(std::string relative = "") {
+inline std::string exec_dir(std::string relative = "") {
   std::string path = exec_path().parent_path().string();
   if (relative != "") {
     return std::filesystem::weakly_canonical(path + "/" + relative).string();
@@ -66,7 +66,7 @@ std::string exec_dir(std::string relative = "") {
   }
 }
 
-std::string prefix() {
+inline std::string prefix() {
   return exec_dir("../");
 }
 

@@ -216,7 +216,7 @@ static const std::map<event_type, std::string> event_map = {
 
 // This results in duplicate definition link error in the GUI
 #ifndef MADS_QAGENT_H
-std::string event_name(event_type type) { return event_map.at(type); }
+inline std::string event_name(event_type type) { return event_map.at(type); }
 #endif // MADS_QAGENT_H
 
 /**

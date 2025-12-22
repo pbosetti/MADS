@@ -8,7 +8,8 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 #   ___) |  __/ |_| |_| | | | | (_| \__ \
 #  |____/ \___|\__|\__|_|_| |_|\__, |___/
 #                              |___/     
-set(LIB_NAME mads)
+set(PROJECT_NAME mads)
+set(LIB_NAME ${PROJECT_NAME}lib)
 # Version from git tags
 # Check if project root is a git repository
 execute_process(
@@ -49,7 +50,7 @@ endif()
 # Set variables for project
 set(LIB_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
 set(LIB_VERSION_CHECK "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}")
-project(${LIB_NAME} VERSION ${LIB_VERSION} LANGUAGES CXX)
+project(${PROJECT_NAME} VERSION ${LIB_VERSION} LANGUAGES CXX)
 set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -169,14 +170,14 @@ FetchContent_Declare(pugg
   GIT_SHALLOW    TRUE
 )
 
-set(SNAPPY_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
-set(SNAPPY_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-FetchContent_Declare(snappy
-  GIT_REPOSITORY https://github.com/google/snappy.git
-  GIT_TAG        1.2.2
-  GIT_SHALLOW    TRUE
-)
-FetchContent_MakeAvailable(snappy)
+# set(SNAPPY_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+# set(SNAPPY_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+# FetchContent_Declare(snappy
+#   GIT_REPOSITORY https://github.com/google/snappy.git
+#   GIT_TAG        1.2.2
+#   GIT_SHALLOW    TRUE
+# )
+# FetchContent_MakeAvailable(snappy)
 
 if(MSVC)
   FetchContent_Populate(libsodium
@@ -302,7 +303,7 @@ macro(create_exec target)
   cmake_parse_arguments(ARG "" "" "${multiValueArgs}" ${ARGN})
   add_executable(${PREFIX}${target} ${MAIN_DIR}/${ARG_SRCS})
   list(APPEND TARGET_LIST ${PREFIX}${target})
-  target_link_libraries(${PREFIX}${target} ${LIB_LIST} ${ARG_LIBS})
+  target_link_libraries(${PREFIX}${target} ${LIB_NAME} ${ARG_LIBS})
   target_compile_definitions(${PREFIX}${target} PRIVATE ${ARG_DEFS})
 endmacro()
 
@@ -315,6 +316,23 @@ endmacro()
 #                 |___/              
 
 
+# Build the main library
+file(GLOB LIB_SOURCES ${SOURCE_DIR}/*.cpp)
+add_library(${LIB_NAME} STATIC ${LIB_SOURCES})
+target_link_libraries(${LIB_NAME} ${LIB_LIST})
+list(APPEND TARGET_LIST ${LIB_NAME})
+add_library(${PROJECT_NAME}-lib SHARED ${LIB_SOURCES})
+target_link_libraries(${PROJECT_NAME}-lib ${LIB_LIST})
+list(APPEND TARGET_LIST ${PROJECT_NAME}-lib)
+
+# Main command
+add_executable(mads ${MAIN_DIR}/mads.cpp)
+if(UNIX AND NOT APPLE)
+  target_link_libraries(mads OpenSSL::Crypto OpenSSL::SSL)
+endif()
+target_link_libraries(mads ${LIB_NAME})
+list(APPEND TARGET_LIST mads)
+
 # The following also work on WINDOWS!
 if(NOT MADS_MINIMAL)
   create_exec(broker SRCS broker.cpp)
@@ -326,19 +344,17 @@ if(NOT MADS_MINIMAL)
   endif()
 endif()
 
-# Main command
-add_executable(mads ${MAIN_DIR}/mads.cpp)
-if(UNIX AND NOT APPLE)
-  target_link_libraries(mads OpenSSL::Crypto OpenSSL::SSL)
-endif()
-target_link_libraries(mads ${LIB_LIST})
-list(APPEND TARGET_LIST mads)
-
 create_exec(filter SRCS plugin_loader.cpp LIBS pugg ${DLOPEN_LIB} DEFS "PLUGIN_LOADER_FILTER")
-create_exec(source SRCS plugin_loader.cpp LIBS  pugg ${DLOPEN_LIB} DEFS "PLUGIN_LOADER_SOURCE")
-create_exec(sink SRCS plugin_loader.cpp LIBS  pugg ${DLOPEN_LIB} DEFS "PLUGIN_LOADER_SINK")
+create_exec(source SRCS plugin_loader.cpp LIBS pugg ${DLOPEN_LIB} DEFS "PLUGIN_LOADER_SOURCE")
+create_exec(sink SRCS plugin_loader.cpp LIBS pugg ${DLOPEN_LIB} DEFS "PLUGIN_LOADER_SINK")
 create_exec(dealer SRCS dealer.cpp)
 create_exec(worker SRCS worker.cpp LIBS pugg)
+create_exec(plugin SRCS make_plugin.cpp)
+
+# Default plugins
+add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/src/plugin)
+
+add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/share/man)
 
 # Conditionally built targets
 
@@ -358,7 +374,6 @@ if (${MADS_ENABLE_LOGGER})
   create_exec(logger SRCS logger.cpp LIBS ${MONGO_LIBS})
   target_link_directories(${PREFIX}logger PRIVATE ${USR_DIR}/lib)
 endif()
-  
 
 if(${MADS_ENABLE_TOOLS})
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/tools)
@@ -371,13 +386,6 @@ endif()
 if(${MADS_ENABLE_GUI})
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/GUI/MADSMetadata)
 endif()
-
-# Default plugins
-add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/src/plugin)
-
-add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/share/man)
-
-create_exec(plugin SRCS make_plugin.cpp)
 
 if(${MADS_BUILD_TESTS})
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/test)
@@ -394,8 +402,6 @@ if(NOT ${MADS_SKIP_EXTERNALS})
   message(STATUS "Compiling third party libraries")
   include(external.cmake)  
   foreach(t IN ITEMS ${TARGET_LIST})
-    # add_dependencies(${t} libzmq)
-    # add_dependencies(${t} zmqpp)
     add_dependencies(${t} snappy)
   endforeach()
   if (${MADS_ENABLE_LOGGER})
@@ -403,6 +409,7 @@ if(NOT ${MADS_SKIP_EXTERNALS})
   endif()
 endif()
 
+message(STATUS "Targets: ${TARGET_LIST}")
 
 #   ___           _        _ _ 
 #  |_ _|_ __  ___| |_ __ _| | |
@@ -422,20 +429,9 @@ install(TARGETS ${TARGET_LIST}
   INCLUDES DESTINATION include
   COMPONENT MADS
 )
-file(GLOB ZMQPP_HEADER_FILES "${zmqpp_SOURCE_DIR}/src/zmqpp/*.hpp")
+file(GLOB LIB_HEADERS ${SOURCE_DIR}/*.hpp)
 install(FILES 
-  ${ZMQPP_HEADER_FILES}
-  DESTINATION include/zmqpp
-)
-install(FILES 
-  ${SOURCE_DIR}/mads.hpp
-  ${SOURCE_DIR}/agent.hpp
-  ${SOURCE_DIR}/exec_path.hpp
-  ${snappy_SOURCE_DIR}/snappy.h
-  ${snappy_BINARY_DIR}/snappy-stubs-public.h
-  ${libzmq_SOURCE_DIR}/include/zmq.h
-  ${libzmq_SOURCE_DIR}/include/zmq_utils.h
-  ${zmqpp_BINARY_DIR}/zmqpp_export.h
+  ${LIB_HEADERS}
   TYPE INCLUDE
 )
 install(DIRECTORY 
@@ -447,17 +443,6 @@ if(MSVC)
   file(GLOB MSVC_LIBS "${USR_DIR}/lib/*.lib")
   install(FILES
     ${MSVC_LIBS}
-    TYPE LIB
-  )
-else()
-  install(FILES
-    ${USR_DIR}/lib/libbson-static-1.0.a
-    ${USR_DIR}/lib/libbsoncxx-static.a
-    ${USR_DIR}/lib/libmongoc-static-1.0.a
-    ${USR_DIR}/lib/libmongocxx-static.a
-    ${snappy_BINARY_DIR}/libsnappy.a
-    ${libzmq_BINARY_DIR}/lib/libzmq.a
-    ${zmqpp_BINARY_DIR}/libzmqpp-static.a
     TYPE LIB
   )
 endif()
@@ -485,7 +470,7 @@ endif()
 #                              __/ |         __/ |
 #                             |___/         |___/ 
 if(${MADS_SKIP_EXTERNALS})
-  set(CPACK_PACKAGE_NAME "${LIB_NAME}")
+  set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
   set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${GIT_TAG}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
   set(CPACK_PACKAGE_VENDOR "MADS Consortium")
   set(CPACK_PACKAGE_DIRECTORY ${CMAKE_SOURCE_DIR}/packages)
