@@ -448,12 +448,14 @@ install(DIRECTORY
   TYPE INCLUDE
 )
 if(MSVC)
-  file(GLOB MSVC_LIBS "${USR_DIR}/lib/*.lib")
-  install(FILES
-    ${MSVC_LIBS}
-    TYPE LIB
-  )
+  file(GLOB STATIC_LIBS "${USR_DIR}/lib/*.lib")
+else()
+  file(GLOB STATIC_LIBS "${USR_DIR}/lib/*.a")
 endif()
+install(FILES
+  ${STATIC_LIBS}
+  TYPE LIB
+)
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/templates
   DESTINATION share
   COMPONENT MADS
