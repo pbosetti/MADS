@@ -386,7 +386,7 @@ public:
    * It checks if the last received message is a control message and acts
    * accordingly.
    */
-  void remote_control();
+  void remote_control(std::string payload_str);
 
 
   /*
@@ -622,6 +622,7 @@ protected:
   int _settings_timeout = 0;
   bool _init_done = false;
   bool _restart = false;
+  bool _remote_controlled = false;
   chrono::milliseconds _time_step = chrono::milliseconds(0);
   double _timecode_offset = 0.0;
   filesystem::path _attachment_path;

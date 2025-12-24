@@ -325,31 +325,6 @@ void Agent::set_cross(bool cross) { _cross = cross; }
 
 void Agent::set_pub_topic(string topic) { _pub_topic = topic; }
 
-void Agent::enable_remote_control() {
-  if (!_init_done)
-    throw AgentError("Agent not initialized");
-  if (_connected)
-    throw AgentError("Cannot enable remote control after connecting");
-  bool subscriber = !_sub_topic.empty();
-  _sub_topic.push_back("control");
-  if (!subscriber)
-    thread([&]() {
-      _subscriber.set(zmqpp::socket_option::receive_timeout, 100);
-      while (Mads::running) {
-        message_type type;
-        try {
-          type = receive();
-        } catch (const std::exception &e) {
-          cerr << "Error receiving message: " << e.what() << endl;
-          continue;
-        }
-        if (type != message_type::json)
-          continue;
-        remote_control();
-      }
-    }).detach();
-}
-
 void Agent::register_event(const event_type event, const nlohmann::json &info) {
   if (!_init_done)
     throw AgentError("Agent not initialized");
@@ -448,10 +423,18 @@ message_type Agent::receive(bool dont_block) {
     throw AgentError("Received message with only one part");
   case 2: // Payload is JSON
     message >> topic >> payload;
+    if (payload.empty()) {
+      result = message_type::none;
+      break;
+    }
     if (_compress) {
       snappy::Uncompress(payload.data(), payload.size(), &j);
     } else {
       j = payload;
+    }
+    if (_remote_controlled && topic == "control") {
+      remote_control(j);
+      break;
     }
     _status[topic] = j;
     _last_message = make_tuple(topic, j);
@@ -497,12 +480,47 @@ void Agent::loop(std::function<void()> const &lambda) {
   loop(lambda, _time_step);
 }
 
-void Agent::remote_control() {
+void Agent::enable_remote_control() {
   if (!_init_done)
     throw AgentError("Agent not initialized");
-  auto [topic, payload_str] = last_message();
-  nlohmann::json payload = nlohmann::json::parse(payload_str);
-  string command = payload["command"];
+  if (_connected)
+    throw AgentError("Cannot enable remote control after connecting");
+  // bool subscriber = !_sub_topic.empty();
+  // if (!subscriber) {
+    _remote_controlled = true;
+    _sub_topic.push_back("control");
+  // }
+  // if (!subscriber)
+  //   thread([&]() {
+  //     // _subscriber.set(zmqpp::socket_option::receive_timeout, 100);
+  //     while (Mads::running) {
+  //       message_type type;
+  //       try {
+  //         type = receive();
+  //       } catch (const std::exception &e) {
+  //         cerr << "Error receiving message: " << e.what() << endl;
+  //         continue;
+  //       }
+  //       if (type != message_type::json)
+  //         continue;
+  //       remote_control();
+  //     }
+  //   }).detach();
+}
+
+void Agent::remote_control(string payload_str) {
+  if (!_init_done)
+    throw AgentError("Agent not initialized");
+  // auto [topic, payload_str] = last_message();
+  nlohmann::json payload = {};
+  string command;
+  try {
+    payload = nlohmann::json::parse(payload_str);
+  } catch(...) {
+    cout << "Error" << endl;
+    payload["cmd"] = "none";
+  }
+  command = payload["cmd"];
   if (command == "restart") {
     _restart = true;
     Mads::running = false;
@@ -510,9 +528,8 @@ void Agent::remote_control() {
     Mads::running = false;
   } else if (command == "info") {
     nlohmann::json response = get_settings();
-    response["command"] = "info_response";
-    response["name"] = _name;
-    publish(response, "control");
+    response["agent"] = _name;
+    publish(response, "info");
   }
 }
 

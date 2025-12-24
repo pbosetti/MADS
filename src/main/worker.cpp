@@ -168,7 +168,7 @@ int main(int argc, char *argv[]) {
     return_type rt;
     if (payload.empty() && !Mads::running) return;
     message_type type = agent.receive();
-    agent.remote_control();
+    // agent.remote_control();
     json out;
     rt = filter->load_data(payload, agent.last_topic());
     if (rt != return_type::success) {

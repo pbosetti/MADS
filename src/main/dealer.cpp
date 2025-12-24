@@ -73,7 +73,7 @@ int main(int argc, char *argv[]) {
     json j;
     message_type type = dealer.receive();
     auto msg = dealer.last_message();
-    dealer.remote_control();
+    // dealer.remote_control();
     switch (type) {
     case message_type::json:
       try {

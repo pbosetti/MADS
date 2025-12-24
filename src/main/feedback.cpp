@@ -83,7 +83,7 @@ int main(int argc, char *argv[]) {
   agent.loop([&]() {
     message_type type = agent.receive();
     auto msg = agent.last_message();
-    agent.remote_control();
+    // agent.remote_control();
     if (get<0>(msg) == LOGGER_STATUS_TOPIC) {
       return;
     }

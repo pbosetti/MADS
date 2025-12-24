@@ -148,13 +148,13 @@ FetchContent_Declare(tomlplusplus
 
 FetchContent_Declare(nlohmann_json
     GIT_REPOSITORY https://github.com/nlohmann/json.git
-    GIT_TAG        v3.11.3
+    GIT_TAG        v3.12.0
     GIT_SHALLOW    TRUE
 )
 
 FetchContent_Declare(cxxopts
     GIT_REPOSITORY https://github.com/jarro2783/cxxopts.git
-    GIT_TAG        v3.1.1
+    GIT_TAG        v3.3.1
     GIT_SHALLOW    TRUE
 )
 
@@ -231,7 +231,7 @@ FetchContent_Populate(plugin
 
 FetchContent_Populate(inja
   GIT_REPOSITORY https://github.com/pantor/inja.git
-  GIT_TAG        v3.4.0
+  GIT_TAG        v3.5.0
   GIT_SHALLOW    TRUE
   SUBBUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/_deps/inja-subbuild
   SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/_deps/inja-src

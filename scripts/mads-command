@@ -3,7 +3,7 @@
 
 SCRIPT_DIR=$(dirname "$0")
 COMMAND="mads-bridge"
-USAGE="Usage: $0 <stop|restart>"
+USAGE="Usage: $0 <stop|info|restart>"
 
 
 # Check number of arguments
@@ -25,6 +25,10 @@ fi
 if [ "$1" == "stop" ]; then
   echo "Stopping agents"
   ${COMMAND} -t control -m "{\"cmd\":\"shutdown\"}"
+  exit 0
+elif [ "$1" == "info" ]; then
+  echo "Requesting info"
+  ${COMMAND} -t control -m "{\"cmd\":\"info\"}"
   exit 0
 elif [ "$1" == "restart" ]; then
   echo "Restarting agents"

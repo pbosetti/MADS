@@ -374,7 +374,7 @@ int main(int argc, char *argv[]) {
           cerr << fg::red << "Error receiving message: " << e.what()
                << fg::reset << endl;
         }
-        agent.remote_control();
+        // agent.remote_control();
         if (agent.last_topic() == "control") {
           return; // Control message, already handled
         }
@@ -460,7 +460,7 @@ int main(int argc, char *argv[]) {
            << endl;
     }
     auto msg = agent.last_message();
-    agent.remote_control();
+    // agent.remote_control();
     if (agent.last_topic() == "control") {
       return; // Control message, already handled
     }
