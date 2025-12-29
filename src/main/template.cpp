@@ -41,8 +41,8 @@ int main(int argc, char *argv[]) {
     if (options_parsed.count("keys_dir") != 0) {
       key_dir = options_parsed["keys_dir"].as<string>();
     }
-    if (options_parsed.count("key_server") != 0) {
-      server_key_name = options_parsed["key_server"].as<string>();
+    if (options_parsed.count("key_broker") != 0) {
+      server_key_name = options_parsed["key_broker"].as<string>();
     }
     if (options_parsed.count("key_client") != 0) {
       client_key_name = options_parsed["key_client"].as<string>();
