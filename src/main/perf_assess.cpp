@@ -86,7 +86,7 @@ int main(int argc, char *argv[]) {
               << fg::reset << endl;
     exit(EXIT_FAILURE);
   }
-  agent.enable_remote_control();
+  agent.enable_threaded_remote_control();
   agent.connect();
   agent.register_event(event_type::startup);
   agent.info();

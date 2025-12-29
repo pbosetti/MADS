@@ -196,7 +196,11 @@ int main(int argc, char *argv[]) {
          << fg::reset << endl;
     exit(EXIT_FAILURE);
   }
+  #if defined(PLUGIN_LOADER_SINK) or defined(PLUGIN_LOADER_FILTER)
   agent.enable_remote_control();
+  #else
+  agent.enable_threaded_remote_control();
+  #endif
   agent.connect();
 
   // Copy agent settings as plugin parameters

@@ -278,10 +278,16 @@ public:
    * If the agent is also a subscriber, then the remote control is handled
    * in the main loop by calling the remote_control() function.
    *
+   * @param threaded If true, the agent is NOT supposed to receive data (it is
+   *        a pure sink) so messages are read on a searate thread
    * @throws AgentError if not initialized
    * @throws AgentError if already connected
    */
-  void enable_remote_control();
+  void enable_remote_control(bool threaded = false);
+  
+  inline void enable_threaded_remote_control() {
+    enable_remote_control(true);
+  }
 
 
   /**

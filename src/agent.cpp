@@ -480,33 +480,35 @@ void Agent::loop(std::function<void()> const &lambda) {
   loop(lambda, _time_step);
 }
 
-void Agent::enable_remote_control() {
+void Agent::enable_remote_control(bool threaded) {
   if (!_init_done)
     throw AgentError("Agent not initialized");
   if (_connected)
     throw AgentError("Cannot enable remote control after connecting");
-  // bool subscriber = !_sub_topic.empty();
-  // if (!subscriber) {
-    _remote_controlled = true;
-    _sub_topic.push_back("control");
-  // }
-  // if (!subscriber)
-  //   thread([&]() {
-  //     // _subscriber.set(zmqpp::socket_option::receive_timeout, 100);
-  //     while (Mads::running) {
-  //       message_type type;
-  //       try {
-  //         type = receive();
-  //       } catch (const std::exception &e) {
-  //         cerr << "Error receiving message: " << e.what() << endl;
-  //         continue;
-  //       }
-  //       if (type != message_type::json)
-  //         continue;
-  //       remote_control();
-  //     }
-  //   }).detach();
+  _remote_controlled = true;
+  _sub_topic.push_back("control");
+  if (threaded)
+    thread([&]() {
+      _subscriber.set(zmqpp::socket_option::receive_timeout, 500);
+      message msg;
+      string topic, payload, j;
+      while (Mads::running) {
+        _subscriber.receive(msg, false);
+        if (msg.parts() == 2) {
+          msg >> topic >> payload;
+          if (topic == "control") {
+            if (_compress) {
+              snappy::Uncompress(payload.data(), payload.size(), &j);
+            } else {
+              j = payload;
+            }
+            remote_control(j);
+          }
+        }
+      }
+    }).detach();
 }
+
 
 void Agent::remote_control(string payload_str) {
   if (!_init_done)
