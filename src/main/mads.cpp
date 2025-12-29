@@ -527,8 +527,9 @@ int main(int argc, char **argv) {
     cout << "If this pair is for the broker, " << style::bold
          << "distribute only the public key to the clients." << style::reset
          << endl;
-    cout << "Broker and agents look for the keys in the prefix directory (here "
-         << Mads::prefix() << ") by default." << endl;
+    cout << "Broker and agents look for the keys in the etc directory under "
+            "the prefix directory (here "
+         << Mads::prefix() << "/etc) by default." << endl;
     cout << fg::yellow << "Keep the secret key safe!" << fg::reset << endl;
     return 0;
   }
