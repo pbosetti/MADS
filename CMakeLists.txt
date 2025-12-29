@@ -508,7 +508,7 @@ if(${MADS_SKIP_EXTERNALS})
       ${CMAKE_INSTALL_PREFIX}/include ./include
     )
   else()
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libzstd1, libssl, openssl, libsodium23")
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libzstd1, libgnutls30, openssl, libsodium23")
     set(CPACK_DEBIAN_PACKAGE_NAME MADS)
     set(CPACK_GENERATOR "DEB;TGZ")
   endif()
