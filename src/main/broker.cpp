@@ -220,6 +220,7 @@ int main(int argc, char **argv) {
   Options options(argv[0]);
   string nic = "lo0";
   string ip = "127.0.0.1";
+  string key_name;
   bool crypto = false;
   vector<string> desc{"FRONTEND msg in   ", "FRONTEND bytes in ",
                       "FRONTEND msg out  ", "FRONTEND bytes out",
@@ -280,13 +281,15 @@ int main(int argc, char **argv) {
   }
 
   if (options_parsed.count("crypto") != 0) {
+    key_name = options_parsed["crypto"].as<string>();
     if (options_parsed.count("keys_dir") != 0) {
       keys_dir = filesystem::path(options_parsed["keys_dir"].as<string>());
     }
-    cout << fg::cyan << "Enabling CURVE encryption for broker sockets" 
-         << endl;
-    cout << "Searching for keys in " << style::bold
-         << keys_dir.string() << style::reset << fg::reset << endl;
+    cout << fg::cyan << "Enabling CURVE encryption for broker sockets" << endl
+         << "  Searching for keys in " << style::bold
+         << keys_dir.string() << style::reset << endl
+         << fg::cyan << "  Broker key name: " << style::bold
+         << key_name << "[.key|.pub]" << fg::reset << endl;
     crypto = true;
   }
 
@@ -314,7 +317,6 @@ int main(int argc, char **argv) {
   if (crypto) {
     auto whitelist = config[name]["ip_whitelist"].as_array();
     bool verbose = config[name]["auth_verbose"].value_or(false);
-    string name = options_parsed["crypto"].as<string>();
     curve_auth_ptr = make_unique<Mads::CurveAuth>(context);
     if (whitelist) {
       whitelist->for_each([&](const toml::node& n) {
@@ -336,8 +338,8 @@ int main(int argc, char **argv) {
       exit(EXIT_FAILURE);
     }
     try {
-      curve_auth_ptr->setup_curve_server(frontend, name);
-      curve_auth_ptr->setup_curve_server(backend, name);
+      curve_auth_ptr->setup_curve_server(frontend, key_name);
+      curve_auth_ptr->setup_curve_server(backend, key_name);
     } catch (const runtime_error &e) {
       cerr << fg::red << e.what() << fg::reset << endl;
       curve_auth_ptr = nullptr;
@@ -363,7 +365,7 @@ int main(int argc, char **argv) {
   // Create Settings socket (Req/Rep)
   zmqpp::socket settings(context, zmqpp::socket_type::rep);
   if (crypto)
-    curve_auth_ptr->setup_curve_server(settings, "broker");
+    curve_auth_ptr->setup_curve_server(settings, key_name);
   settings.bind(settings_address);
   settings.set(zmqpp::socket_option::receive_timeout, 1000);
   cout << "Binding broker shared settings (REP) at " << style::bold
