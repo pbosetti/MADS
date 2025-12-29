@@ -140,6 +140,8 @@ endif()
 
 # Fetched targets
 include(FetchContent)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 FetchContent_Declare(tomlplusplus
     GIT_REPOSITORY https://github.com/pbosetti/tomlplusplus.git
     GIT_TAG        050c7a0
@@ -327,11 +329,9 @@ file(GLOB LIB_SOURCES ${SOURCE_DIR}/*.cpp)
 add_library(${LIB_NAME} STATIC ${LIB_SOURCES})
 target_link_libraries(${LIB_NAME} ${LIB_LIST})
 list(APPEND TARGET_LIST ${LIB_NAME})
-if(APPLE)
-  add_library(${PROJECT_NAME}-lib SHARED ${LIB_SOURCES})
-  target_link_libraries(${PROJECT_NAME}-lib ${LIB_LIST})
-  list(APPEND TARGET_LIST ${PROJECT_NAME}-lib)
-endif()
+add_library(${PROJECT_NAME}-lib SHARED ${LIB_SOURCES})
+target_link_libraries(${PROJECT_NAME}-lib ${LIB_LIST})
+list(APPEND TARGET_LIST ${PROJECT_NAME}-lib)
 
 # Main command
 add_executable(mads ${MAIN_DIR}/mads.cpp)
