@@ -123,7 +123,7 @@ else()
 endif()
 
 # Disable some warnings in Visual Studio
-if (MSVC)
+if (WIN32)
   add_definitions(-D_CRT_SECURE_NO_WARNINGS)
   add_compile_options(/wd4068 /wd4005 /wd4267 /wd4244 /wd4804 /EHsc /MP)
 else()
@@ -181,7 +181,7 @@ FetchContent_Declare(pugg
 # )
 # FetchContent_MakeAvailable(snappy)
 
-if(MSVC)
+if(WIN32)
   FetchContent_Populate(libsodium
     URL https://download.libsodium.org/libsodium/releases/libsodium-1.0.20-msvc.zip
     SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/vendor/libsodium
@@ -209,7 +209,7 @@ FetchContent_Declare(
   GIT_TAG HEAD
   GIT_SHALLOW TRUE
 )
-if(MSVC)
+if(WIN32)
   set(ZEROMQ_INCLUDE "${libzmq_SOURCE_DIR}/include" CACHE INTERNAL "")
   set(ZEROMQ_LIBRARY_STATIC "${libzmq_BINARY_DIR}/lib/libzmq-static.a" CACHE INTERNAL "")
 endif()
@@ -267,8 +267,13 @@ link_directories(${USR_DIR}/lib)
 
 if(WIN32)
   link_directories(${CMAKE_CURRENT_LIST_DIR}/vendor/libsodium/x64/Release/v143/static)
-  file(GLOB LIB_ZMQ "${libzmq_BINARY_DIR}/lib/Release/libzmq*.lib")
-  file(GLOB LIB_ZMQPP "${zmqpp_BINARY_DIR}/Release/zmqpp-static*.lib")
+  if (GENERATOR_IS_MULTI_CONFIG)
+    file(GLOB LIB_ZMQ "${libzmq_BINARY_DIR}/lib/Release/libzmq*.lib")
+    file(GLOB LIB_ZMQPP "${zmqpp_BINARY_DIR}/Release/zmqpp-static*.lib")
+  else()
+    file(GLOB LIB_ZMQ "${libzmq_BINARY_DIR}/lib/libzmq*.lib")
+    file(GLOB LIB_ZMQPP "${zmqpp_BINARY_DIR}/zmqpp-static*.lib")
+  endif()
   file(GLOB LIB_MONGOCXX "${USR_DIR}/lib/mongocxx-v_noabi*.lib")
   file(GLOB LIB_BSONCXX "${USR_DIR}/lib/bsoncxx-v_noabi*.lib")
   set(LIB_LIST ${LIB_ZMQPP} ${LIB_ZMQ} libsodium snappy Ws2_32 Iphlpapi)
@@ -278,7 +283,7 @@ if(WIN32)
     Ws2_32 bcrypt Secur32 Crypt32 Dnsapi
   )
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DZMQ_STATIC")
-  set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -DZMQ_STATIC")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DZMQ_STATIC")
   add_compile_options(/MP /wd4061 /wd4996 /wd4710 /wd4711)
   add_link_options(/NODEFAULTLIB:libcmt.lib)
 else()
@@ -447,7 +452,7 @@ install(DIRECTORY
   ${nlohmann_json_SOURCE_DIR}/include/nlohmann
   TYPE INCLUDE
 )
-if(MSVC)
+if(WIN32)
   file(GLOB STATIC_LIBS "${USR_DIR}/lib/*.lib")
 else()
   file(GLOB STATIC_LIBS "${USR_DIR}/lib/*.a")
@@ -495,7 +500,7 @@ if(${MADS_SKIP_EXTERNALS})
     if(CMAKE_OSX_ARCHITECTURES MATCHES ";")
       set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${GIT_TAG}-${CMAKE_SYSTEM_NAME}-universal")
     endif()
-  elseif(MSVC)
+  elseif(WIN32)
     set(CPACK_GENERATOR "ZIP;INNOSETUP")
     set(CPACK_PACKAGE_INSTALL_DIRECTORY "MADS")
     set(CPACK_INNOSETUP_IGNORE_LICENSE_PAGE OFF)
