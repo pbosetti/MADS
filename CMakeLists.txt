@@ -251,8 +251,11 @@ FetchContent_Populate(inja
 #  | |_) | |_| | | | (_| | \__ \  __/ |_| |_| | | | | (_| \__ \
 #  |____/ \__,_|_|_|\__,_| |___/\___|\__|\__|_|_| |_|\__, |___/
 #                                                    |___/     
-
-set(CMAKE_CXX_STANDARD 17)
+if (WIN32)
+  set(CMAKE_CXX_STANDARD 20)
+else()
+  set(CMAKE_CXX_STANDARD 17)
+endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Python3 COMPONENTS Interpreter Development)

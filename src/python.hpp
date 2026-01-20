@@ -15,7 +15,9 @@ Common header for source, filter and sink python plugins
 #include <vector>
 #include <iostream>
 #include <rang.hpp>
+#include "mads.hpp"
 #include "exec_path.hpp"
+#include "agent.hpp"
 
 using namespace std;
 using namespace filesystem;

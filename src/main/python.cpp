@@ -9,11 +9,9 @@ An agent that runs Python3 scripts
 Author(s): Paolo Bosetti
 */
 #include "../python.hpp"
-#include <agent.hpp>
 #include <cppy3/cppy3.hpp>
 #include <cppy3/utils.hpp>
 #include <cxxopts.hpp>
-#include <mads.hpp>
 
 using namespace std;
 using namespace cxxopts;
