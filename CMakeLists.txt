@@ -53,6 +53,9 @@ set(LIB_VERSION_CHECK "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MI
 project(${PROJECT_NAME} VERSION ${LIB_VERSION} LANGUAGES CXX)
 set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
 
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 # Prefix for executable ames
 set(PREFIX "mads-")
 
@@ -169,13 +172,6 @@ FetchContent_Declare(pugg
   GIT_SHALLOW    TRUE
 )
 
-FetchContent_Declare(cppy3 
-  GIT_REPOSITORY https://github.com/pbosetti/cppy3.git
-  GIT_TAG        HEAD
-  GIT_SHALLOW    TRUE
-)
-FetchContent_MakeAvailable(cppy3)
-
 # set(SNAPPY_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
 # set(SNAPPY_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 # FetchContent_Declare(snappy
@@ -251,17 +247,6 @@ FetchContent_Populate(inja
 #  | |_) | |_| | | | (_| | \__ \  __/ |_| |_| | | | | (_| \__ \
 #  |____/ \__,_|_|_|\__,_| |___/\___|\__|\__|_|_| |_|\__, |___/
 #                                                    |___/     
-if (WIN32)
-  set(CMAKE_CXX_STANDARD 20)
-else()
-  set(CMAKE_CXX_STANDARD 17)
-endif()
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-find_package(Python3 COMPONENTS Interpreter Development)
-if(NOT Python3_FOUND)
-  message(STATUS "Python3 not found")
-endif()
 include_directories(
   ${USR_DIR}/include 
   ${USR_DIR}/include/mongocxx/v_noabi 
@@ -276,8 +261,6 @@ include_directories(
   ${zmqpp_BINARY_DIR}
   ${zmqpp_SOURCE_DIR}/src
   ${libzmq_SOURCE_DIR}/include
-  ${cppy3_SOURCE_DIR}
-  ${Python3_INCLUDE_DIRS}
 )
 link_directories(${USR_DIR}/lib)
 
@@ -379,9 +362,6 @@ create_exec(sink SRCS plugin_loader.cpp LIBS pugg ${DLOPEN_LIB} DEFS "PLUGIN_LOA
 create_exec(dealer SRCS dealer.cpp)
 create_exec(worker SRCS worker.cpp LIBS pugg)
 create_exec(plugin SRCS make_plugin.cpp)
-if (Python3_FOUND)
-  create_exec(python SRCS python.cpp LIBS cppy3 DEFS "INSTALL_PREFIX=\"/usr/local\"")
-endif()
 
 # Default plugins
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/src/plugin)
