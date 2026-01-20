@@ -35,10 +35,8 @@ Author(s): Paolo Bosetti
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop
 #endif
-#include <csignal>
 #include <iostream>
 #include <regex>
-#include <snappy.h>
 #include <string>
 #include <string_view>
 #include <thread>
