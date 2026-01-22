@@ -176,7 +176,6 @@ void Agent::init(bool crypto) {
   // member variables
   auto all_cfg = _config["agents"];
   timecode_fps = all_cfg["timecode_fps"].value_or(MADS_FPS);
-  _compress = all_cfg["compress"].value_or(false);
   dummy = all_cfg["dummy"].value_or(false);
 
   if (_config[_name].type() != toml::node_type::table)
@@ -277,11 +276,6 @@ void Agent::info(ostream &out) {
     out << "  Agent ID:         " << style::bold << _agent_id << style::reset
         << endl;
   }
-  out << "  Compression:      " << style::bold;
-  if (_compress)
-    out << "enabled" << style::reset << endl;
-  else
-    out << fg::red << "disabled" << fg::reset << style::reset << endl;
   out << "  Timecode FPS:     " << style::bold << timecode_fps << style::reset
       << endl;
   out << "  Timecode offset:  " << style::bold << _timecode_offset
@@ -374,15 +368,12 @@ void Agent::publish(nlohmann::json payload, string topic) {
     payload["timecode"] = timecode(now, timecode_fps) - offset;
   }
   str = payload.dump();
-  if (topic.empty())
+  if (topic.empty()) {
     topic = _pub_topic;
-  if (_compress) {
-    string compressed;
-    snappy::Compress(str.data(), str.size(), &compressed);
-    message << topic << compressed;
-  } else {
-    message << topic << str;
   }
+  string compressed;
+  snappy::Compress(str.data(), str.size(), &compressed);
+  message << topic << compressed;
   _publisher.send(message);
 }
 
@@ -427,11 +418,7 @@ message_type Agent::receive(bool dont_block) {
       result = message_type::none;
       break;
     }
-    if (_compress) {
-      snappy::Uncompress(payload.data(), payload.size(), &j);
-    } else {
-      j = payload;
-    }
+    snappy::Uncompress(payload.data(), payload.size(), &j);
     if (_remote_controlled && topic == "control") {
       remote_control(j);
       break;
@@ -497,11 +484,7 @@ void Agent::enable_remote_control(bool threaded) {
         if (msg.parts() == 2) {
           msg >> topic >> payload;
           if (topic == "control") {
-            if (_compress) {
-              snappy::Uncompress(payload.data(), payload.size(), &j);
-            } else {
-              j = payload;
-            }
+            snappy::Uncompress(payload.data(), payload.size(), &j);
             remote_control(j);
           }
         }

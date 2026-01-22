@@ -619,7 +619,6 @@ protected:
   map<string, string> _status;
   tuple<string, string> _last_message;
   tuple<string, string, vector<unsigned char>> _last_blob;
-  bool _compress = false;
   bool _cross = false;
   bool _connected = false;
   int _receive_timeout = 500;
