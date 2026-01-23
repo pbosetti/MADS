@@ -14,3 +14,6 @@ target_link_libraries(curve_server PRIVATE ${LIB_LIST})
 
 add_executable(curve_client client.cpp)
 target_link_libraries(curve_client PRIVATE ${LIB_LIST})
+
+add_executable(c_test c_test.c)
+target_link_libraries(c_test PRIVATE mads-lib)
