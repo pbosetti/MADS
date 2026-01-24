@@ -23,16 +23,15 @@ extern "C" {
 #include <stdbool.h>
 
 /*
-  _     _ _                          
- | |   (_) |__  _ __ __ _ _ __ _   _ 
+  _     _ _
+ | |   (_) |__  _ __ __ _ _ __ _   _
  | |   | | '_ \| '__/ _` | '__| | | |
  | |___| | |_) | | | (_| | |  | |_| |
  |_____|_|_.__/|_|  \__,_|_|   \__, |
-                               |___/ 
+                               |___/
 */
 const char *mads_version();
 const char *mads_default_settings_uri();
-
 
 /*
    ____ _
@@ -45,15 +44,20 @@ Class-like opaque struct
 */
 typedef void *agent_t;
 
-typedef enum { none = 0, json = 1, blob, error } message_type_t;
+typedef enum {
+  mads_none = 0,
+  mads_json = 1,
+  mads_blob,
+  mads_error
+} message_type_t;
 
 typedef enum {
-  marker = 0,
-  marker_in,
-  marker_out,
-  startup,
-  shutdown,
-  message
+  mads_marker = 0,
+  mads_marker_in,
+  mads_marker_out,
+  mads_startup,
+  mads_shutdown,
+  mads_message
 } event_type_t;
 
 /*

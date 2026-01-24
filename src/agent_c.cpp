@@ -222,10 +222,10 @@ message_type_t agent_receive(agent_t agent, bool dont_block) {
     type = ag->receive(dont_block);
   } catch (const std::exception &e) {
     snprintf(_err_msg, ERR_MSG_SIZE, "Error receiving message: %s", e.what());
-    return error;
+    return mads_error;
   } catch (...) {
     snprintf(_err_msg, ERR_MSG_SIZE, "Error receiving message: Unexpected");
-    return error;
+    return mads_error;
   }
   return static_cast<message_type_t>(type);
 }
