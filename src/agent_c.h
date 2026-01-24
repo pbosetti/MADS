@@ -102,6 +102,7 @@ int agent_setting_int(agent_t agent, const char *key);
 double agent_setting_dbl(agent_t agent, const char *key);
 const char *agent_setting_str(agent_t agent, const char *key);
 void agent_print_settings(agent_t agent);
+const char *agent_settings_uri(agent_t agent);
 
 // Messaging
 int agent_publish(agent_t agent, const char *topic, const char *message);

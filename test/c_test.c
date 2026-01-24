@@ -23,6 +23,7 @@ int main(int argc, const char **argv) {
   else
     agent = agent_create("c_test", argv[1]);
 
+  printf("Reading settings from %s\n", agent_settings_uri(agent));
   agent_set_settings_timeout(agent, 2000);
   printf("Settings timeout: %d ms\n", agent_settings_timeout(agent));
 

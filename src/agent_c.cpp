@@ -187,6 +187,12 @@ void agent_print_settings(agent_t agent) {
   std::cout << ag->get_settings().dump(2) << std::endl;
 }
 
+const char *agent_settings_uri(agent_t agent) {
+  Agent *ag = reinterpret_cast<Agent *>(agent);
+  static string s = ag->settings_uri();
+  return s.c_str();
+}
+
 int agent_publish(agent_t agent, const char *topic, const char *message) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
   nlohmann::json j;

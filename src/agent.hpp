@@ -571,6 +571,8 @@ public:
    */
   void set_key_dir(const filesystem::path &path);
 
+  string settings_uri();
+
   double timecode_fps = MADS_FPS;
   auth_verbose auth_verbose = auth_verbose::off;
   string server_key_name = "broker";

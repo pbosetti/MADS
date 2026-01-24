@@ -631,4 +631,6 @@ void Agent::set_key_dir(const filesystem::path &path) {
   _key_dir = path;
 }
 
+string Agent::settings_uri() { return _settings_uri; }
+
 } // namespace Mads
