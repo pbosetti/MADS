@@ -17,10 +17,15 @@ Paolo Bosetti 2026
 
 int main(int argc, const char **argv) {
   agent_t agent = NULL;
+  printf("Using MADS library version %s\n", mads_version());
   if (argc == 1)
     agent = agent_create("c_test", "tcp://localhost:9092");
   else
     agent = agent_create("c_test", argv[1]);
+
+  agent_set_settings_timeout(agent, 2000);
+  printf("Settings timeout: %d ms\n", agent_settings_timeout(agent));
+
   if (agent_init(agent, false)) {
     printf("Fatal : %s\n", agent_last_error(agent));
     return -1;

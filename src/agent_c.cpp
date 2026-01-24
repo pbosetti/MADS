@@ -17,7 +17,18 @@ Paolo Bosetti, 2026
 
 using namespace Mads;
 
+const char *mads_version() {
+  static string v = LIB_VERSION;
+  return v.c_str();
+}
+
+const char *mads_default_settings_uri() {
+  static string s = SETTINGS_URI;
+  return s.c_str();
+}
+
 static char _err_msg[ERR_MSG_SIZE];
+
 agent_t agent_create(const char *name, const char *settings_uri) {
   Agent *agent = new Agent(string(name), string(settings_uri));
   return reinterpret_cast<agent_t *>(agent);
@@ -137,6 +148,16 @@ int agent_disconnect(agent_t agent) {
 void agent_get_settings(agent_t agent) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
   ag->get_settings();
+}
+
+void agent_set_settings_timeout(agent_t agent, int to_ms) {
+  Agent *ag = reinterpret_cast<Agent *>(agent);
+  ag->set_settings_timeout(to_ms);
+}
+
+int agent_settings_timeout(agent_t agent) {
+  Agent *ag = reinterpret_cast<Agent *>(agent);
+  return ag->settings_timeout();
 }
 
 bool agent_setting_bool(agent_t agent, const char *key) {

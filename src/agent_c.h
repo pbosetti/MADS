@@ -23,6 +23,18 @@ extern "C" {
 #include <stdbool.h>
 
 /*
+  _     _ _                          
+ | |   (_) |__  _ __ __ _ _ __ _   _ 
+ | |   | | '_ \| '__/ _` | '__| | | |
+ | |___| | |_) | | | (_| | |  | |_| |
+ |_____|_|_.__/|_|  \__,_|_|   \__, |
+                               |___/ 
+*/
+const char *mads_version();
+const char *mads_default_settings_uri();
+
+
+/*
    ____ _
   / ___| | __ _ ___ ___
  | |   | |/ _` / __/ __|
@@ -83,6 +95,8 @@ const char *agent_last_error(agent_t agent);
 
 // Settings
 void agent_get_settings(agent_t agent);
+void agent_set_settings_timeout(agent_t agent, int to_ms);
+int agent_settings_timeout(agent_t agent);
 bool agent_setting_bool(agent_t agent, const char *key);
 int agent_setting_int(agent_t agent, const char *key);
 double agent_setting_dbl(agent_t agent, const char *key);
