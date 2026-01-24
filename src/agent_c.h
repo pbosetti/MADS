@@ -94,14 +94,14 @@ void agent_set_receive_timeout(agent_t agent, int timeout);
 const char *agent_last_error(agent_t agent);
 
 // Settings
-void agent_get_settings(agent_t agent);
+const char *agent_get_settings(agent_t agent, int n);
 void agent_set_settings_timeout(agent_t agent, int to_ms);
 int agent_settings_timeout(agent_t agent);
 bool agent_setting_bool(agent_t agent, const char *key);
 int agent_setting_int(agent_t agent, const char *key);
 double agent_setting_dbl(agent_t agent, const char *key);
 const char *agent_setting_str(agent_t agent, const char *key);
-void agent_print_settings(agent_t agent);
+void agent_print_settings(agent_t agent, int tab);
 const char *agent_settings_uri(agent_t agent);
 
 // Messaging

@@ -33,9 +33,8 @@ int main(int argc, const char **argv) {
   }
   agent_set_id(agent, "Test C agent");
   agent_connect(agent, 1000);
-  agent_get_settings(agent);
-  agent_print_settings(agent);
-  agent_connect(agent, 1000);
+  agent_get_settings(agent, 0);
+  agent_print_settings(agent, 0);
   agent_register_event(agent, startup,
                        "{\"message\":\"Feedback agent started\"}");
 

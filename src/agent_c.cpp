@@ -145,9 +145,10 @@ int agent_disconnect(agent_t agent) {
 }
 
 // Settings
-void agent_get_settings(agent_t agent) {
+const char *agent_get_settings(agent_t agent, int n) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
-  ag->get_settings();
+  static string s = ag->get_settings().dump(n);
+  return s.c_str();
 }
 
 void agent_set_settings_timeout(agent_t agent, int to_ms) {
@@ -182,9 +183,9 @@ const char *agent_setting_str(agent_t agent, const char *key) {
   return value.c_str();
 }
 
-void agent_print_settings(agent_t agent) {
+void agent_print_settings(agent_t agent, int tab) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
-  std::cout << ag->get_settings().dump(2) << std::endl;
+  std::cout << ag->get_settings().dump(tab) << std::endl;
 }
 
 const char *agent_settings_uri(agent_t agent) {

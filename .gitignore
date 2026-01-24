@@ -13,6 +13,8 @@ src/mads.hpp
 .Rproj.user
 .Rhistory
 
+__pycache__
+
 Dockerfile
 
 vendor/libsodium
