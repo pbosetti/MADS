@@ -35,7 +35,7 @@ int main(int argc, const char **argv) {
   agent_connect(agent, 1000);
   agent_get_settings(agent, 0);
   agent_print_settings(agent, 0);
-  agent_register_event(agent, startup,
+  agent_register_event(agent, mads_startup,
                        "{\"message\":\"Feedback agent started\"}");
 
   int i = 0;
@@ -47,7 +47,7 @@ int main(int argc, const char **argv) {
   }
 
   sleep(1);
-  agent_register_event(agent, shutdown, NULL);
+  agent_register_event(agent, mads_shutdown, NULL);
   sleep(1);
   agent_disconnect(agent);
   return 0;
