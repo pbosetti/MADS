@@ -191,7 +191,7 @@ class Agent:
         """Set the server key name."""
         lib.agent_set_server_key_name(self._agent, server_key_name.encode('utf-8'))
     
-    def set_auth_verbose(self, verbose: bool):
+    def set_auth_verbose(self, verbose: bool = True):
         """Set authentication verbosity."""
         lib.agent_set_auth_verbose(self._agent, verbose)
     
@@ -231,7 +231,7 @@ class Agent:
         """Get the settings timeout."""
         return lib.agent_settings_timeout(self._agent)
     
-    def print_settings(self, tab = 0):
+    def print_settings(self, tab: int = 0):
         """Print all settings."""
         lib.agent_print_settings(self._agent, tab)
     
@@ -241,12 +241,12 @@ class Agent:
         return result.decode('utf-8') if result else None
     
     # Messaging methods
-    def publish(self, topic: str, message: str) -> int:
+    def publish(self, topic: str, message: dict) -> int:
         """Publish a message to a topic."""
         return lib.agent_publish(
             self._agent,
             topic.encode('utf-8'),
-            message.encode('utf-8')
+            json.dumps(message).encode('utf-8')
         )
     
     def receive(self, dont_block: bool = False) -> MessageType:
@@ -264,7 +264,7 @@ class Agent:
         topic = ctypes.string_at(topic_ptr).decode('utf-8') if topic_ptr else None
         message = ctypes.string_at(message_ptr).decode('utf-8') if message_ptr else None
         
-        return topic, message
+        return topic, json.loads(message)
     
     def __del__(self):
         """Destructor to ensure proper cleanup."""
