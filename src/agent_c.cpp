@@ -56,7 +56,7 @@ const char *agent_id(agent_t agent) {
 void agent_set_receive_timeout(agent_t agent, int timeout) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
   ag->set_receive_timeout(timeout);
-})
+}
 
 const char *agent_last_error(agent_t agent) { return _err_msg; }
 
