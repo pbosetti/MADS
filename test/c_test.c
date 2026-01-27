@@ -46,7 +46,7 @@ int main(int argc, const char **argv) {
     usleep(100);
   }
 
-  int to = 5000;
+  int to = 2000;
   printf("Waiting %d ms to receive a message\n", to);
   agent_set_receive_timeout(agent, to);
   message_type_t mt = agent_receive(agent, false);

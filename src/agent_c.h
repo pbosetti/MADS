@@ -95,6 +95,7 @@ int agent_register_event(agent_t agent, event_type_t event,
                          const char *info_json);
 int agent_disconnect(agent_t agent);
 void agent_set_receive_timeout(agent_t agent, int timeout);
+int agent_receive_timeout(agent_t agent);
 const char *agent_last_error(agent_t agent);
 
 // Settings

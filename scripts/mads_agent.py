@@ -24,18 +24,23 @@ else:  # Linux and others
 
 # Get the library path dynamically
 try:
-    mads_prefix = subprocess.check_output(["mads", "-p"], text=True).strip()
-    LIB_PATH = os.path.join(mads_prefix, "lib", f"libmads-lib{lib_ext}")
+    if 'MADS_LIB_PATH' in os.environ:
+        MADS_LIB_PATH = os.environ['MADS_LIB_PATH']
+        sys.stderr.write(f"Loading MADS lib from {MADS_LIB_PATH}\n")
+    else:
+        mads_prefix = subprocess.check_output(["mads", "-p"], text=True).strip()
+        MADS_LIB_PATH = os.path.join(mads_prefix, "lib", f"libmads-lib{lib_ext}")
+        sys.stderr.write(f"Loading MADS lib from default {MADS_LIB_PATH}\n")
 except (FileNotFoundError, subprocess.CalledProcessError):
-    sys.stderr.write("Cannot find MADS shared library. Is MADS installed?")
+    sys.stderr.write("Cannot find MADS shared library. Is MADS installed?\n")
     exit
 
 
 # Load the library
 try:
-    lib = ctypes.CDLL(LIB_PATH)
+    lib = ctypes.CDLL(MADS_LIB_PATH)
 except OSError as e:
-    raise OSError(f"Failed to load MADS library from {LIB_PATH}: {e}")
+    raise OSError(f"Failed to load MADS library from {MADS_LIB_PATH}: {e}\n")
 
 # Define enums
 class MessageType(IntEnum):
@@ -101,6 +106,9 @@ lib.agent_disconnect.restype = c_int
 
 lib.agent_set_receive_timeout.argtypes = [c_void_p, c_int]
 lib.agent_set_receive_timeout.restype = None
+
+lib.agent_receive_timeout.argtypes = [c_void_p]
+lib.agent_receive_timeout.restype = c_int
 
 lib.agent_last_error.argtypes = [c_void_p]
 lib.agent_last_error.restype = c_char_p
@@ -211,6 +219,10 @@ class Agent:
     def set_receive_timeout(self, timeout: int):
         """Set the receive timeout in milliseconds."""
         lib.agent_set_receive_timeout(self._agent, timeout)
+    
+    def receive_timeout(self):
+        """get the receive timeout in milliseconds."""
+        return lib.agent_receive_timeout(self._agent)
     
     def last_error(self) -> str:
         """Get the last error message."""

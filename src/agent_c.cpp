@@ -69,6 +69,11 @@ void agent_set_receive_timeout(agent_t agent, int timeout) {
   ag->set_receive_timeout(timeout);
 }
 
+int agent_receive_timeout(agent_t agent) {
+  Agent *ag = reinterpret_cast<Agent *>(agent);
+  return ag->receive_timeout();
+}
+
 const char *agent_last_error(agent_t agent) { return _err_msg; }
 
 // Crypto
