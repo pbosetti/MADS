@@ -27,7 +27,6 @@ try:
     mads_prefix = subprocess.check_output(["mads", "-p"], text=True).strip()
     LIB_PATH = os.path.join(mads_prefix, "lib", f"libmads-lib{lib_ext}")
 except (FileNotFoundError, subprocess.CalledProcessError):
-    # Fallback to the hardcoded path if mads command is not available
     sys.stderr.write("Cannot find MADS shared library. Is MADS installed?")
     exit
 

@@ -46,7 +46,12 @@ int main(int argc, const char **argv) {
     usleep(100);
   }
 
-  sleep(1);
+  int to = 5000;
+  printf("Waiting %d ms to receive a message\n", to);
+  agent_set_receive_timeout(agent, to);
+  message_type_t mt = agent_receive(agent, false);
+  printf("Message type: %d\n", mt);
+
   agent_register_event(agent, mads_shutdown, NULL);
   sleep(1);
   agent_disconnect(agent);
