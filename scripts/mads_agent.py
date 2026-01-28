@@ -15,10 +15,14 @@ import json
 
 # Determine the library extension based on the OS
 system = platform.system()
+lib_folder = "lib"
+lib_prefix = "lib"
 if system == "Darwin":
     lib_ext = ".dylib"
 elif system == "Windows":
     lib_ext = ".dll"
+    lib_folder = "bin"
+    lib_prefix = ""
 else:  # Linux and others
     lib_ext = ".so"
 
@@ -29,7 +33,7 @@ try:
         sys.stderr.write(f"Loading MADS lib from {MADS_LIB_PATH}\n")
     else:
         mads_prefix = subprocess.check_output(["mads", "-p"], text=True).strip()
-        MADS_LIB_PATH = os.path.join(mads_prefix, "lib", f"libmads-lib{lib_ext}")
+        MADS_LIB_PATH = os.path.join(mads_prefix, lib_folder, f"{lib_prefix}mads-lib{lib_ext}")
         sys.stderr.write(f"Loading MADS lib from default {MADS_LIB_PATH}\n")
 except (FileNotFoundError, subprocess.CalledProcessError):
     sys.stderr.write("Cannot find MADS shared library. Is MADS installed?\n")
