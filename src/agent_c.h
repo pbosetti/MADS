@@ -24,6 +24,8 @@ extern "C" {
 
 #ifdef _WIN32
 #define MADS_EXPORT __declspec(dllexport)
+#else 
+#define MADS_EXPORT
 #endif
 
 /*
