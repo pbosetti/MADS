@@ -108,7 +108,6 @@ int main(int argc, char **argv) {
     exit(0);
   }
 
-  data["name"] = "example";
   data["type"] = "source";
 
   if (options_parsed.count("name") == 0) {
@@ -120,6 +119,7 @@ int main(int argc, char **argv) {
       cerr << fg::yellow << "Warning: multiple names provided, using " 
            << data["name"] << fg::reset << endl;
   }
+  dir = data.value("name", "example_plugin") + "/";
   if (options_parsed.count("type") > 0) {
     data["type"] = lowercase(options_parsed["type"].as<string>());
     if (options_parsed.count("type") > 1) 
