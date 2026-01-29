@@ -47,11 +47,11 @@ public:
     return return_type::success;
   }
 
-  void set_params(void const *params) override { 
+  void set_params(const json &params) override { 
     Sink::set_params(params);
     _params["print_width"] = 60;
     _params["indent_width"] = 0;
-    _params.merge_patch(*(json *)params);
+    _params.merge_patch(params);
 
     _print_width = _params["print_width"].get<int>();
     _indent_width = _params["indent_width"].get<int>();

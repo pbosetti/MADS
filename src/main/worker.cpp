@@ -151,7 +151,7 @@ int main(int argc, char *argv[]) {
   
   // Create the class from the plugin:
   FilterJ *filter = filter_driver->create();
-  filter->set_params((void *)&settings);
+  filter->set_params(settings);
   for (auto &[k, v] : filter->info()) {
     cout << "  " << left << setw(18) << k << style::bold << v << style::reset 
          << endl;

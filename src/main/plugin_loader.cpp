@@ -41,6 +41,8 @@ Author(s): Paolo Bosetti
 #error "No plugin type defined"
 #endif
 
+#define MADS_PLUGIN_MIN_PROTOCOL 6
+
 using namespace std;
 using namespace cxxopts;
 using namespace Mads;
@@ -294,10 +296,21 @@ int main(int argc, char *argv[]) {
   // Create the class from the plugin:
   Plugin *plugin = plugin_driver->create();
 
-  cerr << "  Plugin:           " << style::bold << plugin_file << " (loaded as "
-       << agent_name << ")" << style::reset << endl;
+  cerr << "  Plugin:           " << style::bold << plugin_file 
+       << " (loaded as " << agent_name  
+       << " prot. v" << plugin->version << ")" << style::reset << endl;
+  
+  if (plugin->version < MADS_PLUGIN_MIN_PROTOCOL) {
+    cerr << style::bold << fg::red 
+         << "Fatal error: unsupported plugin protocol version. Minimum is "
+         << plugin->version << ", loaded plugin protocol is version "
+         << MADS_PLUGIN_MIN_PROTOCOL << ".\n"
+         << "Recompile the plugin (see https://github.com/pbosetti/mads_plugin)"
+         << fg::reset << style::reset << endl;
+    exit(EXIT_FAILURE);
+  }
 
-  plugin->set_params((void *)&settings);
+  plugin->set_params(settings);
   for (auto &[k, v] : plugin->info()) {
     cerr << "  " << left << setw(18) << k << style::bold << v << style::reset
          << endl;
