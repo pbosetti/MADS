@@ -98,7 +98,9 @@ int main(int argc, char const *argv[]) {
     // Main loop
     cout << fg::green << "Bridge process started, send 'exit' to stop"
          << fg::reset << endl;
-    bridge.loop([&]() { bridge.route(); }, sleep_time);
+    bridge.loop([&]() -> chrono::milliseconds { 
+      bridge.route(); 
+      return 0ms; }, sleep_time);
     cout << fg::green << "Bridge process stopped" << fg::reset << endl;
     bridge.register_event(event_type::shutdown);
   }

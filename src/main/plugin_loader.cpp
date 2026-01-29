@@ -334,7 +334,7 @@ int main(int argc, char *argv[]) {
   json out, err;
   return_type rt;
   agent.loop(
-      [&]() {
+      [&]() -> chrono::milliseconds {
         vector<unsigned char> blob;
         rt = plugin->get_output(out, &blob);
         switch (rt) {
@@ -354,7 +354,7 @@ int main(int argc, char *argv[]) {
           }
           break;
         case return_type::retry:
-          return;
+          return 0ms;
         case return_type::error:
           err = {{"error", {"get_output", plugin->error()}}};
           agent.register_event(event_type::message, err);
@@ -365,7 +365,7 @@ int main(int argc, char *argv[]) {
                << fg::reset << endl;
           count_err++;
           Mads::running = false;
-          return;
+          return 0ms;
         }
 
         if (!silent) {
@@ -374,6 +374,7 @@ int main(int argc, char *argv[]) {
                << " with errors ";
           cerr.flush();
         }
+        return plugin->next_loop_duration;
       },
       time);
 
@@ -383,7 +384,7 @@ int main(int argc, char *argv[]) {
   message_type type;
   tuple<string, string> msg;
   agent.loop(
-      [&]() {
+      [&]() -> chrono::milliseconds {
         err.clear();
         try {
           type = agent.receive(dont_block);
@@ -393,7 +394,7 @@ int main(int argc, char *argv[]) {
         }
         // agent.remote_control();
         if (agent.last_topic() == "control") {
-          return; // Control message, already handled
+          return 0ms; // Control message, already handled
         }
 
         // loading data into plugin
@@ -405,7 +406,7 @@ int main(int argc, char *argv[]) {
           goto process_output;
         }
         if (type != message_type::json) {
-          return; // Not a JSON message
+          return 0ms; // Not a JSON message
         }
         switch (rt) {
         case return_type::warning:
@@ -414,7 +415,7 @@ int main(int argc, char *argv[]) {
         case return_type::success:
           break; // next step
         case return_type::retry:
-          return; // next iteration
+          return 0ms; // next iteration
         case return_type::error:
           err = {{"error", {"load_data", plugin->error()}}};
           agent.register_event(event_type::message, err);
@@ -426,7 +427,7 @@ int main(int argc, char *argv[]) {
           err = {{"error", {"load_data", plugin->error()}}};
           agent.register_event(event_type::message, err);
           Mads::running = false;
-          return;
+          return 0ms;
         }
         // processing data in the plugin
       process_output:
@@ -439,7 +440,7 @@ int main(int argc, char *argv[]) {
         case return_type::success:
           break; // next step
         case return_type::retry:
-          return; // next iteration
+          return 0ms; // next iteration
         case return_type::error:
           err = {{"error", {"process", plugin->error()}}};
           agent.register_event(event_type::message, err);
@@ -452,7 +453,7 @@ int main(int argc, char *argv[]) {
           err = {{"error", {"process", plugin->error()}}};
           agent.register_event(event_type::message, err);
           Mads::running = false;
-          return;
+          return 0ms;
         }
         // publishing data
         agent.publish(out);
@@ -463,13 +464,14 @@ int main(int argc, char *argv[]) {
                << " with errors ";
           cerr.flush();
         }
+        return plugin->next_loop_duration;
       },
       time);
 #elif defined(PLUGIN_LOADER_SINK)
   message_type type;
   json in;
   return_type rt;
-  agent.loop([&]() {
+  agent.loop([&]() -> chrono::milliseconds {
     try {
       type = agent.receive();
     } catch (const AgentError &e) {
@@ -479,10 +481,10 @@ int main(int argc, char *argv[]) {
     auto msg = agent.last_message();
     // agent.remote_control();
     if (agent.last_topic() == "control") {
-      return; // Control message, already handled
+      return 0ms; // Control message, already handled
     }
     if (type != message_type::json) {
-      return; // No message received
+      return 0ms; // No message received
     }
     in = json::parse(get<1>(msg));
     rt = plugin->load_data(in, agent.last_topic());
@@ -498,7 +500,7 @@ int main(int argc, char *argv[]) {
       cerr << fg::red << "Error loading data: " << plugin->error() << fg::reset
            << endl;
       count_err++;
-      return;
+      return 0ms;
     case return_type::critical:
       cerr << fg::red << "Critical error loading data: " << plugin->error()
            << fg::reset << endl;
@@ -506,7 +508,7 @@ int main(int argc, char *argv[]) {
       agent.register_event(event_type::message, msg);
       count_err++;
       Mads::running = false;
-      return;
+      return 0ms;
     }
 
     if (!silent) {
@@ -515,6 +517,7 @@ int main(int argc, char *argv[]) {
            << " with errors ";
       cerr.flush();
     }
+    return 0ms;
   });
 #endif
   cerr << fg::green << PLUGIN_NAME " plugin stopped" << fg::reset << endl;

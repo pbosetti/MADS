@@ -78,8 +78,9 @@ int main(int argc, char *argv[]) {
 
   // Main loop
   cout << fg::green << "Image process started" << fg::reset << endl;
-  image.loop([&]() {
+  image.loop([&]() -> chrono::milliseconds {
     image.publish_change();
+    return 0ms;
   }, sampling_time);
   cout << fg::green << "Image process stopped" << fg::reset << endl;
 

@@ -163,10 +163,10 @@ int main(int argc, char *argv[]) {
   // Main loop
   agent.register_event(event_type::startup);
   cout << fg::green << "Filter plugin process started" << fg::reset << endl;
-  agent.loop([&]() {
+  agent.loop([&]() -> chrono::milliseconds {
     json payload = agent.pull();
     return_type rt;
-    if (payload.empty() && !Mads::running) return;
+    if (payload.empty() && !Mads::running) return 0ms;
     message_type type = agent.receive();
     // agent.remote_control();
     json out;
@@ -186,6 +186,7 @@ int main(int argc, char *argv[]) {
          << fg::reset << " total, " << fg::red << count_err << fg::reset
          << " with errors";
     cout.flush();
+    return 0ms;
   });
   cout << fg::green << "Filter plugin process stopped" << fg::reset << endl;
 

@@ -118,9 +118,9 @@ int main(int argc, char *argv[]) {
   cout << fg::green << "Logger process started" << fg::reset << endl;
   if (logger.paused) 
     cout << fg::yellow << "Logging is paused" << fg::reset << endl;
-  logger.loop([&] {
+  logger.loop([&]() -> chrono::milliseconds {
     message_type type = logger.receive();
-    if (type == message_type::none) return;
+    if (type == message_type::none) return 0ms;
     auto msg = logger.last_message();
     // check for pause/unpause message
     if (get<0>(msg) == "metadata") {
@@ -157,6 +157,7 @@ int main(int argc, char *argv[]) {
     } catch (const AgentError &e) {
       cout << e.what() << endl;
     }
+    return 0ms;
   });
   cout << fg::green << "Logger process stopped" << fg::reset << endl;
 

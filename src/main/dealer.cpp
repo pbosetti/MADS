@@ -69,7 +69,7 @@ int main(int argc, char *argv[]) {
 
   dealer.info(cerr);
   dealer.register_event(event_type::startup);
-  dealer.loop([&]() {
+  dealer.loop([&]() -> chrono::milliseconds {
     json j;
     message_type type = dealer.receive();
     auto msg = dealer.last_message();
@@ -86,7 +86,7 @@ int main(int argc, char *argv[]) {
       dealer.publish(j);
       break;
     case message_type::none:
-      return;
+      return 0ms;
     default:
       cerr << fg::yellow << "Received unsupported message type" << fg::reset
            << endl;
@@ -96,6 +96,7 @@ int main(int argc, char *argv[]) {
     cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count << fg::reset
          << " total, " << fg::red << count_err << fg::reset << " with errors ";
     cerr.flush();
+    return 0ms;
   });
 
   dealer.register_event(event_type::shutdown);

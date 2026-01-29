@@ -440,8 +440,8 @@ message_type Agent::receive(bool dont_block) {
   return result;
 }
 
-void Agent::loop(std::function<void()> const &lambda,
-          chrono::milliseconds duration) {
+
+void Agent::loop(loop_fun_t const &lambda, chrono::milliseconds duration) {
   if (!_init_done)
     throw AgentError("Agent not initialized");
   std::signal(SIGINT, [](int signum) {
@@ -452,18 +452,19 @@ void Agent::loop(std::function<void()> const &lambda,
     UNUSED(signum);
     Mads::running = false;
   });
+  chrono::milliseconds nld(0); // next loop duration
   while (running) {
-    if (duration > chrono::milliseconds(0)) {
-      thread t([&]() { this_thread::sleep_for(duration); });
-      lambda();
+    if (duration > 0ms) {
+      thread t([&]() { this_thread::sleep_for(nld == 0ms ? duration : nld); });
+      nld = lambda();
       t.join();
     } else {
-      lambda();
+      nld = lambda();
     }
   }
 }
 
-void Agent::loop(std::function<void()> const &lambda) {
+void Agent::loop(loop_fun_t const &lambda) {
   loop(lambda, _time_step);
 }
 

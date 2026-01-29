@@ -362,11 +362,14 @@ public:
    * @brief Enters the main loop of the agent. It also sets a signal handler for
    * SIGNINT, which will set the running flag to false.
    *
-   * @param lambda the function to be executed in the main loop
+   * @param lambda the function to be executed in the main loop; it can return 
+   *  the requested duration of the next loop: if this is 0, the default loop 
+   *  time is used, otherwise the value returned by the lambda
    * @param duration the duration of the loop (default 0, max speed)
    * @throws AgentError if not initialized
    */
-  void loop(std::function<void()> const &lambda,
+  using loop_fun_t = std::function<chrono::milliseconds()>;
+  void loop(loop_fun_t const &lambda,
             chrono::milliseconds duration);
 
 
@@ -377,10 +380,12 @@ public:
    * ini file with the time_step parameter. It it is zero or not set,
    * it will run at max speed.
    *
-   * @param lambda the function to be executed in the main loop
+   * @param lambda the function to be executed in the main loop; it can return 
+   *  the requested duration of the next loop: if this is 0, the default loop 
+   *  time is used, otherwise the value returned by the lambda
    * @throws AgentError if not initialized
    */
-  void loop(std::function<void()> const &lambda);
+  void loop(loop_fun_t const &lambda);
 
 
   /**
