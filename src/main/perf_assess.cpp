@@ -94,7 +94,7 @@ int main(int argc, char *argv[]) {
   // Main loop
   cout << fg::green << "Performance assessment process started" << fg::reset
        << endl;
-  agent.loop([&]() {
+  agent.loop([&]() -> chrono::milliseconds {
     json payload;
     payload["id"] = i;
     payload["origin_timestamp"]["$date"] = 
@@ -105,6 +105,7 @@ int main(int argc, char *argv[]) {
     agent.publish(payload);
     cout << "\r\x1b[0KSent message " << i++;
     cout.flush();
+    return 0ms;
   }, time);
   cout << endl << fg::green << "Performance assessment process stopped" 
        << fg::reset << endl;
