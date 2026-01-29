@@ -319,11 +319,12 @@ void Agent::set_cross(bool cross) { _cross = cross; }
 
 void Agent::set_pub_topic(string topic) { _pub_topic = topic; }
 
-void Agent::register_event(const event_type event, const nlohmann::json &info) {
+void Agent::register_event(const event_type event, const nlohmann::json &info,
+                      const string &info_name) {
   if (!_init_done)
     throw AgentError("Agent not initialized");
   nlohmann::json settings = get_settings();
-  thread t([info, event, settings, this]() {
+  thread t([info, info_name, event, settings, this]() {
     nlohmann::json payload;
     if (event == event_type::startup)
       this_thread::sleep_for(chrono::milliseconds(STARTUP_SHUTDOWN_DELAY));
@@ -337,7 +338,7 @@ void Agent::register_event(const event_type event, const nlohmann::json &info) {
       payload["agent_id"] = _agent_id;
     }
     if (!info.empty()) {
-      payload["info"] = info;
+      payload[info_name] = info;
     }
     publish(payload, METADATA_TOPIC);
   });

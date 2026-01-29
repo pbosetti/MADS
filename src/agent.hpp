@@ -298,7 +298,8 @@ public:
    * @throws AgentError if not initialized
    */
   void register_event(const event_type event = event_type::marker,
-                      const nlohmann::json &info = nlohmann::json());
+                      const nlohmann::json &info = nlohmann::json(),
+                      const string &info_name = "info");
 
 
   /**

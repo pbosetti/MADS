@@ -327,7 +327,7 @@ int main(int argc, char *argv[]) {
   }
 
   // Main loop
-  agent.register_event(event_type::startup);
+  agent.register_event(event_type::startup, settings, "modified_settings");
   cerr << fg::green << PLUGIN_NAME " plugin started" << fg::reset << endl;
 
 #if defined(PLUGIN_LOADER_SOURCE)
