@@ -299,8 +299,10 @@ int make_service(int argc, char **argv) {
 
 
 void update(const std::string &url) {
-  cout << "Press Enter to open " << style::bold << style::underline << url
-       << style::reset << " in your browser (Ctrl-C to cancel)..." << endl;
+  cout << style::italic << "This is MADS " << style::bold
+       << LIB_GIT_TAG << style::reset
+       << "\nPress Enter to open " << style::bold << style::underline << url
+       << style::reset << " in your browser\n(or Ctrl-C to cancel)..." << endl;
   string dummy;
   getline(cin, dummy);
 #ifdef _WIN32
