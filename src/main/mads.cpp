@@ -12,6 +12,7 @@ Author: Paolo Bosetti, July 2024
 */
 
 #include "../mads.hpp"
+#include "../agent.hpp"
 #include "../exec_path.hpp"
 #if not defined(_WIN32) and not defined(__APPLE__)
 #define CPPHTTPLIB_OPENSSL_SUPPORT
@@ -22,6 +23,7 @@ Author: Paolo Bosetti, July 2024
 #include <filesystem>
 #include <inja/inja.hpp>
 #include <iostream>
+#include <cstdlib>
 #include <nlohmann/json.hpp>
 #include <rang.hpp>
 #include <zmqpp/zmqpp.hpp>
@@ -392,7 +394,28 @@ int update() {
     return -1;
   }
 }
+#else
+
+void update(const std::string &url) {
+  cout << "Press Enter to open " << url << " in your browser (Ctrl-C to cancel)..." << endl;
+  string dummy;
+  getline(cin, dummy);
+#ifdef _WIN32
+  string cmd = string("cmd /C start \"\" \"") + url + "\"";
+#elif defined(__APPLE__)
+  string cmd = string("open \"") + url + "\"";
+#else
+  string cmd = string("xdg-open \"") + url + "\" 2>/dev/null";
 #endif
+  int rc = std::system(cmd.c_str());
+  if (rc != 0) {
+    cerr << fg::red << "Failed to open browser (command returned " << rc
+         << "). Please open " << url << " manually." << fg::reset << endl;
+  }
+}
+
+#endif
+
 
 /*
   __  __       _
@@ -429,6 +452,12 @@ int main(int argc, char **argv) {
 #endif
     } else if (strncmp(argv[1], "ini", 3) == 0) {
       return make_ini(argc - 1, argv + 1);
+    } else if (strncmp(argv[1], "update", 3) == 0) {
+      update("https://git.new/mads");
+      return 0;
+    } else if (strncmp(argv[1], "beta", 3) == 0) {
+      update("https://github.com/pbosetti/mads/releases");
+      return 0;
     }
 #ifdef __linux__
     else if (strncmp(argv[1], "service", 7) == 0) {
@@ -447,9 +476,6 @@ int main(int argc, char **argv) {
     ("keypair", "Generate ZMQ CURVE keypair", value<string>()->implicit_value("mads"))
     ("f,force", "Force operation (if applicable)")
     ("v,version", "Print version")
-  #ifdef MADS_ENABLE_UPDATE
-    ("u,update", "Check online for MADS updates")
-  #endif
     ("h,help", "Print help");
   
   string plugins_dir = 
@@ -533,11 +559,6 @@ int main(int argc, char **argv) {
     cout << fg::yellow << "Keep the secret key safe!" << fg::reset << endl;
     return 0;
   }
-#ifdef MADS_ENABLE_UPDATE
-  if (options_parsed.count("update")) {
-    return update();
-  }
-#endif
   if (options_parsed.count("prefix")) {
     cout << Mads::prefix() << endl;
     return 0;
@@ -560,7 +581,8 @@ int main(int argc, char **argv) {
   }
 #ifdef _WIN32
 #define FIELD_WIDTH 15
-  cout << style::bold << "Available executables:" << style::reset << endl;
+  cout << style::bold << "Available executables and subcommands:" 
+       << style::reset << endl;
   for (auto const &cmd : ext_commands) {
     cout << setw(FIELD_WIDTH) << string(MADS_PREFIX + cmd) << style::italic
          << " (external executable)" << style::reset << endl;
@@ -575,6 +597,10 @@ int main(int argc, char **argv) {
   }
 #endif
   cout << setw(FIELD_WIDTH) << "ini" << style::italic << " (internal)"
+       << style::reset << endl;
+  cout << setw(FIELD_WIDTH) << "update" << style::italic << " (internal)"
+       << style::reset << endl;
+  cout << setw(FIELD_WIDTH) << "beta" << style::italic << " (internal)"
        << style::reset << endl;
 #ifdef __linux__
   cout << setw(FIELD_WIDTH) << "service" << style::italic << " (internal)"
