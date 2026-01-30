@@ -397,7 +397,8 @@ int update() {
 #else
 
 void update(const std::string &url) {
-  cout << "Press Enter to open " << url << " in your browser (Ctrl-C to cancel)..." << endl;
+  cout << "Press Enter to open " << style::bold << style::underline << url
+       << style::reset << " in your browser (Ctrl-C to cancel)..." << endl;
   string dummy;
   getline(cin, dummy);
 #ifdef _WIN32
@@ -410,7 +411,8 @@ void update(const std::string &url) {
   int rc = std::system(cmd.c_str());
   if (rc != 0) {
     cerr << fg::red << "Failed to open browser (command returned " << rc
-         << "). Please open " << url << " manually." << fg::reset << endl;
+         << "). Please open " << style::bold << style::underline 
+         << " manually." << fg::reset << style::reset << endl;
   }
 }
 
