@@ -14,11 +14,6 @@ Author: Paolo Bosetti, July 2024
 #include "../mads.hpp"
 #include "../agent.hpp"
 #include "../exec_path.hpp"
-#if not defined(_WIN32) and not defined(__APPLE__)
-#define CPPHTTPLIB_OPENSSL_SUPPORT
-#include "../httplib.h"
-#define MADS_ENABLE_UPDATE
-#endif
 #include <cxxopts.hpp>
 #include <filesystem>
 #include <inja/inja.hpp>
@@ -37,8 +32,8 @@ Author: Paolo Bosetti, July 2024
 #endif
 
 #define SYSTEMD_PATH "/etc/systemd/system"
-#define GH_URL "https://api.github.com"
-#define GH_PATH "/repos/pbosetti/MADS/releases/latest"
+#define RELEASE_URL "https://git.new/mads"
+#define BETA_URL "https://github.com/pbosetti/mads/releases"
 
 using namespace std;
 using namespace inja;
@@ -302,99 +297,6 @@ int make_service(int argc, char **argv) {
   return 0;
 }
 
-/*
-  _   _           _       _         __  __    _    ____  ____
- | | | |_ __   __| | __ _| |_ ___  |  \/  |  / \  |  _ \/ ___|
- | | | | '_ \ / _` |/ _` | __/ _ \ | |\/| | / _ \ | | | \___ \
- | |_| | |_) | (_| | (_| | ||  __/ | |  | |/ ___ \| |_| |___) |
-  \___/| .__/ \__,_|\__,_|\__\___| |_|  |_/_/   \_\____/|____/
-       |_|
-*/
-#ifdef MADS_ENABLE_UPDATE
-pair<string, string> split_name(const string &name) {
-  size_t first_dash = name.find("-");
-  size_t second_dash = name.find("-", first_dash + 1);
-  size_t dot = name.find(".", second_dash + 1);
-  string substring1 = name.substr(first_dash + 1, second_dash - first_dash - 1);
-  string substring2 = name.substr(second_dash + 1, dot - second_dash - 1);
-  return make_pair(substring1, substring2);
-}
-
-bool compare_versions(const string &version1, const string &version2) {
-  // Remove the leading 'v' character from the version strings
-  string v1 = version1[0] == 'v' ? version1.substr(1) : version1;
-  string v2 = version2[0] == 'v' ? version2.substr(1) : version2;
-
-  // Split the version strings into individual components
-  vector<int> components1;
-  vector<int> components2;
-  stringstream ss1(v1);
-  stringstream ss2(v2);
-  string component;
-  while (getline(ss1, component, '.')) {
-    components1.push_back(atoi(component.c_str()));
-  }
-  while (getline(ss2, component, '.')) {
-    components2.push_back(atoi(component.c_str()));
-  }
-
-  // Compare the components of the version strings
-  for (size_t i = 0; i < components1.size() && i < components2.size(); i++) {
-    if (components1[i] < components2[i]) {
-      return true;
-    } else if (components1[i] > components2[i]) {
-      return false;
-    }
-  }
-
-  // If all components are equal, the longer version string is considered
-  // greater
-  return components1.size() < components2.size();
-}
-
-int update() {
-  cout << "Checking MADS updates for version " << style::bold << "v"
-       << Mads::version() << style::reset << "..." << endl;
-  httplib::Client cli(GH_URL);
-  auto res = cli.Get( GH_PATH);
-  if (res->status == 200) {
-    json response;
-    try {
-      response = json::parse(res->body);
-    } catch (json::parse_error &e) {
-      cerr << fg::red << "Cannot parse JSON response from " GH_URL GH_PATH
-           << fg::reset << endl;
-      return -1;
-    }
-    string last_ver = string("v");
-    try {
-      last_ver += split_name(response["assets"][0]["name"]).first;
-    } catch (json::exception &e) {
-      cerr << fg::red << "Cannot parse remote object "
-           << response["assets"][0]["name"] << fg::reset << endl;
-      return -1;
-    }
-    if (!compare_versions(Mads::version(), last_ver)) {
-      cout << fg::green << "You are already up to date (most recent version "
-           << last_ver << ")" << fg::reset << endl;
-      return 0;
-    }
-    cout << fg::yellow << "A newer release is available: " << last_ver
-         << fg::reset << endl;
-    for (auto &asset : response["assets"]) {
-      auto p = split_name(asset["name"]);
-      cout << setw(20) << p.second << " -> " << style::bold
-           << asset.value("browser_download_url", "<missing URL>")
-           << style::reset << endl;
-    }
-    return 0;
-  } else {
-    cerr << fg::red << "Cannot get latest release from " GH_URL GH_PATH
-         << fg::reset << endl;
-    return -1;
-  }
-}
-#else
 
 void update(const std::string &url) {
   cout << "Press Enter to open " << style::bold << style::underline << url
@@ -416,7 +318,6 @@ void update(const std::string &url) {
   }
 }
 
-#endif
 
 
 /*
@@ -455,10 +356,10 @@ int main(int argc, char **argv) {
     } else if (strncmp(argv[1], "ini", 3) == 0) {
       return make_ini(argc - 1, argv + 1);
     } else if (strncmp(argv[1], "update", 3) == 0) {
-      update("https://git.new/mads");
+      update(RELEASE_URL);
       return 0;
     } else if (strncmp(argv[1], "beta", 3) == 0) {
-      update("https://github.com/pbosetti/mads/releases");
+      update(BETA_URL);
       return 0;
     }
 #ifdef __linux__
