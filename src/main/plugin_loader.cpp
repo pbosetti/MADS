@@ -411,6 +411,7 @@ int main(int argc, char *argv[]) {
         switch (rt) {
         case return_type::warning:
           err = {{"warning", {"load_data", plugin->error()}}};
+          agent.register_event(event_type::message, err);
           [[fallthrough]];
         case return_type::success:
           break; // next step
@@ -469,7 +470,7 @@ int main(int argc, char *argv[]) {
       time);
 #elif defined(PLUGIN_LOADER_SINK)
   message_type type;
-  json in;
+  json in, err;
   return_type rt;
   agent.loop([&]() -> chrono::milliseconds {
     try {
@@ -492,6 +493,8 @@ int main(int argc, char *argv[]) {
     case return_type::warning:
       cerr << fg::yellow << "Warning loading data: " << plugin->error()
            << fg::reset << endl;
+      err = {{"warning", {"load_data", plugin->error()}}};
+      agent.register_event(event_type::message, err);
       [[fallthrough]];
     case return_type::success:
     case return_type::retry:
@@ -499,6 +502,8 @@ int main(int argc, char *argv[]) {
     case return_type::error:
       cerr << fg::red << "Error loading data: " << plugin->error() << fg::reset
            << endl;
+      err = {{"error", {"load_data", plugin->error()}}};
+      agent.register_event(event_type::message, err);
       count_err++;
       return 0ms;
     case return_type::critical:

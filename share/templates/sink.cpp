@@ -37,6 +37,12 @@ public:
   string kind() override { return PLUGIN_NAME; }
 
   // Implement the actual functionality here
+  // Return types:
+  // return_type::success: processing is valid
+  // return_type::retry: skip processing go to next loop
+  // return_type::warning: content of _error is tracked with register_event
+  // return_type::error: _error is traced, skip process
+  // return_type::critical: execution stops
   return_type load_data(json const &input, string topic = "") override {
     // Do something with the input data
     return return_type::success;

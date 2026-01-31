@@ -36,6 +36,12 @@ public:
   string kind() override { return PLUGIN_NAME; }
 
   // Implement the actual functionality here
+  // Return types:
+  // return_type::success: processing is valid, go to process
+  // return_type::retry: skip processing go to next loop
+  // return_type::warning: content of _error is tracked with register_event
+  // return_type::error: _error is traced, skip process
+  // return_type::critical: execution stops
   return_type load_data(json const &input, string topic = "") override {
     // Do something with the input data
     return return_type::success;
@@ -43,6 +49,12 @@ public:
 
   // We calculate the average of the last N values for each key and store it
   // into the output json object
+  // Return types:
+  // return_type::success: result is published
+  // return_type::retry: don't publish, go to next loop
+  // return_type::warning: content of _error is added to result befor publishing
+  // return_type::error: _error is traced via register_event, don't publish
+  // return_type::critical: execution stops
   return_type process(json &out) override {
     out.clear();
 

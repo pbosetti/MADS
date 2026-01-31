@@ -36,6 +36,12 @@ public:
   string kind() override { return PLUGIN_NAME; }
 
   // Implement the actual functionality here
+  // Return types:
+  // return_type::success: the result is published
+  // return_type::retry: go to next loop, nothing is published
+  // return_type::warning: content of _error is added to result befor publishing
+  // return_type::error: the result only has a copy of _error
+  // return_type::critical: execution stops
   return_type get_output(json &out,
                          std::vector<unsigned char> *blob = nullptr) override {
     out.clear();
