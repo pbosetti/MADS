@@ -302,10 +302,9 @@ void check_update(bool beta = false) {
       describe_release(releases);
 
   } catch (const json::exception &e) {
-    cerr << "Error parsing body: " << e.what() << "\n";
-    // cerr << "body was: \n" << response.body << endl;
+    cerr << "Error fetching info, please try again in a moment" << endl;
   } catch (const std::exception &e) {
-    cerr << "Error: " << e.what() << "\n";
+    cerr << "Unexpected error: " << e.what() << endl;
   }
 }
 
