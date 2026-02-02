@@ -14,6 +14,7 @@ Author: Paolo Bosetti, July 2024
 #include "../mads.hpp"
 #include "../agent.hpp"
 #include "../exec_path.hpp"
+#include "../https_client.hpp"
 #include <cxxopts.hpp>
 #include <filesystem>
 #include <inja/inja.hpp>
@@ -219,6 +220,122 @@ int make_ini(int argc, char **argv) {
 }
 
 /*
+  _   _           _       _       
+ | | | |_ __   __| | __ _| |_ ___ 
+ | | | | '_ \ / _` |/ _` | __/ _ \
+ | |_| | |_) | (_| | (_| | ||  __/
+  \___/| .__/ \__,_|\__,_|\__\___|
+       |_|                        
+*/
+
+void describe_release(const json &release) {
+  std::string plat, arch;
+#ifdef _WIN32
+  plat = "Windows-";
+#elif defined(__APPLE__)
+  plat = "Darwin-";
+#else
+  plat = "Linux-";
+#endif
+
+#ifdef __x86_64__
+  arch = "x86_64";
+#elif defined(__aarch64__) and defined(__APPLE__)
+  arch = "arm64";
+#elif defined(__aarch64__) 
+  arch = "aarch64";
+#elif defined(__arm__)
+  arch = "arm";
+#elif defined(_M_X64) and defined(_WIN32)
+  arch = "AMD64";
+#elif defined(_M_X64)
+  arch = "x86_64";
+#elif defined(_M_ARM64)
+  arch = "aarch64";
+#else
+  arch = "unknown";
+#endif
+  cout << "You are running MADS " << style::bold << LIB_GIT_TAG 
+       << style::reset << endl
+       << "Latest ";
+  if (release["prerelease"])
+    cout << fg::yellow << "pre-release ";
+  else
+    cout << "release ";
+  cout << style::bold
+       << release.value("tag_name", "no tag") << style::reset << fg::reset 
+       << " has " << release["assets"].size() << " assets:" << endl;
+  for (json const a : release["assets"]) {
+    if (regex_match(a.value("name", ""), regex(".*" + plat + arch + ".*")) ||
+        regex_match(a.value("name", ""), regex(".*" + plat + "universal.*")))
+      cout << fg::green << style::bold << "=> ";
+    else
+      cout << " - ";
+    cout << a.value("browser_download_url", "unnamed") << ", "
+         << style::reset << style::italic << a.value("size", 0) / 1024 << " kbytes" 
+         << fg::reset << style::reset << endl;
+  }
+  cout << "Release URL: " << release.value("html_url", "unknown") << endl;
+  cout << style::italic << "URLs in green match current device (" 
+       << fg::green << plat + arch << fg::reset << ")" << style::reset << endl;
+}
+
+void check_update(bool beta = false) {
+  Mads::HttpsClient::Response response;
+  try {
+    Mads::HttpsClient client;
+    client.set_hostname("api.github.com");
+    if (beta) {
+      client.set_path("/repos/pbosetti/mads/releases");
+      client.add_query_pair("per_page", "1");
+    } else {
+      client.set_path("/repos/pbosetti/mads/releases/latest");
+    }
+    client.set_user_agent("MADS" LIB_VERSION);
+
+    response = client.get();
+
+    json releases = json::parse(response.body);
+    if (releases.is_array())
+      describe_release(releases[0]);
+    else
+      describe_release(releases);
+
+  } catch (const json::exception &e) {
+    cerr << "Error parsing body: " << e.what() << "\n";
+    // cerr << "body was: \n" << response.body << endl;
+  } catch (const std::exception &e) {
+    cerr << "Error: " << e.what() << "\n";
+  }
+}
+
+
+void update(const std::string &url) {
+  cout << style::italic << "This is MADS " << style::bold
+       << LIB_GIT_TAG << style::reset
+       << "\nPress Enter to open " << style::bold << style::underline << url
+       << style::reset << " in your browser\n(or Ctrl-C to cancel)..." << endl;
+  string dummy;
+  getline(cin, dummy);
+#ifdef _WIN32
+  string cmd = string("cmd /C start \"\" \"") + url + "\"";
+#elif defined(__APPLE__)
+  string cmd = string("open \"") + url + "\"";
+#else
+  string cmd = string("xdg-open \"") + url + "\" 2>/dev/null";
+#endif
+  int rc = std::system(cmd.c_str());
+  if (rc != 0) {
+    cerr << fg::red << "Failed to open browser (command returned " << rc
+         << "). Please open " << style::bold << style::underline 
+         << " manually." << fg::reset << style::reset << endl;
+  }
+}
+
+
+
+
+/*
                       _                               _
   ___  ___ _ ____   _(_) ___ ___    ___ _ __ ___   __| |
  / __|/ _ \ '__\ \ / / |/ __/ _ \  / __| '_ ` _ \ / _` |
@@ -298,29 +415,6 @@ int make_service(int argc, char **argv) {
 }
 
 
-void update(const std::string &url) {
-  cout << style::italic << "This is MADS " << style::bold
-       << LIB_GIT_TAG << style::reset
-       << "\nPress Enter to open " << style::bold << style::underline << url
-       << style::reset << " in your browser\n(or Ctrl-C to cancel)..." << endl;
-  string dummy;
-  getline(cin, dummy);
-#ifdef _WIN32
-  string cmd = string("cmd /C start \"\" \"") + url + "\"";
-#elif defined(__APPLE__)
-  string cmd = string("open \"") + url + "\"";
-#else
-  string cmd = string("xdg-open \"") + url + "\" 2>/dev/null";
-#endif
-  int rc = std::system(cmd.c_str());
-  if (rc != 0) {
-    cerr << fg::red << "Failed to open browser (command returned " << rc
-         << "). Please open " << style::bold << style::underline 
-         << " manually." << fg::reset << style::reset << endl;
-  }
-}
-
-
 
 /*
   __  __       _
@@ -358,10 +452,10 @@ int main(int argc, char **argv) {
     } else if (strncmp(argv[1], "ini", 3) == 0) {
       return make_ini(argc - 1, argv + 1);
     } else if (strncmp(argv[1], "update", 3) == 0) {
-      update(RELEASE_URL);
+      check_update(false);
       return 0;
     } else if (strncmp(argv[1], "beta", 3) == 0) {
-      update(BETA_URL);
+      check_update(true);
       return 0;
     }
 #ifdef __linux__
@@ -438,6 +532,8 @@ int main(int argc, char **argv) {
          << style::reset << endl;
     cout << "Mads INI file: " << style::bold
          << Mads::exec_dir("../etc/mads.ini") << style::reset << endl;
+    cout << style::italic << "Run mads update or mads beta to check for updates"
+         << style::reset << endl;
     return 0;
   }
   if (options_parsed.count("keypair")) {
