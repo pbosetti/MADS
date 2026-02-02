@@ -10,6 +10,7 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <iostream>
 
 namespace Mads {
 
@@ -75,13 +76,15 @@ HttpsClient::Response HttpsClient::_get_linux() {
         }
 
         // Read response
-        std::string raw_response;
+        std::string raw_response = "";
         char buffer[8192];
+        memset(buffer, 0, 8192);
         int bytes_read = 0;
 
         while ((bytes_read = BIO_read(bio, buffer, sizeof(buffer))) > 0) {
             raw_response.append(buffer, bytes_read);
         }
+
 
         // Parse HTTP response
         size_t header_end = raw_response.find("\r\n\r\n");

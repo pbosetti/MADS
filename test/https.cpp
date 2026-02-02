@@ -22,8 +22,10 @@ void describe_release(const json &release) {
 
 #ifdef __x86_64__
   arch = "x86_64";
-#elif defined(__aarch64__)
+#elif defined(__aarch64__) and defined(__APPLE__)
   arch = "arm64";
+#elif defined(__aarch64__) 
+  arch = "aarch64";
 #elif defined(__arm__)
   arch = "arm";
 #elif defined(_M_X64)
@@ -51,6 +53,7 @@ void describe_release(const json &release) {
 }
 
 int main(int argc, const char **argv) {
+  Mads::HttpsClient::Response response;
   try {
     Mads::HttpsClient client;
     client.set_hostname("api.github.com");
@@ -61,7 +64,7 @@ int main(int argc, const char **argv) {
     client.add_query_pair("per_page", "1");
     client.set_user_agent("MADS" LIB_VERSION);
 
-    auto response = client.get();
+    response = client.get();
 
     json releases = json::parse(response.body);
     if (releases.is_array())
@@ -69,8 +72,11 @@ int main(int argc, const char **argv) {
     else
       describe_release(releases);
 
+  } catch (const json::exception &e) {
+    cerr << "Error parsing body: " << e.what() << "\n";
+    // cerr << "body was: \n" << response.body << endl;
   } catch (const std::exception &e) {
-    std::cerr << "Error: " << e.what() << "\n";
+    cerr << "Error: " << e.what() << "\n";
   }
 
   return 0;
