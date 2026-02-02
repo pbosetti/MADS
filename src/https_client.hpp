@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <map>
 
 namespace Mads {
 
@@ -50,6 +51,15 @@ public:
      */
     void set_user_agent(const std::string& user_agent);
 
+    /** 
+     * @brief Add a query pair
+     * @param key
+     * @param value
+     */
+    void add_query_pair(const std::string& k, const std::string &v);
+
+    std::string query_string();
+
     /**
      * @brief Perform HTTPS GET request to configured endpoint
      * @return Response containing status code, message, and body
@@ -59,8 +69,9 @@ public:
 
 private:
     std::string _hostname;
-    std::string _path;
     std::string _user_agent;
+    std::string _path;
+    std::map<std::string, std::string> _query;
 
 #ifdef _WIN32
     Response _get_windows();
