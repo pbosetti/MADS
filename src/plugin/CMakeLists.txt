@@ -24,6 +24,12 @@ set_target_properties(feedback PROPERTIES PREFIX "" SUFFIX ".plugin")
 target_link_libraries(feedback pugg)
 list(APPEND TARGET_LIST feedback)
 
+# Monitor plugin
+add_library(monitor SHARED ${SOURCE_DIR}/plugin/monitor.cpp)
+set_target_properties(monitor PROPERTIES PREFIX "" SUFFIX ".plugin")
+target_link_libraries(monitor pugg)
+list(APPEND TARGET_LIST monitor)
+
 # Install plugins
 install(TARGETS ${TARGET_LIST}
   BUNDLE DESTINATION bin
