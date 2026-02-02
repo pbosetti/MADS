@@ -13,7 +13,13 @@ Paolo Bosetti 2026
 #include "agent_c.h"
 #include <stdio.h>
 #include <stdlib.h>
+#ifndef _WIN32
 #include <unistd.h>
+#else
+#include <Windows.h>
+#define sleep(o) Sleep(o)
+#define usleep(o) Sleep(o)
+#endif
 
 int main(int argc, const char **argv) {
   agent_t agent = NULL;

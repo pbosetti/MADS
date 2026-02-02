@@ -93,7 +93,7 @@ HttpsClient::Response HttpsClient::_get_windows() {
 
         // Read response body
         DWORD bytes_available = 0;
-        while (WinHttpQueryDataAvailable(h_request, &bytes_available, 0)) {
+        while (WinHttpQueryDataAvailable(h_request, &bytes_available)) {
             if (bytes_available == 0) break;
 
             char buffer[8192];

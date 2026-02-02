@@ -28,6 +28,8 @@ void describe_release(const json &release) {
   arch = "aarch64";
 #elif defined(__arm__)
   arch = "arm";
+#elif defined(_M_X64) and defined(_WIN32)
+  arch = "AMD64";
 #elif defined(_M_X64)
   arch = "x86_64";
 #elif defined(_M_ARM64)

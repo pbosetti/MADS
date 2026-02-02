@@ -19,4 +19,4 @@ add_executable(c_test c_test.c)
 target_link_libraries(c_test PRIVATE mads-lib)
 
 add_executable(https https.cpp)
-target_link_libraries(https PRIVATE mads-lib)
+target_link_libraries(https PRIVATE madslib)
