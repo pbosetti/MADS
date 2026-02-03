@@ -579,6 +579,14 @@ public:
 
   string settings_uri();
 
+  
+  // void set_conflate(bool conflate);
+  // bool conflate();
+
+  void set_high_watermark(int i = 1000);
+  int high_watermark();
+
+
   double timecode_fps = MADS_FPS;
   auth_verbose auth_verbose = auth_verbose::off;
   string server_key_name = "broker";

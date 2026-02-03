@@ -206,7 +206,6 @@ int main(int argc, char *argv[]) {
   #else
   agent.enable_threaded_remote_control();
   #endif
-  agent.connect();
 
   // Copy agent settings as plugin parameters
   json settings = agent.get_settings();
@@ -230,7 +229,14 @@ int main(int argc, char *argv[]) {
       }
     }
   }
+  // HWM or CONFLATE options:
+  if (settings["high_watermark"].is_number_integer()) {
+    agent.set_high_watermark(settings["high_watermark"]);
+  }
+
   agent.info(cerr);
+  agent.connect();
+
 #if defined(PLUGIN_LOADER_SOURCE) or defined(PLUGIN_LOADER_FILTER)
   cerr << "  Sampling period:  " << style::bold;
   if (options_parsed.count("p") != 0) {

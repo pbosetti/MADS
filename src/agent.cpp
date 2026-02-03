@@ -272,6 +272,11 @@ void Agent::info(ostream &out) {
       out << t << " ";
   }
   out << style::reset << endl;
+  // TODO: See down below for conflate not working
+  // out << "  Conflate:         " << style::bold 
+  //     << (conflate() ? "ON" : "OFF") << style::reset << endl;
+  out << "  High Watermark:   " << style::bold 
+      << high_watermark() << " messages" << style::reset << endl;
   if (!_agent_id.empty()) {
     out << "  Agent ID:         " << style::bold << _agent_id << style::reset
         << endl;
@@ -634,5 +639,38 @@ void Agent::set_key_dir(const filesystem::path &path) {
 }
 
 string Agent::settings_uri() { return _settings_uri; }
+
+
+// Apparently, conflate maked the socket irresponsive
+// TODO: investigate
+/*
+void Agent::set_conflate(bool conflate) {
+  if (_connected) throw runtime_error("Cannot set_conflate after connection");
+  _subscriber.set(socket_option::conflate, conflate);
+  cout << "Setting conflate" << endl;
+}
+
+bool Agent::conflate() {
+  void *socket = _subscriber;
+  bool v = false;
+  size_t l = 0;
+  zmq_getsockopt(socket, ZMQ_CONFLATE, &v, &l));
+  return v;
+}
+*/
+
+void Agent::set_high_watermark(int i) {
+  if (_connected) throw runtime_error("Cannot set_high_watermark after connection");
+  _subscriber.set(socket_option::receive_high_water_mark, i);
+}
+
+int Agent::high_watermark() {
+  int i = 0;
+  _subscriber.get(socket_option::receive_high_water_mark, i);
+  return i;
+}
+
+
+
 
 } // namespace Mads

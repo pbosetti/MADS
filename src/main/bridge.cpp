@@ -83,6 +83,11 @@ int main(int argc, char const *argv[]) {
     exit(EXIT_FAILURE);
   }
   bridge.set_pub_topic(topic);
+  // HWM or CONFLATE options:
+  json settings = bridge.get_settings();
+  if (settings["high_watermark"].is_number_integer()) {
+    bridge.set_high_watermark(settings["high_watermark"]);
+  }
   bridge.connect(CONNECT_DELAY);
   if (!single_shot)
     bridge.info();

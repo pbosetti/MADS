@@ -98,6 +98,14 @@ int main(int argc, char *argv[]) {
     logger.set_cross(true);
   }
   logger.enable_remote_control();
+
+  json params = logger.get_settings();
+
+  // HWM or CONFLATE options:
+  if (params["high_watermark"].is_number_integer()) {
+    logger.set_high_watermark(params["high_watermark"]);
+  }
+
   logger.connect();
   logger.register_event(Mads::event_type::startup);
   logger.info();

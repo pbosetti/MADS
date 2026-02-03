@@ -68,8 +68,14 @@ int main(int argc, char *argv[]) {
     exit(EXIT_FAILURE);
   }
   agent.enable_remote_control();
-  agent.connect();
   params = agent.get_settings();
+
+  // HWM or CONFLATE options:
+  if (params["high_watermark"].is_number_integer()) {
+    agent.set_high_watermark(params["high_watermark"]);
+  }
+
+  agent.connect();
   agent.register_event(event_type::startup);
   agent.info();
   try {
