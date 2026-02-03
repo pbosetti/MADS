@@ -116,6 +116,7 @@
 			"PLUGIN_LOADER_FILTER=1",
 			"PLUGIN_LOADER_SOURCE=1",
 			"PLUGIN_LOADER_SINK=1"
-		]
+		],
+		"C_Cpp.default.cppStandard": "c++20"
 	}
 }

@@ -154,6 +154,9 @@ int main(int argc, char *argv[]) {
 
   if (options_parsed.count("plugin") != 0) {
     plugin_file = options_parsed["plugin"].as<string>();
+    if (!plugin_file.ends_with(".plugin")) {
+      plugin_file += ".plugin";
+    }
     agent_name = fs::path(plugin_file).stem().string();
   }
   if (options_parsed.count("name") != 0) {
@@ -254,7 +257,6 @@ int main(int argc, char *argv[]) {
 #endif
 
   if (options_parsed.count("plugin") != 0) {
-    plugin_file = options_parsed["plugin"].as<string>();
     if (!fs::exists(plugin_file)) {
       cerr << style::italic 
            << "  Searching for installed plugin in the default location "
