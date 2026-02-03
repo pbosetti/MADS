@@ -580,8 +580,8 @@ public:
   string settings_uri();
 
   
-  // void set_conflate(bool conflate);
-  // bool conflate();
+  void set_conflate(bool conflate);
+  bool conflate();
 
   void set_high_watermark(int i = 1000);
   int high_watermark();
@@ -646,6 +646,7 @@ protected:
   double _timecode_offset = 0.0;
   filesystem::path _attachment_path;
   bool _crypto = false;
+  bool _conflate = false;
   unique_ptr<CurveAuth> _curve_auth = nullptr;
   filesystem::path _key_dir;
 public:

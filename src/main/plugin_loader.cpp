@@ -253,9 +253,10 @@ int main(int argc, char *argv[]) {
   }
 #endif
 
-#if defined(PLUGIN_LOADER_FILTER)
+#if defined(PLUGIN_LOADER_FILTER) || defined(PLUGIN_LOADER_SINK)
   bool dont_block = false;
   if (options_parsed.count("dont-block") != 0 ||
+      settings.value("dont-block", false) || 
       settings.value("dont_block", false)) {
     cerr << fg::yellow << "  Running in non-blocking mode" << fg::reset << endl;
     dont_block = true;

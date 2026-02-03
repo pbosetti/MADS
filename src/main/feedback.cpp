@@ -28,6 +28,7 @@ int main(int argc, char *argv[]) {
   string server_key_name = "broker";
   auth_verbose auth_verbose = auth_verbose::off;
   int width = 65, indent = -1;
+  bool dont_block = false;
 
   // CLI options
   Options options(argv[0]);
@@ -70,14 +71,25 @@ int main(int argc, char *argv[]) {
   agent.enable_remote_control();
   params = agent.get_settings();
 
+  if (params["receive_timeout"].is_number_integer()) {
+    agent.set_receive_timeout(params["receive_timeout"]);
+  }
+  
   // HWM or CONFLATE options:
   if (params["high_watermark"].is_number_integer()) {
     agent.set_high_watermark(params["high_watermark"]);
   }
-
+  
   agent.connect();
   agent.register_event(event_type::startup);
   agent.info();
+
+  if (params.value("dont-block", false) || 
+      params.value("dont_block", false)) {
+    dont_block = true;
+    cerr << fg::yellow << "  Running in non-blocking mode" << fg::reset << endl;
+  }
+
   try {
     width = params["print_width"].get<int>();
   } catch (...) {}
@@ -87,7 +99,7 @@ int main(int argc, char *argv[]) {
   // Main loop
   cout << fg::green << "Feedback process started" << fg::reset << endl;
   agent.loop([&]() -> chrono::milliseconds {
-    message_type type = agent.receive();
+    message_type type = agent.receive(dont_block);
     auto msg = agent.last_message();
     // agent.remote_control();
     if (get<0>(msg) == LOGGER_STATUS_TOPIC) {
