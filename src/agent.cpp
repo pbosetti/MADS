@@ -243,7 +243,7 @@ nlohmann::json Agent::get_settings() {
 void Agent::info(ostream &out) {
   if (!_init_done)
     throw AgentError("Agent not initialized");
-  out << "Agent: " << style::bold << fg::green << _name << fg::reset
+  out << style::bold << "Agent: " << fg::green << _name << fg::reset
       << style::reset << endl;
   if (_crypto) {
     out << fg::cyan << "  CURVE encryption enabled" << endl
@@ -273,7 +273,7 @@ void Agent::info(ostream &out) {
   }
   out << style::reset << endl;
   // TODO: See down below for conflate not working
-  out << "  High Watermark:   " << style::bold 
+  out << "  Queue size:       " << style::bold 
       << high_watermark() << " messages" << style::reset << endl;
   if (!_agent_id.empty()) {
     out << "  Agent ID:         " << style::bold << _agent_id << style::reset

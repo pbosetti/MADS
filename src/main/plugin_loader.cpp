@@ -143,7 +143,7 @@ int main(int argc, char *argv[]) {
   options.add_options()
     ("p,period", "Sampling period (default 100 ms)", value<size_t>());
   #endif
-  #if defined(PLUGIN_LOADER_FILTER)
+  #if defined(PLUGIN_LOADER_FILTER) || defined(PLUGIN_LOADER_SINK)
   options.add_options()
     ("b,dont-block", "don't block on read");
   #endif
@@ -230,12 +230,8 @@ int main(int argc, char *argv[]) {
     }
   }
   // HWM or CONFLATE options:
-  if (settings["high_watermark"].is_number_integer()) {
-    agent.set_high_watermark(settings["high_watermark"]);
-  }
-
-  agent.info(cerr);
-  agent.connect();
+  agent.set_high_watermark(settings.value("high_watermark", 1000));
+  agent.set_high_watermark(settings.value("queue_size", 1000));
 
 #if defined(PLUGIN_LOADER_SOURCE) or defined(PLUGIN_LOADER_FILTER)
   cerr << "  Sampling period:  " << style::bold;
@@ -253,14 +249,29 @@ int main(int argc, char *argv[]) {
   }
 #endif
 
+  agent.info(cerr);
+  if (!settings["high_watermark"].is_null()) {
+    cerr << fg::yellow 
+         << "Warning: high_watermark setting is deprecated, use queue_size" 
+         << fg::reset << endl;
+  }
+  agent.connect();
+
 #if defined(PLUGIN_LOADER_FILTER) || defined(PLUGIN_LOADER_SINK)
-  bool dont_block = false;
-  if (options_parsed.count("dont-block") != 0 ||
-      settings.value("dont-block", false) || 
-      settings.value("dont_block", false)) {
-    cerr << fg::yellow << "  Running in non-blocking mode" << fg::reset << endl;
+  bool dont_block = settings.value("dont-block", false);
+  dont_block = settings.value("dont_block", dont_block);
+  if (!settings["dont-block"].is_null()) {
+    cerr << fg::yellow
+        << "Warning: dont-block setting is deprecated, use dont_block"
+        << fg::reset << endl;
+  }
+  if (options_parsed.count("dont-block") != 0) {
     dont_block = true;
   }
+  if (dont_block) {
+    cerr << fg::yellow << "Running in non-blocking mode" << fg::reset << endl;
+  }
+
 #endif
 
   if (options_parsed.count("plugin") != 0) {
@@ -305,7 +316,8 @@ int main(int argc, char *argv[]) {
   // Create the class from the plugin:
   Plugin *plugin = plugin_driver->create();
 
-  cerr << "  Plugin:           " << style::bold << plugin_file 
+  cerr << style::bold << "Plugin settings:" << style::reset << endl
+       << "  Plugin:           " << style::bold << plugin_file 
        << " (loaded as " << agent_name  
        << " prot. v" << plugin->version << ")" << style::reset << endl;
   

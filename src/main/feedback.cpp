@@ -32,6 +32,8 @@ int main(int argc, char *argv[]) {
 
   // CLI options
   Options options(argv[0]);
+  options.add_options()
+    ("b,dont-block", "don't block on read");
   SETUP_OPTIONS(options, Agent);
 
   // Settings
@@ -76,18 +78,47 @@ int main(int argc, char *argv[]) {
   }
   
   // HWM or CONFLATE options:
-  if (params["high_watermark"].is_number_integer()) {
-    agent.set_high_watermark(params["high_watermark"]);
+  if (!params["high_watermark"].is_null()) {
+    agent.set_high_watermark(params.value("high_watermark", 1000));
   }
-  
+  if (!params["queue_size"].is_null()) {
+    agent.set_high_watermark(params.value("queue_size", 1000));
+  }
+
   agent.connect();
   agent.register_event(event_type::startup);
   agent.info();
+  if (!params["high_watermark"].is_null()) {
+    cerr << fg::yellow 
+         << "Warning: high_watermark setting is deprecated, use queue_size" 
+         << fg::reset << endl;
+  }
 
-  if (params.value("dont-block", false) || 
-      params.value("dont_block", false)) {
+  /*
+  if (!params["dont_block"].is_null()) {
+    dont_block = params.value("dont_block", false);
+    cerr << fg::yellow << "Running in non-blocking mode" << fg::reset << endl;
+  }
+  if (!params["dont-block"].is_null()) {
+    dont_block = params.value("dont-block", false);
+    cerr << fg::yellow 
+         << "Warning: dont-block setting is deprecated, use dont_block" 
+         << fg::reset << endl;
+    cerr << fg::yellow << "Running in non-blocking mode" << fg::reset << endl;
+  }
+  */
+  dont_block = params.value("dont-block", false);
+  dont_block = params.value("dont_block", dont_block);
+  if (!params["dont-block"].is_null()) {
+    cerr << fg::yellow
+        << "Warning: dont-block setting is deprecated, use dont_block"
+        << fg::reset << endl;
+  }
+  if (options_parsed.count("dont-block") != 0) {
     dont_block = true;
-    cerr << fg::yellow << "  Running in non-blocking mode" << fg::reset << endl;
+  }
+  if (dont_block) {
+    cerr << fg::yellow << "Running in non-blocking mode" << fg::reset << endl;
   }
 
   try {
