@@ -280,31 +280,34 @@ void describe_release(const json &release) {
        << fg::green << plat + arch << fg::reset << ")" << style::reset << endl;
 }
 
-void check_update(bool beta = false) {
+void check_update(bool beta = false, size_t n = 3) {
   Mads::HttpsClient::Response response;
-  try {
-    Mads::HttpsClient client;
-    client.set_hostname("api.github.com");
-    if (beta) {
-      client.set_path("/repos/pbosetti/mads/releases");
-      client.add_query_pair("per_page", "1");
-    } else {
-      client.set_path("/repos/pbosetti/mads/releases/latest");
+  for (int i = 1; i <= n; i++) {
+    try {
+      Mads::HttpsClient client;
+      client.set_hostname("api.github.com");
+      if (beta) {
+        client.set_path("/repos/pbosetti/mads/releases");
+        client.add_query_pair("per_page", "1");
+      } else {
+        client.set_path("/repos/pbosetti/mads/releases/latest");
+      }
+      client.set_user_agent("MADS" LIB_VERSION);
+
+      response = client.get();
+
+      json releases = json::parse(response.body);
+      if (releases.is_array())
+        describe_release(releases[0]);
+      else
+        describe_release(releases);
+      break;
+    } catch (const json::exception &e) {
+      cerr << "Error fetching info, retry " << i << "/" << n << endl;
+      this_thread::sleep_for(chrono::milliseconds(500));
+    } catch (const std::exception &e) {
+      cerr << "Unexpected error: " << e.what() << endl;
     }
-    client.set_user_agent("MADS" LIB_VERSION);
-
-    response = client.get();
-
-    json releases = json::parse(response.body);
-    if (releases.is_array())
-      describe_release(releases[0]);
-    else
-      describe_release(releases);
-
-  } catch (const json::exception &e) {
-    cerr << "Error fetching info, please try again in a moment" << endl;
-  } catch (const std::exception &e) {
-    cerr << "Unexpected error: " << e.what() << endl;
   }
 }
 
