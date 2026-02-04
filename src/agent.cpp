@@ -207,6 +207,8 @@ void Agent::init(bool crypto) {
   }
   _time_step = chrono::milliseconds(cfg["time_step"].value_or(0));
 
+  set_high_watermark(cfg["queue_size"].value_or(1000));
+
   // rename attachment if not a plugin
   if (!_attachment_path.empty()) {
     string ext = cfg["attachment_ext"].value_or("plugin");

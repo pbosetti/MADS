@@ -77,12 +77,9 @@ int main(int argc, char *argv[]) {
     agent.set_receive_timeout(params["receive_timeout"]);
   }
   
-  // HWM or CONFLATE options:
+  // deprecated queue size option:
   if (!params["high_watermark"].is_null()) {
     agent.set_high_watermark(params.value("high_watermark", 1000));
-  }
-  if (!params["queue_size"].is_null()) {
-    agent.set_high_watermark(params.value("queue_size", 1000));
   }
 
   agent.connect();

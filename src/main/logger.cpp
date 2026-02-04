@@ -101,9 +101,10 @@ int main(int argc, char *argv[]) {
 
   json params = logger.get_settings();
 
-  // HWM or CONFLATE options:
-  logger.set_high_watermark(params.value("high_watermark", 1000));
-  logger.set_high_watermark(params.value("queue_size", 1000));
+  // deprecated queue size option:
+  if (!params["high_watermark"].is_null()) {
+    logger.set_high_watermark(params.value("high_watermark", 1000));
+  }
 
   logger.connect();
   logger.register_event(Mads::event_type::startup);

@@ -21,6 +21,7 @@ Author(s): Paolo Bosetti
 extern "C" {
 #endif
 #include <stdbool.h>
+#include <stdlib.h>
 
 #ifdef _WIN32
 #define MADS_EXPORT __declspec(dllexport)
@@ -114,6 +115,8 @@ MADS_EXPORT double agent_setting_dbl(agent_t agent, const char *key);
 MADS_EXPORT const char *agent_setting_str(agent_t agent, const char *key);
 MADS_EXPORT void agent_print_settings(agent_t agent, int tab);
 MADS_EXPORT const char *agent_settings_uri(agent_t agent);
+MADS_EXPORT void agent_set_high_watermark(agent_t agent, size_t n);
+MADS_EXPORT size_t agent_high_watermark(agent_t agent);
 
 // Messaging
 MADS_EXPORT int agent_publish(agent_t agent, const char *topic, const char *message);

@@ -133,6 +133,12 @@ lib.agent_print_settings.restype = None
 lib.agent_settings_uri.argtypes = [c_void_p]
 lib.agent_settings_uri.restype = c_char_p
 
+lib.agent_set_high_watermark.argtypes = [c_void_p, c_int]
+lib.agent_set_high_watermark.restype = None
+
+lib.agent_high_watermark.argtypes = [c_void_p]
+lib.agent_high_watermark.restype = c_int
+
 # Messaging functions
 lib.agent_publish.argtypes = [c_void_p, c_char_p, c_char_p]
 lib.agent_publish.restype = c_int
@@ -254,6 +260,14 @@ class Agent:
         """Get the settings URI."""
         result = lib.agent_settings_uri(self._agent)
         return result.decode('utf-8') if result else None
+    
+    def set_queue_size(self, size: 1000):
+        """Set the receive queue size"""
+        lib.agent_set_high_watermark(self._agent, size)
+    
+    def queue_size(self) -> int:
+        """Set the receive queue size"""
+        return lib.agent_high_watermark(self._agent)
     
     # Messaging methods
     def publish(self, topic: str, message: dict) -> int:

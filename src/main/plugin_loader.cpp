@@ -229,10 +229,11 @@ int main(int argc, char *argv[]) {
       }
     }
   }
-  // HWM or CONFLATE options:
-  agent.set_high_watermark(settings.value("high_watermark", 1000));
-  agent.set_high_watermark(settings.value("queue_size", 1000));
-
+  // deprecated queue size option:
+  if (!settings["high_watermark"].is_null()) {
+    agent.set_high_watermark(settings.value("high_watermark", 1000));
+  }
+  
 #if defined(PLUGIN_LOADER_SOURCE) or defined(PLUGIN_LOADER_FILTER)
   cerr << "  Sampling period:  " << style::bold;
   if (options_parsed.count("p") != 0) {
