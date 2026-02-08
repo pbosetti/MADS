@@ -42,6 +42,9 @@ Author(s): Paolo Bosetti
 #include <thread>
 #include <future>
 #include <zmqpp/zmqpp.hpp>
+#include <mutex>
+#include <condition_variable>
+#include <optional>
 #include "curve.hpp"
 #include "exec_path.hpp"
 
@@ -62,6 +65,12 @@ using namespace std;
 #define STARTUP_SHUTDOWN_DELAY 500
 
 namespace Mads {
+
+template<typename T> struct SharedLatest {
+  std::mutex mtx;
+  std::condition_variable cv;
+  std::optional<T> value;
+};
 
 /**
  * @brief The Agent class represents an agent in the mads system.
@@ -617,6 +626,16 @@ protected:
   void connect_sub();
 
 
+  /**
+   * @brief Internal use wrapping the receive step both for normal operations and for LastKnown Value (LKV) semantic, when high_watermark is 1.
+   * 
+   * @param message 
+   * @param dont_block 
+   * @return true new message
+   * @return false no new message (when non blocking or timeout)
+   */
+  bool receive_raw(message &message, bool dont_block = false);
+
   static tuple<string, string, string> split_URL(const string &url);
 
   // Member variables
@@ -649,6 +668,8 @@ protected:
   bool _conflate = false;
   unique_ptr<CurveAuth> _curve_auth = nullptr;
   filesystem::path _key_dir;
+  bool _last_value_only = false;
+  SharedLatest<zmqpp::message_t> _latest_message;
 public:
   bool dummy = false;
 };

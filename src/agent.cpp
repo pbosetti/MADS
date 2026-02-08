@@ -404,13 +404,37 @@ void Agent::publish(const vector<unsigned char> &payload,
   publish(data, payload.size(), meta, topic);
 }
 
+
+inline bool Agent::receive_raw(message &message, bool dont_block) {
+  bool r = false;
+  // LKV semantic: try and fetch the value from the drain thread
+  // behaves as blocking
+  if (_last_value_only) {
+    std::unique_lock<std::mutex> lock(_latest_message.mtx);
+    _latest_message.cv.wait(lock, [&]() -> bool {
+      return true;
+    });
+    if (_latest_message.value.has_value()) {
+      message = _latest_message.value.value().copy();
+      _latest_message.value.reset();
+      r = true;
+    }
+  } 
+  // Queued operation (blocking or not)
+  else {
+    r = _subscriber.receive(message, dont_block);
+  }
+  return r;
+}
+
+
 message_type Agent::receive(bool dont_block) {
   if (!_init_done)
     throw AgentError("Agent not initialized");
   message message;
   message_type result = message_type::none;
   string topic, format, payload, j;
-  if (!_subscriber.receive(message, dont_block)) {
+  if (!receive_raw(message, dont_block)) {
     return result;
   }
   switch (message.parts()) {
@@ -563,6 +587,21 @@ void Agent::connect_sub() {
   for (auto &t : _sub_topic) {
     _subscriber.subscribe(t);
   }
+  // Drain thread
+  // this keeps the queue updated to the LKV when its size is 1
+  if (_last_value_only) {
+    thread([&]() {
+      zmqpp::message_t msg;
+      while(Mads::running && _connected) {
+        try {
+          if (!_subscriber.receive(msg, false)) continue;
+          std::lock_guard<std::mutex> lock(_latest_message.mtx);
+          _latest_message.value = msg.copy();
+          _latest_message.cv.notify_one();
+        } catch (...) {}
+      }
+    }).detach();
+  }
 }
 
 tuple<string, string, string> Agent::split_URL(const string &url) {
@@ -657,6 +696,7 @@ bool Agent::conflate() {
 void Agent::set_high_watermark(int i) {
   if (_connected) throw runtime_error("Cannot set_high_watermark after connection");
   if (i == 0) i = 1;
+  _last_value_only = (i == 1);
   _subscriber.set(socket_option::receive_high_water_mark, i);
 }
 

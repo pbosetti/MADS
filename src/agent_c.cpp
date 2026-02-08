@@ -137,6 +137,7 @@ int agent_register_event(agent_t agent, event_type_t event,
 
 int agent_disconnect(agent_t agent) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
+  Mads::running = false;
   try {
     ag->disconnect();
   } catch (const std::exception &e) {

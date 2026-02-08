@@ -183,6 +183,7 @@ class Agent:
     def destroy(self):
         """Destroy the agent and free resources."""
         if self._agent:
+            self.disconnect()
             lib.agent_destroy(self._agent)
             self._agent = None
     
