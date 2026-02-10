@@ -312,6 +312,7 @@ void Agent::disconnect() {
   if (!_connected)
     return;
   try {
+    Mads::running = false;
     _publisher.disconnect(_pub_endpoint);
     _subscriber.disconnect(_sub_endpoint);
   } catch (...) {
@@ -483,13 +484,21 @@ void Agent::loop(loop_fun_t const &lambda, chrono::milliseconds duration) {
     Mads::running = false;
   });
   chrono::milliseconds nld(0); // next loop duration
-  while (running) {
+  while (Mads::running) {
     if (duration > 0ms) {
       thread t([&]() { this_thread::sleep_for(nld == 0ms ? duration : nld); });
-      nld = lambda();
+      try {
+        nld = lambda();
+      } catch (...) {
+        Mads::running = false;
+      }
       t.join();
     } else {
-      nld = lambda();
+      try {
+        nld = lambda();
+      } catch (...) {
+        Mads::running = false;
+      }
     }
   }
 }

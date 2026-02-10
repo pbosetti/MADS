@@ -383,10 +383,11 @@ int main(int argc, char *argv[]) {
           count_err++;
           break;
         case return_type::critical:
-          cerr << fg::red << "Critical error getting data: " << plugin->error()
-               << fg::reset << endl;
+          // cerr << fg::red << "Critical error getting data: " << plugin->error()
+          //      << fg::reset << endl;
           count_err++;
           Mads::running = false;
+          throw std::runtime_error(string("Critical error in getting data: ") + plugin->error());
           return 0ms;
         }
 

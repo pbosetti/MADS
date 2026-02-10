@@ -1,0 +1,61 @@
+.\" -*- mode: troff; coding: utf-8 -*-
+.TH "mads-source" "1" "2024/07/17"
+.SH NAME
+\fBmads-source\fR - The source agent for the MADS network
+.SH SYNOPSIS
+\fBmads-source\fR 
+[\fB-n, --name\fR \fIagent_name\fR] 
+[\fB-i, --agent-id\fR \fIagent-id\fR]
+[\fB-p, --period\fR \fIsampling_period\fR]
+[\fB-s, --settings\fR \fIURI\fR]
+[\fB-S, --save-settings\fR \fIfilename\fR]
+[\fB-h, --help\fR]
+[\fIplugin\fR]
+.SH DESCRIPTION
+\fBmads-source\fR is the source agent for the MADS network. 
+.SH ARGUMENTS
+.IP "\fIplugin\fR"
+The plugin to be loaded. The plugin is a shared library (with the \fB.plugin\fR extension) that implements the source agent. You must provide either a full path to the plugin or the plugin name (without extension) if the plugin is in the standard plugin directory (/usr/local/lib/).
+.SH OPTIONS
+.IP "\fB-n\fR, \fB--name\fR"
+The agent name. By default, the agent name is the plugin file name, without extension, so the plugin \fBpublish.plugin\fR will have the agent name \fBpublish\fR. The agent name is used for fetching the proper section forom the INI file, so this option allows to have different settings for different source agents loading the same plugin.
+.if n \
+.sp -1
+.if t \
+.sp -0.25v
+.IP "\fB-i\fR, \fB--agent-id\fR"
+The agent_id field is appended to the message payload. It allows to mark different agents that share the same agent name and the same settings section.
+.if n \
+.sp -1
+.if t \
+.sp -0.25v
+.IP "\fB-p\fR, \fB--period\fR \fIsampling_period\fR"
+Sampling period in milliseconds. Default is 0, meaning free run. If the sampling period is set to a value greater than 0, the source agent will send a message every \fIsampling_period\fR milliseconds.
+.if n \
+.sp -1
+.if t \
+.sp -0.25v
+.IP "\fB-s\fR, \fB--settings\fR \fIURI\fR"
+Path to the settings file (ini format). It can be a valid ZeroMQ url in the form tcp://host:port.
+.if n \
+.sp -1
+.if t \
+.sp -0.25v
+.IP "\fB-S\fR, \fB--save-settings\fR \fIfilename\fR"
+Save the settings (loaded by the broker or via \fB-s\fR option) to the given file (ini format).
+.if n \
+.sp -1
+.if t \
+.sp -0.25v
+.IP "\fB-h\fR, \fB--help\fR"
+show summary of options.
+.SH DEFAULT PLUGIN
+The default plugin (if omitted) is \fBpublish.plugin\fR. This plugin listens on standard input and sends the input to the broker, assuming that any newline terminated string is a JSON message. This allows to use the source agent as a simple command line tool to send messages to the broker, or to pipe through it messages from a scripting language.
+.SH BUGS
+The upstream bug tracker can be found at \fIhttps://github.com/pbosetti/MADS/issues\fR.
+.SH SEE ALSO
+\fBmads\fR(1), \fBmads-broker\fR(1), \fBmads-logger\fR(1), \fBmads-sink\fR(1), \fBmads-filter\fR(1)
+.SH FILES
+\fB/usr/local/etc/mads.ini\fR: MADS configuration file.
+.SH AUTHOR
+\fBmads-source\fR was written by Paolo Bosetti \fIpaolo.bosetti@unitn.it\fR.
