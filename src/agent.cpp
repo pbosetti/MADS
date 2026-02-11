@@ -239,26 +239,25 @@ Agent::~Agent() {
   _context.terminate();
 }
 
-void Agent::install_loop_watchdog() {
-  thread([]() {
+void Agent::install_loop_watchdog(uint8_t max_count) {
+  thread([max_count]() {
     uint8_t count = 0;
     while(true) {
-      this_thread::sleep_for(chrono::seconds(1));
       if (!Mads::running) {
-        count++;
-        if (count == 1) {
-          cerr << style::italic << "\nWaiting for all resources to close";
-          flush(cerr);
-        } else {
+        std::signal(SIGINT, SIG_DFL);
+        cerr << style::italic << "\nWaiting for all resources to close"
+             << " (or CTRL-C again to force)";
+        for (uint8_t count = 0; count < max_count; count++) {
+          this_thread::sleep_for(chrono::seconds(2));
           cerr << ".";
           flush(cerr);
         }
-      }
-      if (count > 3) {
         cerr << " done." << style::reset << endl;
         exit(EXIT_SUCCESS);
+      } else {
+        this_thread::sleep_for(chrono::seconds(2));
       }
-    }
+    } 
   }).detach();
 }
 

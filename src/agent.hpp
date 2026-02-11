@@ -184,7 +184,7 @@ public:
    * This starts a low-frequency thread that forces and exit when 
    * `Mads::running` remains false for more than 3 seconds
    */
-  void install_loop_watchdog();
+  void install_loop_watchdog(uint8_t max_count = 3);
 
 
 /*
