@@ -80,6 +80,7 @@ MADS_EXPORT int agent_init(agent_t agent, bool crypto);
 MADS_EXPORT void agent_destroy(agent_t agent);
 MADS_EXPORT void agent_set_id(agent_t agent, const char *id);
 MADS_EXPORT const char *agent_id(agent_t agent);
+MADS_EXPORT void agent_install_loop_watchdog(agent_t agent);
 
 /*
    ___                       _   _

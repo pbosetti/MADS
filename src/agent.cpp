@@ -137,7 +137,7 @@ Agent::Agent(string name, string settings_uri)
   _key_dir = filesystem::path(Mads::exec_dir()) / "../etc";
 }
 
-void Agent::init(string name, string settings_uri, bool crypto, filesystem::path const &key_dir) {
+void Agent::init(string name, string settings_uri, bool crypto, filesystem::path const &key_dir, bool install_watchdog) {
   size_t pos = name.rfind('-');
   if (pos != std::string::npos) {
     _name = name.substr(pos + 1);
@@ -148,10 +148,10 @@ void Agent::init(string name, string settings_uri, bool crypto, filesystem::path
   if (!key_dir.empty()) {
     _key_dir = key_dir;
   }
-  init(crypto);
+  init(crypto, install_watchdog);
 }
 
-void Agent::init(bool crypto) {
+void Agent::init(bool crypto, bool install_watchdog) {
   _crypto = crypto;
   if (_crypto) {
     _curve_auth = make_unique<CurveAuth>(_context);
@@ -220,6 +220,10 @@ void Agent::init(bool crypto) {
     filesystem::rename(saved_attach, _attachment_path);
   }
 
+  if (install_watchdog) {
+    install_loop_watchdog();
+  }
+
   load_settings();
 
   _init_done = true;
@@ -233,6 +237,29 @@ Agent::~Agent() {
   _publisher.close();
   _subscriber.close();
   _context.terminate();
+}
+
+void Agent::install_loop_watchdog() {
+  thread([]() {
+    uint8_t count = 0;
+    while(true) {
+      this_thread::sleep_for(chrono::seconds(1));
+      if (!Mads::running) {
+        count++;
+        if (count == 1) {
+          cerr << style::italic << "\nWaiting for all resources to close";
+          flush(cerr);
+        } else {
+          cerr << ".";
+          flush(cerr);
+        }
+      }
+      if (count > 3) {
+        cerr << " done." << style::reset << endl;
+        exit(EXIT_SUCCESS);
+      }
+    }
+  }).detach();
 }
 
 nlohmann::json Agent::get_settings() {

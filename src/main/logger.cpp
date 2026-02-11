@@ -175,7 +175,7 @@ int main(int argc, char *argv[]) {
   cout << fg::green << "Logger process stopped" << fg::reset << endl;
 
   // Cleanup
-  Mads::running = false;
+  // Mads::running = false;
   logger_status_thread.join();
   logger.register_event(Mads::event_type::shutdown);
   logger.disconnect(); // Not necessary, called by destructor

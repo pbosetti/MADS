@@ -53,6 +53,11 @@ int agent_init(agent_t agent, bool crypto) {
   return 0;
 }
 
+void agent_install_loop_watchdog(agent_t agent) {
+  Agent *ag = reinterpret_cast<Agent *>(agent);
+  ag->install_loop_watchdog();
+}
+
 void agent_set_id(agent_t agent, const char *id) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
   ag->set_agent_id(string(id));

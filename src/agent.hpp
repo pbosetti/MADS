@@ -161,7 +161,7 @@ public:
    * @param key_dir The directory where the CURVE keys are stored.
    * @throws AgentError if timed out in reading settings from broker.
    */
-  void init(string name, string settings_uri, bool crypto = false, filesystem::path const &key_dir = "");
+  void init(string name, string settings_uri, bool crypto = false, filesystem::path const &key_dir = "", bool install_watchdog = true);
 
 
   /**
@@ -173,10 +173,18 @@ public:
    * @param crypto Whether to use CURVE encryption (default false).
    * @throws AgentError if timed out in reading settings from broker.
    */
-  void init(bool crypto = false);
+  void init(bool crypto = false, bool install_watchdog = true);
 
   // Destructor
   virtual ~Agent();
+
+  /**
+   * @brief Install a watch thread to ensure exit from loops
+   * 
+   * This starts a low-frequency thread that forces and exit when 
+   * `Mads::running` remains false for more than 3 seconds
+   */
+  void install_loop_watchdog();
 
 
 /*
