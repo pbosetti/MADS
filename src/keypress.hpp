@@ -12,6 +12,7 @@ Read a single key press in a portable way.
 #include <iostream>
 #include <string>
 #include <thread> // contains <chrono>
+#include <chrono>
 
 static void kpsleep(const double t) {
   if (t > 0.0)
@@ -29,7 +30,8 @@ static void kpsleep(const double t) {
 #define WIN32_LEAN_AND_MEAN
 #define VC_EXTRALEAN
 #include <Windows.h>
-int key_press() { // not working: F11 (-122, toggles fullscreen)
+using namespace std::chrono_literals;
+char getch(std::chrono::milliseconds const &ms = 500ms) { // not working: F11 (-122, toggles fullscreen)
   KEY_EVENT_RECORD keyevent;
   INPUT_RECORD irec;
   DWORD events;
@@ -129,156 +131,34 @@ int key_press() { // not working: F11 (-122, toggles fullscreen)
 #elif defined(__linux__) || defined(__unix__) || defined(__APPLE__)
 #include <sys/ioctl.h>
 #include <termios.h>
-int key_press() { // not working: ¹ (251), num lock (-144), caps lock (-20),
-                  // windows key (-91), kontext menu key (-93)
-  struct termios term;
-  tcgetattr(0, &term);
-  while (true) {
-    term.c_lflag &= ~(ICANON | ECHO); // turn off line buffering and echoing
-    tcsetattr(0, TCSANOW, &term);
-    int nbbytes;
-    ioctl(0, FIONREAD, &nbbytes); // 0 is STDIN
-    while (!nbbytes) {
-      kpsleep(0.01);
-      fflush(stdout);
-      ioctl(0, FIONREAD, &nbbytes); // 0 is STDIN
-    }
-    int key = (int)getchar();
-    if (key == 27 || key == 194 ||
-        key == 195) { // escape, 194/195 is escape for °ß´äöüÄÖÜ
-      key = (int)getchar();
-      if (key == 91) {               // [ following escape
-        key = (int)getchar();        // get code of next char after \e[
-        if (key == 49) {             // F5-F8
-          key = 62 + (int)getchar(); // 53, 55-57
-          if (key == 115)
-            key++;              // F5 code is too low by 1
-          getchar();            // take in following ~ (126), but discard code
-        } else if (key == 50) { // insert or F9-F12
-          key = (int)getchar();
-          if (key == 126) { // insert
-            key = 45;
-          } else {     // F9-F12
-            key += 71; // 48, 49, 51, 52
-            if (key < 121)
-              key++;   // F11 and F12 are too low by 1
-            getchar(); // take in following ~ (126), but discard code
-          }
-        } else if (key == 51 || key == 53 ||
-                   key == 54) { // delete, page up/down
-          getchar();            // take in following ~ (126), but discard code
-        }
-      } else if (key == 79) {      // F1-F4
-        key = 32 + (int)getchar(); // 80-83
-      }
-      key = -key; // use negative numbers for escaped keys
-    }
-    term.c_lflag |= (ICANON | ECHO); // turn on line buffering and echoing
-    tcsetattr(0, TCSANOW, &term);
-    switch (key) {
-    case 127:
-      return 8; // backspace
-    case -27:
-      return 27; // escape
-    case -51:
-      return 127; // delete
-    case -164:
-      return 132; // ä
-    case -182:
-      return 148; // ö
-    case -188:
-      return 129; // ü
-    case -132:
-      return 142; // Ä
-    case -150:
-      return 153; // Ö
-    case -156:
-      return 154; // Ü
-    case -159:
-      return 225; // ß
-    case -181:
-      return 230; // µ
-    case -167:
-      return 245; // §
-    case -176:
-      return 248; // °
-    case -178:
-      return 253; // ²
-    case -179:
-      return 252; // ³
-    case -180:
-      return 239; // ´
-    case -65:
-      return -38; // up arrow
-    case -66:
-      return -40; // down arrow
-    case -68:
-      return -37; // left arrow
-    case -67:
-      return -39; // right arrow
-    case -53:
-      return -33; // page up
-    case -54:
-      return -34; // page down
-    case -72:
-      return -36; // pos1
-    case -70:
-      return -35; // end
-    case 0:
-      continue;
-    case 1:
-      continue; // disable Ctrl + a
-    case 2:
-      continue; // disable Ctrl + b
-    case 3:
-      continue; // disable Ctrl + c (terminates program)
-    case 4:
-      continue; // disable Ctrl + d
-    case 5:
-      continue; // disable Ctrl + e
-    case 6:
-      continue; // disable Ctrl + f
-    case 7:
-      continue; // disable Ctrl + g
-    case 8:
-      continue; // disable Ctrl + h
-    // case    9: continue; // disable Ctrl + i (ascii for tab)
-    // case   10: continue; // disable Ctrl + j (ascii for new line)
-    case 11:
-      continue; // disable Ctrl + k
-    case 12:
-      continue; // disable Ctrl + l
-    case 13:
-      continue; // disable Ctrl + m
-    case 14:
-      continue; // disable Ctrl + n
-    case 15:
-      continue; // disable Ctrl + o
-    case 16:
-      continue; // disable Ctrl + p
-    case 17:
-      continue; // disable Ctrl + q
-    case 18:
-      continue; // disable Ctrl + r
-    case 19:
-      continue; // disable Ctrl + s
-    case 20:
-      continue; // disable Ctrl + t
-    case 21:
-      continue; // disable Ctrl + u
-    case 22:
-      continue; // disable Ctrl + v
-    case 23:
-      continue; // disable Ctrl + w
-    case 24:
-      continue; // disable Ctrl + x
-    case 25:
-      continue; // disable Ctrl + y
-    case 26:
-      continue; // disable Ctrl + z (terminates program)
-    default:
-      return key; // any other ASCII character
-    }
+char getch(chrono::milliseconds const &ms = 500ms) {
+  struct timeval tv;
+  Mads::milliseconds_to_tv(ms, tv);
+  struct termios oldt, newt;
+  char ch;
+  fd_set readfds;
+  // struct timeval tv;
+
+  tcgetattr(STDIN_FILENO, &oldt);
+  newt = oldt;
+  newt.c_lflag &= ~(ICANON | ECHO);
+
+  tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+
+  // Set up file descriptor set for stdin
+  FD_ZERO(&readfds);
+  FD_SET(STDIN_FILENO, &readfds);
+
+  int select_result = select(STDIN_FILENO + 1, &readfds, NULL, NULL, &tv);
+
+  if (select_result > 0 && FD_ISSET(STDIN_FILENO, &readfds)) {
+    ch = getchar();
+  } else {
+    ch = '\0'; // timeout or error
   }
+
+  tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+
+  return ch;
 }
 #endif // Windows/Linux

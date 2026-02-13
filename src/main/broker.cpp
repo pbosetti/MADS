@@ -20,6 +20,7 @@ Author(s): Paolo Bosetti
 #include "../mads.hpp"
 #include "../watcher.hpp"
 #include "../curve.hpp"
+#include "../keypress.hpp"
 #include <cstring>
 #include <cxxopts.hpp>
 #include <filesystem>
@@ -68,36 +69,6 @@ using namespace rang;
                       |___/
 */
 
-char getch(chrono::milliseconds const &ms = 500ms) {
-  struct timeval tv;
-  Mads::milliseconds_to_tv(ms, tv);
-  struct termios oldt, newt;
-  char ch;
-  fd_set readfds;
-  // struct timeval tv;
-
-  tcgetattr(STDIN_FILENO, &oldt);
-  newt = oldt;
-  newt.c_lflag &= ~(ICANON | ECHO);
-
-  tcsetattr(STDIN_FILENO, TCSANOW, &newt);
-
-  // Set up file descriptor set for stdin
-  FD_ZERO(&readfds);
-  FD_SET(STDIN_FILENO, &readfds);
-
-  int select_result = select(STDIN_FILENO + 1, &readfds, NULL, NULL, &tv);
-
-  if (select_result > 0 && FD_ISSET(STDIN_FILENO, &readfds)) {
-    ch = getchar();
-  } else {
-    ch = '\0'; // timeout or error
-  }
-
-  tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-
-  return ch;
-}
 
 bool get_nic_ip(string &ip, const string nic) {
 #ifdef _WIN32

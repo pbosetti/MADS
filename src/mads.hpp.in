@@ -16,7 +16,6 @@ Author(s): Paolo Bosetti
 #if defined _WIN32 && !defined NOMINMAX
 #define NOMINMAX
 #endif
-
 #include <chrono>
 #include <cmath>
 #include <exception>
@@ -258,6 +257,7 @@ static double timecode(const std::chrono::system_clock::time_point &now,
   return lt->tm_hour * 3600 + lt->tm_min * 60 + lt->tm_sec + ms / 1000.0;
 }
 
+#ifndef _WIN32
 static std::chrono::milliseconds tv_to_milliseconds(struct timeval &tv)
 {
     using namespace std::chrono;
@@ -276,10 +276,17 @@ static void milliseconds_to_tv(std::chrono::milliseconds const &ms,
     auto rem  = ms - duration_cast<milliseconds>(sec);
 
     tv.tv_sec  = static_cast<time_t>(sec.count());
+    #ifdef _WIN32
+    tv.tv_usec = static_cast<long>(
+        duration_cast<microseconds>(rem).count()
+    );
+    #else
     tv.tv_usec = static_cast<suseconds_t>(
         duration_cast<microseconds>(rem).count()
     );
+    #endif
 }
+#endif
 
 /*
    ____ _
