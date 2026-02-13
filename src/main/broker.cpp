@@ -69,7 +69,7 @@ using namespace rang;
                       |___/
 */
 
-
+#ifdef _WIN32
 void relaunch() {
   wchar_t path[MAX_PATH];
   GetModuleFileNameW(nullptr, path, MAX_PATH);
@@ -98,6 +98,7 @@ void relaunch() {
     CloseHandle(pi.hThread);
   }
 }
+#endif
 
 bool get_nic_ip(string &ip, const string nic) {
 #ifdef _WIN32
