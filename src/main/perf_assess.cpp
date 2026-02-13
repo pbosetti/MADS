@@ -32,11 +32,14 @@ int main(int argc, char *argv[]) {
   string client_key_name = "client";
   string server_key_name = "broker";
   auth_verbose auth_verbose = auth_verbose::off;
+  string agent_name = argv[0], agent_id;
 
   // CLI options
   Options options(argv[0]);
   options.add_options()
     ("p", "Sampling period (default 100 ms)", value<size_t>())
+    ("n,name", "Agent name (default to plugin name)", value<string>())
+    ("i,agent-id", "Agent ID to be added to JSON frames", value<string>())
     ("l", "Byte length of Payload", value<size_t>());
   SETUP_OPTIONS(options, Agent);
 
@@ -46,6 +49,9 @@ int main(int argc, char *argv[]) {
   }
   if (options_parsed.count("l") != 0) {
     len = options_parsed["l"].as<size_t>();
+  }
+  if (options_parsed.count("name") != 0) {
+    agent_name = options_parsed["name"].as<string>();
   }
 
   if (options_parsed.count("crypto") != 0) {
@@ -72,7 +78,10 @@ int main(int argc, char *argv[]) {
   }
   buf[len - 1] = 0;  // null-terminate the string
 
-  Agent agent(argv[0], settings_uri);
+  Agent agent(agent_name, settings_uri);
+  if (options_parsed.count("agent-id")) {
+    agent.set_agent_id(options_parsed["agent-id"].as<string>());
+  }
   if (crypto) {
     agent.set_key_dir(key_dir);
     agent.client_key_name = client_key_name;

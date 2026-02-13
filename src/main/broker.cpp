@@ -413,28 +413,28 @@ int main(int argc, char **argv) {
                  << "Received settings request from agent with wrong version: "
                  << agent_version << " (vs. " << LIB_VERSION << ")" << fg::reset
                  << endl;
-            continue;
-          }
-          cout << "Sending settings to agent " << agent_name << " ("
-               << agent_version << ")" << endl;
-          content << ini_table;
-          string attachment_path = config[agent_name]["attachment"].value_or("");
-          if (!attachment_path.empty()) {
-            if (filesystem::path(attachment_path).is_relative()) {
-              attachment_path = Mads::exec_dir(attachment_path);
-            }
-            if (!filesystem::exists(attachment_path)) {
-              cerr << fg::red << "attachment path does not exist: "
-                   << attachment_path << fg::reset << endl;
-            } else {
-              ifstream attachment_file(attachment_path, ios::in | ios::binary);
-              stringstream attachment_content;
-              cout << fg::yellow << "  Attaching binary object: "
-                   << style::bold << attachment_path
-                   << " (" << filesystem::file_size(attachment_path) << " bytes)"
-                   << fg::reset << endl;
-              attachment_content << attachment_file.rdbuf();
-              content << attachment_content.str();
+          } else {
+            cout << "Sending settings to agent " << agent_name << " ("
+                << agent_version << ")" << endl;
+            content << ini_table;
+            string attachment_path = config[agent_name]["attachment"].value_or("");
+            if (!attachment_path.empty()) {
+              if (filesystem::path(attachment_path).is_relative()) {
+                attachment_path = Mads::exec_dir(attachment_path);
+              }
+              if (!filesystem::exists(attachment_path)) {
+                cerr << fg::red << "attachment path does not exist: "
+                    << attachment_path << fg::reset << endl;
+              } else {
+                ifstream attachment_file(attachment_path, ios::in | ios::binary);
+                stringstream attachment_content;
+                cout << fg::yellow << "  Attaching binary object: "
+                    << style::bold << attachment_path
+                    << " (" << filesystem::file_size(attachment_path) << " bytes)"
+                    << fg::reset << endl;
+                attachment_content << attachment_file.rdbuf();
+                content << attachment_content.str();
+              }
             }
           }
           settings.send(content);

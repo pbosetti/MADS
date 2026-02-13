@@ -272,7 +272,7 @@ void Agent::info(ostream &out) {
   if (!_init_done)
     throw AgentError("Agent not initialized");
   out << style::bold << "Agent: " << fg::green << _name << fg::reset
-      << style::reset << endl;
+      << style::reset << " (ID: " << _agent_id << ")" << endl;
   if (_crypto) {
     out << fg::cyan << "  CURVE encryption enabled" << endl
         << "    keys dir:         " << _key_dir.string() << endl
@@ -395,6 +395,9 @@ void Agent::publish(nlohmann::json payload, string topic) {
       offset = STARTUP_SHUTDOWN_DELAY;
     }
   chrono::system_clock::time_point now = chrono::system_clock::now();
+  if (!payload.contains("agent_id")) {
+    payload["agent_id"] = _agent_id;
+  }
   payload["hostname"] = _hostname;
   payload["timestamp"]["$date"] = get_ISODate_time(now, -offset);
   if (!payload.contains("timecode")) {

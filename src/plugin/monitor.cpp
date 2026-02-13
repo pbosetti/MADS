@@ -50,7 +50,7 @@ struct TimingData {
   }
 
   friend ostream &operator<<(ostream &os, const TimingData &obj) {
-    auto delay = (chrono::system_clock::now() - obj.last).count() / 1.0E6;
+    auto delay = chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now() - obj.last).count() / 1.0E3;
     os << setw(obj.col_widths[0]) << obj.machine << " | "
        << setw(obj.col_widths[1]) << obj.topic << " | "
        << setw(obj.col_widths[2]) << obj.id << " | " << setprecision(3)
