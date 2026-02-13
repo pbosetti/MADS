@@ -70,6 +70,35 @@ using namespace rang;
 */
 
 
+void relaunch() {
+  wchar_t path[MAX_PATH];
+  GetModuleFileNameW(nullptr, path, MAX_PATH);
+  std::wstring cmd_line = GetCommandLineW();
+
+  STARTUPINFOW si{};
+  si.cb = sizeof(si);
+  PROCESS_INFORMATION pi = {};
+
+  std::wstring cmd_buffer = cmd_line;
+
+  bool ok = CreateProcessW(
+    path,
+    cmd_buffer.data(),
+    nullptr,
+    nullptr,
+    FALSE,
+    0,
+    nullptr,
+    nullptr,
+    &si,
+    &pi
+  );
+  if (ok) {
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+  }
+}
+
 bool get_nic_ip(string &ip, const string nic) {
 #ifdef _WIN32
   PIP_ADAPTER_INFO pAdapterInfo;
@@ -578,7 +607,11 @@ int main(int argc, char **argv) {
     context.terminate();
     if (reload) {
       cout << fg::yellow << "Restarting..." << fg::reset << endl;
+      #ifdef _WIN32
+      relaunch();
+      #else
       execv(Mads::exec_path().string().c_str(), argv);
+      #endif
     }
   }
   return 0;
