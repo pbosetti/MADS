@@ -258,6 +258,29 @@ static double timecode(const std::chrono::system_clock::time_point &now,
   return lt->tm_hour * 3600 + lt->tm_min * 60 + lt->tm_sec + ms / 1000.0;
 }
 
+static std::chrono::milliseconds tv_to_milliseconds(struct timeval &tv)
+{
+    using namespace std::chrono;
+
+    auto sec  = duration_cast<milliseconds>(seconds(tv.tv_sec));
+    auto usec = duration_cast<milliseconds>(microseconds(tv.tv_usec));
+    return sec + usec;
+}
+
+static void milliseconds_to_tv(std::chrono::milliseconds const &ms,
+                        struct timeval &tv)
+{
+    using namespace std::chrono;
+
+    auto sec  = duration_cast<seconds>(ms);
+    auto rem  = ms - duration_cast<milliseconds>(sec);
+
+    tv.tv_sec  = static_cast<time_t>(sec.count());
+    tv.tv_usec = static_cast<suseconds_t>(
+        duration_cast<microseconds>(rem).count()
+    );
+}
+
 /*
    ____ _
   / ___| | __ _ ___ ___  ___  ___

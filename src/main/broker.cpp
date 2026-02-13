@@ -17,7 +17,6 @@ Author(s): Paolo Bosetti
 #include <windows.h>
 #endif
 #include "../exec_path.hpp"
-#include "../keypress.hpp"
 #include "../mads.hpp"
 #include "../watcher.hpp"
 #include "../curve.hpp"
@@ -43,6 +42,7 @@ Author(s): Paolo Bosetti
 #include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <sys/ioctl.h>
+#include <termios.h>
 #endif
 
 
@@ -67,6 +67,37 @@ using namespace rang;
   \___/ \__|_|_|_|\__|\__, |
                       |___/
 */
+
+char getch(chrono::milliseconds const &ms = 500ms) {
+  struct timeval tv;
+  Mads::milliseconds_to_tv(ms, tv);
+  struct termios oldt, newt;
+  char ch;
+  fd_set readfds;
+  // struct timeval tv;
+
+  tcgetattr(STDIN_FILENO, &oldt);
+  newt = oldt;
+  newt.c_lflag &= ~(ICANON | ECHO);
+
+  tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+
+  // Set up file descriptor set for stdin
+  FD_ZERO(&readfds);
+  FD_SET(STDIN_FILENO, &readfds);
+
+  int select_result = select(STDIN_FILENO + 1, &readfds, NULL, NULL, &tv);
+
+  if (select_result > 0 && FD_ISSET(STDIN_FILENO, &readfds)) {
+    ch = getchar();
+  } else {
+    ch = '\0'; // timeout or error
+  }
+
+  tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+
+  return ch;
+}
 
 bool get_nic_ip(string &ip, const string nic) {
 #ifdef _WIN32
@@ -185,22 +216,6 @@ void proxy(zmqpp::socket &frontend, zmqpp::socket &backend,
   zmqpp::proxy_steerable(frontend, backend, ctrl);
 }
 
-void send_char(char c) {
-#ifdef _WIN32
-  INPUT ip;
-  ip.type = INPUT_KEYBOARD;
-  ip.ki.wScan = 0;
-  ip.ki.time = 0;
-  ip.ki.dwExtraInfo = 0;
-  ip.ki.wVk = c;
-  ip.ki.dwFlags = 0;
-  SendInput(1, &ip, sizeof(INPUT));
-  ip.ki.dwFlags = KEYEVENTF_KEYUP;
-  SendInput(1, &ip, sizeof(INPUT));
-#else
-  ioctl(0, TIOCSTI, &c);
-#endif
-}
 
 /*
   __  __       _
@@ -451,17 +466,17 @@ int main(int argc, char **argv) {
     zmqpp::proxy(frontend, backend);
     exit(EXIT_SUCCESS);
   }
-  thread watcher_thread;
+
   // Run as a daemon
   if (options_parsed.count("daemon") != 0) {
-    thread watcher_thread([&]() {
+    thread([&]() {
       Mads::Watcher watcher(settings_path);
       watcher.watch(&running, [&](const std::string &file_name) {
         cout << fg::yellow << "Settings file " << file_name
              << " has been modified, exiting..." << fg::reset << endl;
         raise(SIGUSR1);
       });
-    });
+    }).detach();
     cout << "Running as daemon with PID " << getpid()
          << ", will exit upon changes to " << settings_path << endl;
     zmqpp::proxy(frontend, backend);
@@ -485,17 +500,18 @@ int main(int argc, char **argv) {
 #ifndef _WIN32
     // to stop this thread on Q, need implementing
     // https://stackoverflow.com/questions/60718561/clean-way-to-stop-terminating-a-thread-waiting-on-stdin-in-c
-    watcher_thread = thread([&]() {
+    thread([&]() {
       Mads::Watcher watcher(settings_path, 1s);
       watcher.watch(&running, [&](const std::string &file_name) {
         cout << fg::yellow << "Settings file " << file_name
              << " has been modified, reloading..." << fg::reset << endl;
-        send_char('x');
+        reload = true;
+        running = false;
       });
-    });
+    }).detach();
 #endif
 
-    thread proxy_thread(proxy, ref(frontend), ref(backend), ref(controlled));
+    thread(proxy, ref(frontend), ref(backend), ref(controlled)).detach();
     cout << style::italic << "CTRL-C to immediate exit" << style::reset << endl;
 #ifdef _WIN32
     cout << fg::green
@@ -510,7 +526,8 @@ int main(int argc, char **argv) {
 
     while (running) {
       zmqpp::message msg;
-      char c = key_press();
+      char c = getch();
+      if (c == '\0') continue;
       switch (c) {
 #ifndef _WIN32
       // On Windows, the execv() function detaches from terminal and the
@@ -581,11 +598,7 @@ int main(int argc, char **argv) {
 
     cout << fg::green << "Closing sockets..." << fg::reset << endl;
     running = false;
-    proxy_thread.join();
     settings_thread.join();
-#ifndef _WIN32
-    watcher_thread.join();
-#endif
     controller.close();
     controlled.close();
     if (crypto) curve_auth_ptr = nullptr;
