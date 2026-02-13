@@ -605,7 +605,7 @@ public:
 
 
   double timecode_fps = MADS_FPS;
-  auth_verbose auth_verbose = auth_verbose::off;
+  Mads::auth_verbose auth_verbose = auth_verbose::off;
   string server_key_name = "broker";
   string client_key_name = "client";
 
