@@ -61,22 +61,12 @@ public:
 #endif
   }
 
-  static int getAnswer() {
-    std::string answer;
-    std::cin >> answer;
-    return 0;
-  }
 
-  void watch(bool *running,
-             const std::function<void(const std::string &)> &callback) {
-    while (file_modified() == 0) {
-      if (!*running) {
-        break;
-      }
+  void watch(const std::function<void(const std::string &)> &callback) {
+    while (true) {
+      if (file_modified()) callback(_file_name);
       std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
-    if (*running)
-      callback(_file_name);
   }
 
 private:

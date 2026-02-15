@@ -217,6 +217,15 @@ void proxy(zmqpp::socket &frontend, zmqpp::socket &backend,
   zmqpp::proxy_steerable(frontend, backend, ctrl);
 }
 
+std::string &read_settings_file(std::string const &settings_path) {
+  static std::string ini_table_content = "";
+  std::ifstream t(settings_path);
+  std::stringstream buffer;
+  buffer << t.rdbuf();
+  ini_table_content = buffer.str();
+  return ini_table_content;
+}
+
 
 /*
   __  __       _
@@ -248,7 +257,6 @@ int main(int argc, char **argv) {
       value<string>())
     ("s,settings", "Settings file path", value<string>())
     ("d,daemon", "Run as daemon")
-    ("docker", "Run as in container (don't check for file changes)")
     ("crypto", "Enable CURVE encryption (requires proper setup)", value<string>()->implicit_value("broker"))
     ("keys_dir", "Directory containing CURVE keypairs",
       value<string>()->implicit_value(keys_dir.string()))
@@ -378,6 +386,7 @@ int main(int argc, char **argv) {
          << endl;
     exit(EXIT_FAILURE);
   }
+  
   // Create Settings socket (Req/Rep)
   zmqpp::socket settings(context, zmqpp::socket_type::rep);
   if (crypto)
@@ -386,13 +395,11 @@ int main(int argc, char **argv) {
   settings.set(zmqpp::socket_option::receive_timeout, 1000);
   cout << "Binding broker shared settings (REP) at " << style::bold
        << settings_address << style::reset << endl;
+  string ini_table = read_settings_file(settings_path);
+  std::mutex ini_table_mutex;
   thread settings_thread([&]() {
-    zmqpp::message msg;
-    std::ifstream t(settings_path);
-    std::stringstream buffer;
-    buffer << t.rdbuf();
-    string ini_table = buffer.str();
     while (running) {
+      zmqpp::message msg;
       zmqpp::message content;
       content << LIB_VERSION;
       if (settings.receive(msg)) {
@@ -416,7 +423,10 @@ int main(int argc, char **argv) {
           } else {
             cout << "Sending settings to agent " << agent_name << " ("
                 << agent_version << ")" << endl;
-            content << ini_table;
+            {
+              std::lock_guard<std::mutex> lock(ini_table_mutex);
+              content << ini_table;
+            }
             string attachment_path = config[agent_name]["attachment"].value_or("");
             if (!attachment_path.empty()) {
               if (filesystem::path(attachment_path).is_relative()) {
@@ -459,29 +469,33 @@ int main(int argc, char **argv) {
   cout << "Settings are provided via " << style::bold << "tcp://" << ip << ":"
        << port << style::reset << endl;
 
+  thread([&]() {
+    Mads::Watcher watcher(settings_path, 1s);
+    string ini_tmp = "";
+    watcher.watch([&](const std::string &file_name) {
+      cout << fg::yellow << "Settings file " << file_name
+            << " has been modified, reloading..." << fg::reset << endl;
+      ini_tmp = read_settings_file(settings_path);
+      try {
+        auto i = toml::parse(ini_tmp);
+        {
+          std::lock_guard<std::mutex> lock(ini_table_mutex);
+          ini_table = ini_tmp;
+        }
+      } catch (const exception &e) {
+        cerr << fg::red << "INI file read error: " << e.what() 
+             << " - skipping changes" << fg::reset << endl;
+      }
+    });
+  }).detach();
+
 #ifndef _WIN32
-  if (options_parsed.count("docker") != 0) {
+  if (options_parsed.count("daemon") != 0) {
     cout << fg::yellow
-         << "Running in container mode, remember to restart if mads.ini changes"
-         << fg::reset << endl;
+         << "Running as daemon with PID " << getpid()
+         << ", will watch for changes to " << settings_path << endl;
     zmqpp::proxy(frontend, backend);
     exit(EXIT_SUCCESS);
-  }
-
-  // Run as a daemon
-  if (options_parsed.count("daemon") != 0) {
-    thread([&]() {
-      Mads::Watcher watcher(settings_path);
-      watcher.watch(&running, [&](const std::string &file_name) {
-        cout << fg::yellow << "Settings file " << file_name
-             << " has been modified, exiting..." << fg::reset << endl;
-        raise(SIGUSR1);
-      });
-    }).detach();
-    cout << "Running as daemon with PID " << getpid()
-         << ", will exit upon changes to " << settings_path << endl;
-    zmqpp::proxy(frontend, backend);
-    cerr << "Proxy exited" << endl;
   }
 #else
   if (options_parsed.count("daemon") != 0) {
@@ -497,20 +511,6 @@ int main(int argc, char **argv) {
     controlled.bind("inproc://broker-ctrl");
     zmqpp::socket controller(context, zmqpp::socket_type::req);
     controller.connect("inproc://broker-ctrl");
-
-#ifndef _WIN32
-    // to stop this thread on Q, need implementing
-    // https://stackoverflow.com/questions/60718561/clean-way-to-stop-terminating-a-thread-waiting-on-stdin-in-c
-    thread([&]() {
-      Mads::Watcher watcher(settings_path, 1s);
-      watcher.watch(&running, [&](const std::string &file_name) {
-        cout << fg::yellow << "Settings file " << file_name
-             << " has been modified, reloading..." << fg::reset << endl;
-        reload = true;
-        running = false;
-      });
-    }).detach();
-#endif
 
     thread(proxy, ref(frontend), ref(backend), ref(controlled)).detach();
     cout << style::italic << "CTRL-C to immediate exit" << style::reset << endl;
