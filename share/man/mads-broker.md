@@ -5,11 +5,15 @@
 
 # SYNOPSIS
 
-**mads-broker** [**\-n, \-\-nic**] [**\-s, \-\-settings** *arg*] [**\-d, \-\-daemon**] [**\-\-docker**] [**\-\-crypto[=arg]**] [**\-\-keys_dir[=arg]**] [**\-v, \-\-version**] [**\-h, \-\-help**]
+**mads-broker** [**\-n, \-\-nic**] [**\-s, \-\-settings** *arg*] [**\-d, \-\-daemon**] [**\-\-crypto[=arg]**] [**\-\-keys_dir[=arg]**] [**\-v, \-\-version**] [**\-h, \-\-help**]
 
 # DESCRIPTION
 
 **mads-broker** is the broker for the MADS network. It is a server that listens for incoming connections from sources and sinks and routes messages between them. It also provides a centralized INI file for configurating each agent/client.
+
+The broker will watch for changes to the INI file, automatically reload it, and provide updated settings to newly connecting agents. Agents already running will only update the settings upon relaunch.
+
+Note that if you change broker's settings in the INI file, then you want to also relaunch the broker itself.
 
 # OPTIONS
 
@@ -21,9 +25,6 @@
 
 **\-d**, **\-\-daemon**
 :  run the broker as a daemon. This suppress the output to the console upon launch and the interactive behavior.
-
-**\-\-docker**
-: use it when it runs within a docker container
 
 **\-\-crypto[=arg]**
 : enable CURVE cryptography. The optional argument sets the name of the keys to be used for encryption (default to `broker`).
