@@ -474,7 +474,7 @@ int main(int argc, char **argv) {
     string ini_tmp = "";
     watcher.watch([&](const std::string &file_name) {
       cout << fg::yellow << "Settings file " << file_name
-            << " has been modified, reloading..." << fg::reset << endl;
+            << " has been modified, reloading...";
       ini_tmp = read_settings_file(settings_path);
       try {
         auto i = toml::parse(ini_tmp);
@@ -482,8 +482,9 @@ int main(int argc, char **argv) {
           std::lock_guard<std::mutex> lock(ini_table_mutex);
           ini_table = ini_tmp;
         }
+        cout << " done." << fg::reset << endl;
       } catch (const exception &e) {
-        cerr << fg::red << "INI file read error: " << e.what() 
+        cerr << fg::red << " INI file read error: " << e.what() 
              << " - skipping changes" << fg::reset << endl;
       }
     });

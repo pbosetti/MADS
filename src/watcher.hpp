@@ -44,8 +44,13 @@ public:
 #elif defined(_WIN32)
     _to =
         std::chrono::duration_cast<std::chrono::milliseconds>(_timeout).count();
+    // Extract directory from file path for monitoring
+    fs::path file_path(_file_name);
+    std::string dir_path = file_path.parent_path().string();
+    if (dir_path.empty()) dir_path = ".";
     _change_handle = FindFirstChangeNotificationA(
-        _file_name.c_str(), FALSE, FILE_NOTIFY_CHANGE_LAST_WRITE);
+        dir_path.c_str(), FALSE, FILE_NOTIFY_CHANGE_LAST_WRITE);
+    _last_change_time = std::chrono::steady_clock::now() - std::chrono::seconds(1);
 #endif
   }
 
@@ -85,6 +90,7 @@ private:
 #elif defined(_WIN32)
   DWORD _to;
   HANDLE _change_handle;
+  std::chrono::steady_clock::time_point _last_change_time;
 #endif
 
   int file_modified() {
@@ -106,8 +112,17 @@ private:
       return kevent(_kq, &_change, 1, &_event, 1, NULL);
     }
 #elif defined(_WIN32)
+    // Debounce: only report a change if enough time has passed since the last one
+    auto now = std::chrono::steady_clock::now();
     if (WaitForSingleObject(_change_handle, _to > 0 ? _to : INFINITE) == WAIT_OBJECT_0) {
-      return 1;
+      if (now - _last_change_time > std::chrono::milliseconds(1000)) {
+        _last_change_time = now;
+        FindNextChangeNotification(_change_handle);  // Re-arm for next change
+        return 1;
+      } else {
+        FindNextChangeNotification(_change_handle);  // Re-arm for next change
+        return 0;  // Suppress duplicate
+      }
     } else {
       return 0;
     }
