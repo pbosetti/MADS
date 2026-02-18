@@ -31,8 +31,7 @@ public:
 
   string kind() override { return PLUGIN_NAME; }
 
-  return_type get_output(json &out,
-                         std::vector<unsigned char> *blob = nullptr) override {
+  return_type get_output(json &out, std::vector<unsigned char> *blob = nullptr) override {
     out.clear();
     string line;
     getline(cin, line);

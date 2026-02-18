@@ -355,163 +355,179 @@ int main(int argc, char *argv[]) {
 #if defined(PLUGIN_LOADER_SOURCE)
   json out, err;
   return_type rt;
-  agent.loop(
-      [&]() -> chrono::milliseconds {
-        vector<unsigned char> blob;
-        rt = plugin->get_output(out, &blob);
-        switch (rt) {
-        case return_type::warning:
-          try {
-            out["warning"] = {{"get_output", plugin->error()}};
-          } catch (...) {
-            cerr << fg::yellow << "Warning getting data: " << plugin->error()
-                 << " (could not add to output JSON)" << fg::reset << endl;
-          }
-          [[fallthrough]];
-        case return_type::success:
-          agent.publish(out);
-          if (blob.size() > 0) {
-            json meta{{"format", out_format}};
-            agent.publish(blob, meta);
-          }
-          break;
-        case return_type::retry:
-          return 0ms;
-        case return_type::error:
-          err = {{"error", {"get_output", plugin->error()}}};
-          agent.register_event(event_type::message, err);
-          count_err++;
-          break;
-        case return_type::critical:
-          // cerr << fg::red << "Critical error getting data: " << plugin->error()
-          //      << fg::reset << endl;
-          count_err++;
-          Mads::running = false;
-          throw std::runtime_error(string("Critical error in getting data: ") + plugin->error());
-          return 0ms;
-        }
+  vector<unsigned char> blob;
+  json meta;
+  agent.loop([&]() -> chrono::milliseconds {
+    rt = plugin->get_output(out, &blob);
+    switch (rt) {
+    case return_type::warning:
+      try {
+        out["warning"] = {{"get_output", plugin->error()}};
+      } catch (...) {
+        cerr << fg::yellow << "Warning getting data: " << plugin->error()
+              << " (could not add to output JSON)" << fg::reset << endl;
+      }
+      [[fallthrough]];
+    case return_type::success:
+      if (blob.size() > 0) {
+        if (out.contains("format"))
+          meta["format"] = out["format"];
+        else
+          meta["format"] = out_format;
+        agent.publish(blob, meta);
+      } else if (!out.empty()) {
+        agent.publish(out);
+      }
+      break;
+    case return_type::retry:
+      return 0ms;
+    case return_type::error:
+      err = {{"error", {"get_output", plugin->error()}}};
+      agent.register_event(event_type::message, err);
+      count_err++;
+      break;
+    case return_type::critical:
+      // cerr << fg::red << "Critical error getting data: " << plugin->error()
+      //      << fg::reset << endl;
+      count_err++;
+      Mads::running = false;
+      throw std::runtime_error(string("Critical error in getting data: ") + plugin->error());
+      return 0ms;
+    }
 
-        if (!silent) {
-          cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
-               << fg::reset << " total, " << fg::red << count_err << fg::reset
-               << " with errors ";
-          cerr.flush();
-        }
-        return plugin->next_loop_duration;
-      },
-      time);
+    if (!silent) {
+      cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
+            << fg::reset << " total, " << fg::red << count_err << fg::reset
+            << " with errors ";
+      cerr.flush();
+    }
+    return plugin->next_loop_duration;
+  }, time);
 
 #elif defined(PLUGIN_LOADER_FILTER)
   json in, out = {}, err;
   return_type rt;
   message_type type;
   tuple<string, string> msg;
-  agent.loop(
-      [&]() -> chrono::milliseconds {
-        err.clear();
-        try {
-          type = agent.receive(dont_block);
-        } catch (const AgentError &e) {
-          cerr << fg::red << "Error receiving message: " << e.what()
-               << fg::reset << endl;
-        }
-        // agent.remote_control();
-        if (agent.last_topic() == "control") {
-          return 0ms; // Control message, already handled
-        }
+  tuple<string, string, vector<unsigned char>> msg_blob;
+  vector<unsigned char> blob{};
+  agent.loop([&]() -> chrono::milliseconds {
+    err.clear();
+    try {
+      type = agent.receive(dont_block);
+    } catch (const AgentError &e) {
+      cerr << fg::red << "Error receiving message: " << e.what()
+            << fg::reset << endl;
+    }
+    
+    // loading data into plugin
+    if (type == message_type::json) {
+      // agent.remote_control();
+      if (agent.last_topic() == "control") {
+        return 0ms; // Control message, already handled
+      }
+      msg = agent.last_message();
+      in = json::parse(get<1>(msg));
+      rt = plugin->load_data(in, agent.last_topic());
+    } else if (type == message_type::blob) {
+      msg_blob = agent.last_blob();
+      in = json::parse(get<1>(msg_blob));
+      rt = plugin->load_data(in, agent.last_topic(), &get<2>(msg_blob));
+    } else {
+      goto process_output;
+    }
 
-        // loading data into plugin
-        if (type != message_type::none) {
-          msg = agent.last_message();
-          in = json::parse(get<1>(msg));
-          rt = plugin->load_data(in, agent.last_topic());
-        } else {
-          goto process_output;
-        }
-        if (type != message_type::json) {
-          return 0ms; // Not a JSON message
-        }
-        switch (rt) {
-        case return_type::warning:
-          err = {{"warning", {"load_data", plugin->error()}}};
-          agent.register_event(event_type::message, err);
-          [[fallthrough]];
-        case return_type::success:
-          break; // next step
-        case return_type::retry:
-          return 0ms; // next iteration
-        case return_type::error:
-          err = {{"error", {"load_data", plugin->error()}}};
-          agent.register_event(event_type::message, err);
-          count_err++;
-          goto status_line;
-        case return_type::critical:
-          cerr << fg::red << "Critical error loading data: " << plugin->error()
-               << fg::reset << endl;
-          err = {{"error", {"load_data", plugin->error()}}};
-          agent.register_event(event_type::message, err);
-          Mads::running = false;
-          return 0ms;
-        }
-        // processing data in the plugin
-      process_output:
-        rt = plugin->process(out);
-        if (!err.empty()) out.merge_patch(err);
-        switch (rt) {
-        case return_type::warning:
-          out["warning"] = {{"process", plugin->error()}};
-          [[fallthrough]];
-        case return_type::success:
-          break; // next step
-        case return_type::retry:
-          return 0ms; // next iteration
-        case return_type::error:
-          err = {{"error", {"process", plugin->error()}}};
-          agent.register_event(event_type::message, err);
-          count_err++;
-          goto status_line;
-        case return_type::critical:
-          cerr << fg::red
-               << "Critical error processing data: " << plugin->error()
-               << fg::reset << endl;
-          err = {{"error", {"process", plugin->error()}}};
-          agent.register_event(event_type::message, err);
-          Mads::running = false;
-          return 0ms;
-        }
-        // publishing data
-        agent.publish(out);
-      status_line:
-        if (!silent) {
-          cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
-               << fg::reset << " total, " << fg::red << count_err << fg::reset
-               << " with errors ";
-          cerr.flush();
-        }
-        return plugin->next_loop_duration;
-      },
-      time);
+    switch (rt) {
+    case return_type::warning:
+      err = {{"warning", {"load_data", plugin->error()}}};
+      agent.register_event(event_type::message, err);
+      [[fallthrough]];
+    case return_type::success:
+      break; // next step
+    case return_type::retry:
+      return 0ms; // next iteration
+    case return_type::error:
+      err = {{"error", {"load_data", plugin->error()}}};
+      agent.register_event(event_type::message, err);
+      count_err++;
+      goto status_line;
+    case return_type::critical:
+      cerr << fg::red << "Critical error loading data: " << plugin->error()
+            << fg::reset << endl;
+      err = {{"error", {"load_data", plugin->error()}}};
+      agent.register_event(event_type::message, err);
+      Mads::running = false;
+      return 0ms;
+    }
+    // processing data in the plugin
+  process_output:
+    rt = plugin->process(out, &blob);
+    if (!err.empty()) out.merge_patch(err);
+    switch (rt) {
+    case return_type::warning:
+      out["warning"] = {{"process", plugin->error()}};
+      [[fallthrough]];
+    case return_type::success:
+      break; // next step
+    case return_type::retry:
+      return 0ms; // next iteration
+    case return_type::error:
+      err = {{"error", {"process", plugin->error()}}};
+      agent.register_event(event_type::message, err);
+      count_err++;
+      goto status_line;
+    case return_type::critical:
+      cerr << fg::red
+            << "Critical error processing data: " << plugin->error()
+            << fg::reset << endl;
+      err = {{"error", {"process", plugin->error()}}};
+      agent.register_event(event_type::message, err);
+      Mads::running = false;
+      return 0ms;
+    }
+    // publishing data
+    if (blob.empty()) {
+      agent.publish(blob, out);
+    } else {
+      agent.publish(out);
+    }
+  status_line:
+    if (!silent) {
+      cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
+            << fg::reset << " total, " << fg::red << count_err << fg::reset
+            << " with errors ";
+      cerr.flush();
+    }
+    return plugin->next_loop_duration;
+  }, time);
 #elif defined(PLUGIN_LOADER_SINK)
   message_type type;
   json in, err;
   return_type rt;
+  tuple<string, string> msg;
+  tuple<string, string, vector<unsigned char>> msg_blob;
   agent.loop([&]() -> chrono::milliseconds {
     try {
       type = agent.receive();
     } catch (const AgentError &e) {
-      cerr << fg::red << "Error receiving message: " << e.what() << fg::reset
-           << endl;
+      std::cerr << fg::red << "Error receiving message: " << e.what() 
+                << fg::reset << endl;
     }
-    auto msg = agent.last_message();
-    // agent.remote_control();
-    if (agent.last_topic() == "control") {
-      return 0ms; // Control message, already handled
-    }
-    if (type != message_type::json) {
+    if (type == message_type::none) {
       return 0ms; // No message received
+    } else if (type == message_type::blob) {
+      msg_blob = agent.last_blob();
+      in = json::parse(get<1>(msg_blob));
+      rt = plugin->load_data(in, agent.last_topic(), &get<2>(msg_blob));
+    } else {
+      msg = agent.last_message();
+      // agent.remote_control();
+      if (agent.last_topic() == "control") {
+        return 0ms; // Control message, already handled
+      }
+      in = json::parse(get<1>(msg));
+      rt = plugin->load_data(in, agent.last_topic());
     }
-    in = json::parse(get<1>(msg));
-    rt = plugin->load_data(in, agent.last_topic());
     switch (rt) {
     case return_type::warning:
       cerr << fg::yellow << "Warning loading data: " << plugin->error()

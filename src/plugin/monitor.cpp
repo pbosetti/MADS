@@ -75,7 +75,7 @@ public:
   string kind() override { return PLUGIN_NAME; }
 
   // Implement the actual functionality here
-  return_type load_data(json const &input, string topic = "") override {
+  return_type load_data(json const &input, string topic = "", vector<unsigned char> const *blob = nullptr) override {
     string id = topic + "/" + input.value("agent_id", "-");
 
     if (topic == "agent_event")

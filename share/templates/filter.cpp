@@ -42,7 +42,7 @@ public:
   // return_type::warning: content of _error is tracked with register_event
   // return_type::error: _error is traced, skip process
   // return_type::critical: execution stops
-  return_type load_data(json const &input, string topic = "") override {
+  return_type load_data(json const &input, string topic = "", vector<unsigned char> const *blob = nullptr) override {
     // Do something with the input data
     return return_type::success;
   }
@@ -55,7 +55,7 @@ public:
   // return_type::warning: content of _error is added to result befor publishing
   // return_type::error: _error is traced via register_event, don't publish
   // return_type::critical: execution stops
-  return_type process(json &out) override {
+  return_type process(json &out, vector<unsigned char> *blob = nullptr) override {
     out.clear();
 
     // load the data as necessary and set the fields of the json out variable

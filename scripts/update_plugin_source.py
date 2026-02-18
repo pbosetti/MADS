@@ -12,8 +12,11 @@ Uses a global dictionary of replacements.
 CppReplacements = {
   '.set_params(&params)': '.set_params(params)',
   'void set_params(void const *params) override': 'void set_params(const json &params) override',
-  '_params.merge_patch(*(json *)params)': '_params.merge_patch(params)'
-  # Add more replacements as needed
+  '_params.merge_patch(*(json *)params)': '_params.merge_patch(params)',
+  'return_type load_data(json const &input, string topic = "")': 'return_type load_data(json const &input, string topic = "", vector<unsigned char> const *blob = nullptr)',
+  'return_type process(json &out)': 'return_type process(json &out, vector<unsigned char> *blob = nullptr)',
+  'return_type load_data(json const &input, string topic)': 'return_type load_data(json const &input, string topic, vector<unsigned char> const *blob = nullptr)',
+  'return_type get_output(json &out)': 'return_type get_output(json &out, std::vector<unsigned char> *blob = nullptr)'
 }
 
 def replace_in_file(file_path: str) -> None:

@@ -32,7 +32,7 @@ public:
 
   string kind() override { return PLUGIN_NAME; }
 
-  return_type load_data(json const &input, string topic) override {
+  return_type load_data(json const &input, string topic, vector<unsigned char> const *blob = nullptr) override {
     json out;
     if (!topic.empty())
       out["topic"] = topic;
@@ -41,7 +41,7 @@ public:
     return return_type::success;
   }
 
-  return_type process(json &out) override {
+  return_type process(json &out, vector<unsigned char> *blob = nullptr) override {
     out.clear();
     string line;
     getline(cin, line);
