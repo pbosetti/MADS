@@ -21,6 +21,7 @@
 #include <pugg/Kernel.h>
 #include <rang.hpp>
 #include <sink.hpp>
+#include "../goback.hpp"
 
 #define ESC "\x1B"
 
@@ -79,7 +80,8 @@ public:
 
     if (topic == "agent_event")
       return return_type::retry;
-    cout << ESC "[1J" ESC "[H" << style::bold << "Seen " << _timings.size()
+    cout << Mads::goback(_timings.size() + 2) << style::bold 
+         << "Seen " << _timings.size()
          << " agents:" << endl
          << setw(_col_widths[0]) << "host" << style::reset << " | "
          << style::bold << setw(_col_widths[1]) << "topic" << style::reset
