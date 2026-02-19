@@ -441,9 +441,11 @@ inline bool Agent::receive_raw(message &message, bool dont_block) {
   // behaves as blocking
   if (_last_value_only) {
     std::unique_lock<std::mutex> lock(_latest_message.mtx);
-    _latest_message.cv.wait(lock, [&]() -> bool {
-      return true;
-    });
+    // TODO: check why the overload with predicate takes 100% CPU
+    // _latest_message.cv.wait(lock, [&]() -> bool {
+    //   return true;
+    // });
+    _latest_message.cv.wait(lock);
     if (_latest_message.value.has_value()) {
       message = _latest_message.value.value().copy();
       _latest_message.value.reset();

@@ -104,7 +104,6 @@ int main(int argc, char *argv[]) {
     cerr << fg::yellow << "Running in non-blocking mode" << fg::reset << endl;
   }
   */
-  dont_block = params.value("dont-block", false);
   dont_block = params.value("dont_block", dont_block);
   if (!params["dont-block"].is_null()) {
     cerr << fg::yellow
@@ -147,6 +146,8 @@ int main(int argc, char *argv[]) {
       cout << fg::yellow << "Received BLOB message" << fg::reset << endl;
       break;
     case message_type::none:
+      // cout << ".";
+      // flush(cout);
       break;
     default:
       cout << fg::red << "Received unknown message type" << fg::reset << endl;

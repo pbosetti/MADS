@@ -41,7 +41,7 @@ Author(s): Paolo Bosetti
 #error "No plugin type defined"
 #endif
 
-#define MADS_PLUGIN_MIN_PROTOCOL 6
+#define MADS_PLUGIN_MIN_PROTOCOL 7
 
 using namespace std;
 using namespace cxxopts;
