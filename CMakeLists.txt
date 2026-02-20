@@ -473,6 +473,8 @@ install(DIRECTORY
 )
 if(WIN32)
   file(GLOB STATIC_LIBS "${USR_DIR}/lib/*.lib")
+  file(GLOB SHARED_LIBS "${USR_DIR}/bin/*.dll")
+  install(FILES ${SHARED_LIBS} TYPE BIN)
 else()
   file(GLOB STATIC_LIBS "${USR_DIR}/lib/*.a")
 endif()
