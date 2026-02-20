@@ -42,8 +42,7 @@ public:
   // return_type::warning: content of _error is added to result befor publishing
   // return_type::error: the result only has a copy of _error
   // return_type::critical: execution stops
-  return_type get_output(json &out,
-                         std::vector<unsigned char> *blob = nullptr) override {
+  return_type get_output(json &out, vector<unsigned char> *blob = nullptr) override {
     out.clear();
 
     // load the data as necessary and set the fields of the json out variable
