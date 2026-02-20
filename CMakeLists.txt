@@ -85,6 +85,7 @@ option(MADS_SKIP_EXTERNALS
        "Skip external targets (assume already compiled)" OFF)
 option(MADS_MINIMAL "Only compile filter and source executables" OFF)
 option(MADS_BUILD_TESTS "Build test programs" OFF)
+option(MADS_DIRECTOR "Also build the director app (requires graphical interface)" OFF)
 
 #  __     __             
 #  \ \   / /_ _ _ __ ___ 
@@ -222,14 +223,17 @@ set(ZMQPP_BUILD_CLIENT OFF CACHE BOOL "" FORCE)
 set(ZMQPP_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(ZMQPP_BUILD_STATIC ON CACHE BOOL "" FORCE)
 
-FetchContent_Declare(mads-director
-  GIT_REPOSITORY https://github.com/mads-net/mads_director.git
-  GIT_TAG HEAD
-  GIT_SHALLOW TRUE
-)
+if(MADS_DIRECTOR)
+  FetchContent_Declare(mads-director
+    GIT_REPOSITORY https://github.com/mads-net/mads_director.git
+    GIT_TAG HEAD
+    GIT_SHALLOW TRUE
+  )
+  FetchContent_MakeAvailable(mads-director)
+endif()
 
 FetchContent_MakeAvailable(
-  tomlplusplus nlohmann_json cxxopts rang pugg zmqpp mads-director
+  tomlplusplus nlohmann_json cxxopts rang pugg zmqpp
 )
 
 FetchContent_Populate(plugin 
