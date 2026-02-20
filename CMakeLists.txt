@@ -222,11 +222,19 @@ set(ZMQPP_BUILD_CLIENT OFF CACHE BOOL "" FORCE)
 set(ZMQPP_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(ZMQPP_BUILD_STATIC ON CACHE BOOL "" FORCE)
 
-FetchContent_MakeAvailable(tomlplusplus nlohmann_json cxxopts rang pugg zmqpp)
+FetchContent_Declare(mads-director
+  GIT_REPOSITORY https://github.com/mads-net/mads_director.git
+  GIT_TAG HEAD
+  GIT_SHALLOW TRUE
+)
+
+FetchContent_MakeAvailable(
+  tomlplusplus nlohmann_json cxxopts rang pugg zmqpp mads-director
+)
 
 FetchContent_Populate(plugin 
   GIT_REPOSITORY https://github.com/pbosetti/mads_plugin.git
-  GIT_TAG        v2.0-P6
+  GIT_TAG        v2.0-P7
   GIT_SHALLOW    TRUE
   SUBBUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/_deps/plugin-subbuild
   SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/_deps/plugin-src
@@ -436,6 +444,7 @@ message(STATUS "Targets: ${TARGET_LIST}")
 #   | || | | \__ \ || (_| | | |
 #  |___|_| |_|___/\__\__,_|_|_|
 #
+
 
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
   set_property(CACHE CMAKE_INSTALL_PREFIX PROPERTY VALUE ${USR_DIR})
