@@ -216,7 +216,7 @@ size_t agent_high_watermark(agent_t agent) {
 }
 
 
-int agent_publish(agent_t agent, const char *topic, const char *message) {
+int agent_publish(agent_t agent, const char *message, const char *topic) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
   nlohmann::json j;
   try {

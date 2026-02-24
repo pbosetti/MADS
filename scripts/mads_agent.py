@@ -271,12 +271,12 @@ class Agent:
         return lib.agent_high_watermark(self._agent)
     
     # Messaging methods
-    def publish(self, topic: str, message: dict) -> int:
+    def publish(self, message: dict, topic: str = "") -> int:
         """Publish a message to a topic."""
         return lib.agent_publish(
             self._agent,
-            topic.encode('utf-8'),
-            json.dumps(message).encode('utf-8')
+            json.dumps(message).encode('utf-8'),
+            topic.encode('utf-8')
         )
     
     def receive(self, dont_block: bool = False) -> MessageType:
