@@ -120,7 +120,7 @@ MADS_EXPORT void agent_set_high_watermark(agent_t agent, size_t n);
 MADS_EXPORT size_t agent_high_watermark(agent_t agent);
 
 // Messaging
-MADS_EXPORT int agent_publish(agent_t agent, const char *topic, const char *message);
+MADS_EXPORT int agent_publish(agent_t agent, const char *message, const char *topic);
 MADS_EXPORT message_type_t agent_receive(agent_t agent, bool dont_block);
 MADS_EXPORT void agent_last_message(agent_t agent, char **topic, char **message);
 
