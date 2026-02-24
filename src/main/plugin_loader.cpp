@@ -11,10 +11,8 @@ Actual work is done by the plugins, this executable is just a wrapper.
 Author(s): Paolo Bosetti
 */
 #include "../agent.hpp"
-#include "../execution_time_window_stats.hpp"
 #include "../exec_path.hpp"
 #include "../mads.hpp"
-#include <csignal>
 #include <cxxopts.hpp>
 #include <filesystem>
 #include <pugg/Kernel.h>
@@ -69,29 +67,6 @@ using PluginDriver = SinkDriver<json>;
 
 using namespace std;
 using json = nlohmann::json;
-
-namespace {
-
-#ifndef _WIN32
-volatile std::sig_atomic_t g_print_timing_stats = 0;
-
-void handle_siginfo(int) { g_print_timing_stats = 1; }
-#endif
-
-class LoopTimingScope {
-public:
-  explicit LoopTimingScope(Mads::ExecutionTimeWindowStats &stats)
-      : _stats(stats) {
-    _stats.tic();
-  }
-
-  ~LoopTimingScope() { _stats.toc(); }
-
-private:
-  Mads::ExecutionTimeWindowStats &_stats;
-};
-
-} // namespace
 
 json str_to_num(const string &s) {
   string str = s;
@@ -149,7 +124,6 @@ int main(int argc, char *argv[]) {
   size_t count = 0, count_err = 0;
   size_t delay = 0;
   chrono::milliseconds time{0};
-  ExecutionTimeWindowStats loop_timing_stats(20);
   bool crypto = false;
   filesystem::path key_dir(Mads::exec_dir() + "/../etc");
   string client_key_name = "client";
@@ -284,27 +258,6 @@ int main(int argc, char *argv[]) {
   }
   agent.connect();
 
-#ifndef _WIN32
-#ifdef SIGINFO
-  std::signal(SIGINFO, handle_siginfo);
-#endif
-#endif
-
-  auto print_timing_stats_if_requested = [&]() {
-#ifndef _WIN32
-#ifdef SIGINFO
-    if (g_print_timing_stats != 0) {
-      g_print_timing_stats = 0;
-      cerr << "\n[Timing] avg=" << fixed << setprecision(3)
-           << loop_timing_stats.average_ms() << " ms, stddev="
-           << loop_timing_stats.stddev_ms() << " ms (n="
-           << loop_timing_stats.size() << ", window="
-           << loop_timing_stats.window_width() << ")\n";
-    }
-#endif
-#endif
-  };
-
 #if defined(PLUGIN_LOADER_FILTER) || defined(PLUGIN_LOADER_SINK)
   bool dont_block = settings.value("dont-block", false);
   dont_block = settings.value("dont_block", dont_block);
@@ -405,8 +358,6 @@ int main(int argc, char *argv[]) {
   vector<unsigned char> blob;
   json meta;
   agent.loop([&]() -> chrono::milliseconds {
-    LoopTimingScope timing_scope(loop_timing_stats);
-    print_timing_stats_if_requested();
     rt = plugin->get_output(out, &blob);
     switch (rt) {
     case return_type::warning:
@@ -461,8 +412,6 @@ int main(int argc, char *argv[]) {
   tuple<string, string, vector<unsigned char>> msg_blob;
   vector<unsigned char> blob{};
   agent.loop([&]() -> chrono::milliseconds {
-    LoopTimingScope timing_scope(loop_timing_stats);
-    print_timing_stats_if_requested();
     err.clear();
     try {
       type = agent.receive(dont_block);
@@ -558,8 +507,6 @@ int main(int argc, char *argv[]) {
   tuple<string, string> msg;
   tuple<string, string, vector<unsigned char>> msg_blob;
   agent.loop([&]() -> chrono::milliseconds {
-    LoopTimingScope timing_scope(loop_timing_stats);
-    print_timing_stats_if_requested();
     try {
       type = agent.receive();
     } catch (const AgentError &e) {
