@@ -274,9 +274,9 @@ add_vendor(nlohmann_json)
 add_vendor(cxxopts)
 add_vendor(rang)
 add_vendor(tomlplusplus)
+add_vendor(libzmq)
 add_vendor_exclude_from_all(pugg)
 add_vendor_exclude_from_all(libsodium)
-add_vendor_exclude_from_all(libzmq)
 add_vendor_exclude_from_all(inja)
 add_vendor_exclude_from_all(snappy)
 
@@ -293,6 +293,26 @@ set(CMAKE_POLICY_DEFAULT_CMP0079 NEW)
 # zmqpp unconditionally searches for zmq.h; point it to fetched libzmq headers.
 set(ZEROMQ_INCLUDE_DIR "${libzmq_SOURCE_DIR}/include" CACHE PATH "" FORCE)
 add_vendor_exclude_from_all(zmqpp)
+if(EXISTS "${zmqpp_SOURCE_DIR}/src/zmqpp")
+  install(
+    DIRECTORY "${zmqpp_SOURCE_DIR}/src/zmqpp/"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/zmqpp"
+    COMPONENT MadsCore
+    FILES_MATCHING
+      PATTERN "*.h"
+      PATTERN "*.hh"
+      PATTERN "*.hpp"
+      PATTERN "*.hxx"
+      PATTERN "*.inc"
+  )
+endif()
+if(EXISTS "${zmqpp_BINARY_DIR}/zmqpp_export.h")
+  install(
+    FILES "${zmqpp_BINARY_DIR}/zmqpp_export.h"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/zmqpp"
+    COMPONENT MadsCore
+  )
+endif()
 if(MSVC)
   # zmqpp expects SOCKET to be available on Windows.
   if(TARGET zmqpp-static)
