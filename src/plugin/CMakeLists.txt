@@ -6,28 +6,34 @@
 #                 |___/             
 # Default plugins for Source, filter and sink agents
 
+if(MSVC)
+
+else()
+  add_compile_options(-Wno-unused-parameter)
+endif()
+
 # Source plugin
 add_library(publish SHARED ${SOURCE_DIR}/plugin/source_default.cpp)
 set_target_properties(publish PROPERTIES PREFIX "" SUFFIX ".plugin")
-target_link_libraries(publish pugg)
+target_link_libraries(publish PRIVATE MadsCore pugg rang)
 list(APPEND TARGET_LIST publish)
 
 # Filter plugin
 add_library(bridge SHARED ${SOURCE_DIR}/plugin/filter_default.cpp)
 set_target_properties(bridge PROPERTIES PREFIX "" SUFFIX ".plugin")
-target_link_libraries(bridge pugg)
+target_link_libraries(bridge PRIVATE MadsCore pugg rang)
 list(APPEND TARGET_LIST bridge)
 
 # Sink plugin
 add_library(feedback SHARED ${SOURCE_DIR}/plugin/sink_default.cpp)
 set_target_properties(feedback PROPERTIES PREFIX "" SUFFIX ".plugin")
-target_link_libraries(feedback pugg)
+target_link_libraries(feedback PRIVATE MadsCore pugg rang)
 list(APPEND TARGET_LIST feedback)
 
 # Monitor plugin
 add_library(monitor SHARED ${SOURCE_DIR}/plugin/monitor.cpp)
 set_target_properties(monitor PROPERTIES PREFIX "" SUFFIX ".plugin")
-target_link_libraries(monitor pugg)
+target_link_libraries(monitor PRIVATE MadsCore pugg rang)
 list(APPEND TARGET_LIST monitor)
 
 # Install plugins
@@ -36,4 +42,5 @@ install(TARGETS ${TARGET_LIST}
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
   ARCHIVE DESTINATION lib
+  COMPONENT MadsApps
 )

@@ -35,6 +35,7 @@ public:
   string kind() override { return PLUGIN_NAME; }
 
   return_type load_data(json const &input, string topic = "", vector<unsigned char> const *blob = nullptr) override {
+    (void)blob;
     if (topic == "logger_status") {
       return return_type::retry;
     }

@@ -24,6 +24,7 @@ Author(s): Paolo Bosetti
 #include <sstream>
 #include <string>
 
+
 /*
   ____        __ _
  |  _ \  ___ / _(_)_ __   ___  ___
@@ -37,7 +38,7 @@ Author(s): Paolo Bosetti
 #define LIB_VERSION "v@LIB_VERSION@"
 #define LIB_VERSION_CHECK "v@LIB_VERSION_CHECK@"
 #define LIB_GIT_TAG "@GIT_TAG@"
-#define MADS_PREFIX "@PREFIX@"
+#define MADS_PREFIX "@PREFIX@-"
 
 #define LOGGER_STATUS_TOPIC "logger_status"
 
@@ -77,6 +78,7 @@ Author(s): Paolo Bosetti
 #else
 #define THIS_EXEC_DIR fs::path(argv[0]).parent_path()
 #endif
+
 
 // Used for common CLI options in agent executables
 // clang-format off
@@ -227,14 +229,15 @@ inline std::string event_name(event_type type) { return event_map.at(type); }
 static std::string
 get_ISODate_time(const std::chrono::system_clock::time_point &time,
                  int32_t offset = 0) {
-  time_t tt = std::chrono::system_clock::to_time_t(time);
+  const auto adjusted_time = time + std::chrono::milliseconds(offset);
+  const auto truncated_time =
+      std::chrono::floor<std::chrono::seconds>(adjusted_time);
+  time_t tt = std::chrono::system_clock::to_time_t(truncated_time);
   tm *tt2 = localtime(&tt);
   std::stringstream ss;
 
-  // Get milliseconds hack
-  auto timeTruncated = std::chrono::system_clock::from_time_t(tt);
   long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                     time - timeTruncated)
+                     adjusted_time - truncated_time)
                      .count();
 
   ss << std::put_time(tt2, "%FT%T")                    // "2023-03-30T19:49:53"
@@ -252,7 +255,7 @@ static double timecode(const std::chrono::system_clock::time_point &now,
   auto tt = std::chrono::system_clock::from_time_t(now_c);
   long long ms =
       std::chrono::duration_cast<std::chrono::milliseconds>(now - tt).count();
-  ms = floor(ms / fct) * fct; // Round to the nearest 25ms
+  ms = static_cast<long long>(floor(ms / fct) * fct); // Round to the nearest 25ms
 
   return lt->tm_hour * 3600 + lt->tm_min * 60 + lt->tm_sec + ms / 1000.0;
 }

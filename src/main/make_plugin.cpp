@@ -15,6 +15,11 @@ Plugin maker: creates stub files for developing a new MADS plugin
 #include <rang.hpp>
 #include "../exec_path.hpp"
 #include "../mads.hpp"
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 using namespace std;
 using namespace inja;
@@ -174,7 +179,14 @@ int main(int argc, char **argv) {
   data["today"] = Mads::get_ISODate_time(chrono::system_clock::now());
   data["cwd"] = filesystem::current_path().string();
   char hostname[HOST_NAME_MAX] = "unknown";
-  if (gethostname(hostname, HOST_NAME_MAX)) {
+  bool got_hostname = false;
+#ifdef _WIN32
+  DWORD hostname_len = HOST_NAME_MAX;
+  got_hostname = GetComputerNameA(hostname, &hostname_len) != 0;
+#else
+  got_hostname = gethostname(hostname, HOST_NAME_MAX) == 0;
+#endif
+  if (!got_hostname) {
     data["hostname"] = "unknown";
   } else {
     data["hostname"] = hostname;

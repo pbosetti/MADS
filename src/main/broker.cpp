@@ -13,7 +13,11 @@ Author(s): Paolo Bosetti
 */
 // clang-format off
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
 #include <windows.h>
 #endif
 #include "../exec_path.hpp"
@@ -36,7 +40,6 @@ Author(s): Paolo Bosetti
 #include <zmqpp/proxy_steerable.hpp>
 #include <zmqpp/zmqpp.hpp>
 #ifdef _WIN32
-#include <WinSock2.h>
 #include <iphlpapi.h>
 #include <signal.h>
 #else
@@ -317,7 +320,7 @@ int main(int argc, char **argv) {
     crypto = true;
   }
 
-  double timecode_fps = config["agents"]["timecode_fps"].value_or(MADS_FPS);
+  unsigned int timecode_fps = config["agents"]["timecode_fps"].value_or(MADS_FPS);
 
   string frontend_address, backend_address, settings_address;
   frontend_address = config[name]["frontend_address"].value_or(BROKER_FRONTEND);

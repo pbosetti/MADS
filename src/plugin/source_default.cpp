@@ -33,6 +33,7 @@ public:
 
   return_type get_output(json &out, std::vector<unsigned char> *blob = nullptr) override {
     out.clear();
+    (void)blob;
     string line;
     getline(cin, line);
     try{

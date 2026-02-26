@@ -104,7 +104,7 @@ MADS_EXPORT int agent_register_event(agent_t agent, event_type_t event,
 MADS_EXPORT int agent_disconnect(agent_t agent);
 MADS_EXPORT void agent_set_receive_timeout(agent_t agent, int timeout);
 MADS_EXPORT int agent_receive_timeout(agent_t agent);
-MADS_EXPORT const char *agent_last_error(agent_t agent);
+MADS_EXPORT const char *agent_last_error();
 
 // Settings
 MADS_EXPORT const char *agent_get_settings(agent_t agent, int n);
@@ -116,8 +116,8 @@ MADS_EXPORT double agent_setting_dbl(agent_t agent, const char *key);
 MADS_EXPORT const char *agent_setting_str(agent_t agent, const char *key);
 MADS_EXPORT void agent_print_settings(agent_t agent, int tab);
 MADS_EXPORT const char *agent_settings_uri(agent_t agent);
-MADS_EXPORT void agent_set_high_watermark(agent_t agent, size_t n);
-MADS_EXPORT size_t agent_high_watermark(agent_t agent);
+MADS_EXPORT void agent_set_high_watermark(agent_t agent, int n);
+MADS_EXPORT int agent_high_watermark(agent_t agent);
 
 // Messaging
 MADS_EXPORT int agent_publish(agent_t agent, const char *message, const char *topic);

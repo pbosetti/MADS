@@ -167,7 +167,9 @@ int main(int argc, char *argv[]) {
     json payload = agent.pull();
     return_type rt;
     if (payload.empty() && !Mads::running) return 0ms;
-    message_type type = agent.receive();
+    // TODO: verify if we need to check return type
+    // message_type type = agent.receive();
+    agent.receive();
     // agent.remote_control();
     json out;
     rt = filter->load_data(payload, agent.last_topic());

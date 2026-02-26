@@ -4,7 +4,7 @@
 namespace Mads {
 
 HttpsClient::HttpsClient()
-    : _hostname(""), _path(""), _user_agent("") {}
+    : _hostname(""), _user_agent(""), _path("") {}
 
 HttpsClient::~HttpsClient() = default;
 

@@ -33,7 +33,7 @@ try:
         sys.stderr.write(f"Loading MADS lib from {MADS_LIB_PATH}\n")
     else:
         mads_prefix = subprocess.check_output(["mads", "-p"], text=True).strip()
-        MADS_LIB_PATH = os.path.join(mads_prefix, lib_folder, f"{lib_prefix}mads-lib{lib_ext}")
+        MADS_LIB_PATH = os.path.join(mads_prefix, lib_folder, f"{lib_prefix}MadsCore{lib_ext}")
         sys.stderr.write(f"Loading MADS lib from default {MADS_LIB_PATH}\n")
 except (FileNotFoundError, subprocess.CalledProcessError):
     sys.stderr.write("Cannot find MADS shared library. Is MADS installed?\n")

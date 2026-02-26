@@ -15,6 +15,15 @@ Author: Paolo Bosetti, July 2024
 #include "../agent.hpp"
 #include "../exec_path.hpp"
 #include "../https_client.hpp"
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#endif
 #include <cxxopts.hpp>
 #include <filesystem>
 #include <inja/inja.hpp>
@@ -55,6 +64,85 @@ namespace fs = std::filesystem;
 bool includes(vector<string> const &commands, string const &command) {
   return find(commands.begin(), commands.end(), command) != commands.end();
 }
+
+#ifdef _WIN32
+static std::wstring utf8_to_wide(const std::string &str) {
+  if (str.empty()) return std::wstring();
+  int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, nullptr, 0);
+  if (size <= 0) return std::wstring();
+  std::wstring out(static_cast<size_t>(size) - 1, L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, out.data(), size);
+  return out;
+}
+
+static std::wstring quote_win_arg(const std::wstring &arg) {
+  if (arg.find_first_of(L" \t\"") == std::wstring::npos) return arg;
+
+  std::wstring out = L"\"";
+  size_t backslashes = 0;
+  for (wchar_t c : arg) {
+    if (c == L'\\') {
+      backslashes++;
+      continue;
+    }
+    if (c == L'"') {
+      out.append(backslashes * 2 + 1, L'\\');
+      out.push_back(L'"');
+      backslashes = 0;
+      continue;
+    }
+    if (backslashes > 0) {
+      out.append(backslashes, L'\\');
+      backslashes = 0;
+    }
+    out.push_back(c);
+  }
+  if (backslashes > 0) out.append(backslashes * 2, L'\\');
+  out.push_back(L'"');
+  return out;
+}
+
+static int run_windows_subcommand(const std::string &exec_dir, int argc, char **argv) {
+  fs::path exe_path = fs::path(exec_dir) / (std::string(MADS_PREFIX) + argv[1]);
+  if (!fs::exists(exe_path)) {
+    fs::path with_ext = exe_path;
+    with_ext += ".exe";
+    if (fs::exists(with_ext)) exe_path = with_ext;
+  }
+
+  std::wstring exe_w = utf8_to_wide(exe_path.string());
+  std::wstring cmd_line = quote_win_arg(exe_w);
+  for (int i = 2; i < argc; ++i) {
+    cmd_line.push_back(L' ');
+    cmd_line += quote_win_arg(utf8_to_wide(argv[i]));
+  }
+
+  STARTUPINFOW si{};
+  si.cb = sizeof(si);
+  si.dwFlags = STARTF_USESTDHANDLES;
+  si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+  si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+  si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+  PROCESS_INFORMATION pi{};
+
+  std::wstring mutable_cmd_line = cmd_line;
+  BOOL ok = CreateProcessW(exe_w.c_str(), mutable_cmd_line.data(), nullptr,
+                           nullptr, TRUE, 0, nullptr, nullptr, &si, &pi);
+  if (!ok) {
+    cerr << fg::red << "Error: cannot execute subcommand '" << exe_path.string()
+         << "' on Windows (CreateProcessW failed with error " << GetLastError()
+         << ")." << fg::reset << endl;
+    return -1;
+  }
+
+  WaitForSingleObject(pi.hProcess, INFINITE);
+  DWORD exit_code = 1;
+  GetExitCodeProcess(pi.hProcess, &exit_code);
+  CloseHandle(pi.hThread);
+  CloseHandle(pi.hProcess);
+  return static_cast<int>(exit_code);
+}
+#endif
 
 bool save_keypair(pair<string, string> &key_files, const string &path, const string &name, bool force=false) {
   zmqpp::curve::keypair keypair = zmqpp::curve::generate_keypair();
@@ -265,7 +353,7 @@ void describe_release(const json &release) {
   cout << style::bold
        << release.value("tag_name", "no tag") << style::reset << fg::reset 
        << " has " << release["assets"].size() << " assets:" << endl;
-  for (json const a : release["assets"]) {
+  for (json const &a : release["assets"]) {
     if (regex_match(a.value("name", ""), regex(".*" + plat + arch + ".*")) ||
         regex_match(a.value("name", ""), regex(".*" + plat + "universal.*")))
       cout << fg::green << style::bold << "=> ";
@@ -282,7 +370,7 @@ void describe_release(const json &release) {
 
 void check_update(bool beta = false, size_t n = 3) {
   Mads::HttpsClient::Response response;
-  for (int i = 1; i <= n; i++) {
+  for (size_t i = 1; i <= n; i++) {
     try {
       Mads::HttpsClient client;
       client.set_hostname("api.github.com");
@@ -304,6 +392,7 @@ void check_update(bool beta = false, size_t n = 3) {
       break;
     } catch (const json::exception &e) {
       cerr << "Error fetching info, retry " << i << "/" << n << endl;
+      cerr << "Error: " << e.what() << endl;
       this_thread::sleep_for(chrono::milliseconds(500));
     } catch (const std::exception &e) {
       cerr << "Unexpected error: " << e.what() << endl;
@@ -349,7 +438,6 @@ void update(const std::string &url) {
 int make_service(int argc, char **argv) {
   auto template_dir = Mads::exec_dir("../share/templates/");
   string this_exe = Mads::exec_path().stem().string();
-  int start = 1;
   json data;
   string command_line = Mads::exec_dir() + "/";
   string args = "";
@@ -443,10 +531,7 @@ int main(int argc, char **argv) {
   if (argc > 1) {
     if (includes(ext_commands, argv[1])) {
 #ifdef _WIN32
-      cerr << "On Windows, please use the command " << style::bold << fg::green
-           << MADS_PREFIX << argv[1] << style::reset << fg::reset << " directly"
-           << endl;
-      return -1;
+      return run_windows_subcommand(exec_dir, argc, argv);
 #else
       string cmd = exec_dir + "/" + string(MADS_PREFIX) + argv[1];
       execv(cmd.c_str(), argv + 1);

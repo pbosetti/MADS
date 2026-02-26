@@ -34,6 +34,7 @@ public:
 
   return_type load_data(json const &input, string topic, vector<unsigned char> const *blob = nullptr) override {
     json out;
+    (void)blob;
     if (!topic.empty())
       out["topic"] = topic;
     out["input"] = input;
@@ -42,6 +43,7 @@ public:
   }
 
   return_type process(json &out, vector<unsigned char> *blob = nullptr) override {
+    (void)blob;
     out.clear();
     string line;
     getline(cin, line);

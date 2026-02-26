@@ -79,7 +79,7 @@ int agent_receive_timeout(agent_t agent) {
   return ag->receive_timeout();
 }
 
-const char *agent_last_error(agent_t agent) { return _err_msg; }
+const char *agent_last_error() { return _err_msg; }
 
 // Crypto
 void agent_set_key_dir(agent_t agent, const char *key_dir) {
@@ -205,12 +205,12 @@ const char *agent_settings_uri(agent_t agent) {
   return s.c_str();
 }
 
-void agent_set_high_watermark(agent_t agent, size_t n) {
+void agent_set_high_watermark(agent_t agent, int n) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
   ag->set_high_watermark(n);
 }
 
-size_t agent_high_watermark(agent_t agent) {
+int agent_high_watermark(agent_t agent) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
   return ag->high_watermark();
 }

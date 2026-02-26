@@ -1,0 +1,315 @@
+#
+#  _   _                _
+# | | | | ___ _ __   __| | ___  _ __ ___
+# | | | |/ _ \ '_ \ / _` |/ _ \| '__/ __|
+# | |_| |  __/ | | | (_| | (_) | |  \__ \
+#  \___/ \___|_| |_|\__,_|\___/|_|  |___/
+#
+include(FetchContent)
+
+set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS 1)
+set(CMAKE_WARN_DEPRECATED OFF)
+
+# Silence compiler warnings from third-party dependencies only.
+if(MSVC)
+  string(REGEX REPLACE "/W[3|4]" "/W0" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+  add_compile_options(/wd4710 /wd4711 /wd4865 /wd5039 /wd4458 /wd4820 /wd4668 /wd4626 /wd4005 /wd4061 /wd4244 /wd4267 /wd4365 /wd4319 /wd4245)
+else()
+  add_compile_options(-w)
+endif()
+
+set(BUILD_TESTING OFF CACHE BOOL "Build tests" FORCE)
+set(BUILD_TESTS OFF CACHE BOOL "Build tests for dependencies that use BUILD_TESTS" FORCE)
+set(SODIUM_DISABLE_TESTS ON CACHE BOOL "" FORCE)
+
+# Dependency-specific static options where supported.
+set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
+set(JSON_Install OFF CACHE BOOL "" FORCE)
+
+set(CXXOPTS_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(CXXOPTS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(CXXOPTS_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+
+set(INJA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(BUILD_BENCHMARK OFF CACHE BOOL "" FORCE)
+set(INJA_INSTALL OFF CACHE BOOL "" FORCE)
+set(INJA_EXPORT OFF CACHE BOOL "" FORCE)
+set(INJA_USE_EMBEDDED_JSON OFF CACHE BOOL "" FORCE)
+
+set(SNAPPY_INSTALL OFF CACHE BOOL "" FORCE)
+set(ZMQPP_LIBZMQ_CMAKE ON CACHE BOOL "" FORCE)
+set(ZMQPP_BUILD_STATIC ON CACHE BOOL "" FORCE)
+set(ZMQPP_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(ZMQPP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(ZMQPP_BUILD_CLIENT OFF CACHE BOOL "" FORCE)
+set(ZMQPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+
+set(BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(BUILD_STATIC ON CACHE BOOL "" FORCE)
+set(ZMQ_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ENABLE_WS OFF CACHE BOOL "" FORCE)
+set(WITH_TLS OFF CACHE BOOL "" FORCE)
+set(CMAKE_DISABLE_FIND_PACKAGE_GnuTLS ON CACHE BOOL "" FORCE)
+set(WITH_PERF_TOOL OFF CACHE BOOL "" FORCE)
+set(WITH_DOC OFF CACHE BOOL "" FORCE)
+set(WITH_DOCS OFF CACHE BOOL "" FORCE)
+set(ENABLE_CPACK OFF CACHE BOOL "" FORCE)
+
+set(SNAPPY_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(SNAPPY_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+
+# Snappy's compile-time SIMD feature probes are not reliable for universal
+# macOS builds (x86_64+arm64): they may enable NEON globally and break x86_64.
+if(APPLE AND CMAKE_OSX_ARCHITECTURES MATCHES ";")
+  set(SNAPPY_HAVE_SSSE3 OFF CACHE BOOL "" FORCE)
+  set(SNAPPY_HAVE_X86_CRC32 OFF CACHE BOOL "" FORCE)
+  set(SNAPPY_HAVE_BMI2 OFF CACHE BOOL "" FORCE)
+  set(SNAPPY_HAVE_NEON OFF CACHE BOOL "" FORCE)
+  set(SNAPPY_HAVE_NEON_CRC32 OFF CACHE BOOL "" FORCE)
+endif()
+
+set(ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+set(ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(ENABLE_UNINSTALL OFF CACHE BOOL "" FORCE)
+set(ENABLE_MAN_PAGES OFF CACHE BOOL "" FORCE)
+set(ENABLE_HTML_DOCS OFF CACHE BOOL "" FORCE)
+set(ENABLE_MAINTAINER_FLAGS OFF CACHE BOOL "" FORCE)
+set(ENABLE_SHARED OFF CACHE STRING "" FORCE)
+set(ENABLE_STATIC ON CACHE STRING "" FORCE)
+set(ENABLE_SASL OFF CACHE STRING "" FORCE)
+set(ENABLE_ZSTD OFF CACHE STRING "" FORCE)
+set(ENABLE_MONGODB_AWS_AUTH OFF CACHE STRING "" FORCE)
+
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_AND_STATIC_LIBS OFF CACHE BOOL "" FORCE)
+if(MADS_ENABLE_MONGOCXX)
+  set(MONGOCXX_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(BSONCXX_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+endif()
+
+FetchContent_Declare(
+  nlohmann_json
+  GIT_REPOSITORY https://github.com/nlohmann/json.git
+  GIT_TAG v3.11.3
+)
+
+FetchContent_Declare(
+  cxxopts
+  GIT_REPOSITORY https://github.com/jarro2783/cxxopts.git
+  GIT_TAG v3.2.0
+)
+
+FetchContent_Declare(
+  rang
+  GIT_REPOSITORY https://github.com/agauniyal/rang.git
+  GIT_TAG v3.2
+)
+
+FetchContent_Declare(
+  tomlplusplus
+  GIT_REPOSITORY https://github.com/pbosetti/tomlplusplus.git
+  GIT_TAG master
+)
+
+FetchContent_Declare(
+  pugg
+  GIT_REPOSITORY https://github.com/pbosetti/pugg.git
+  GIT_TAG master
+)
+
+FetchContent_Declare(
+  libsodium
+  GIT_REPOSITORY https://github.com/robinlinden/libsodium-cmake.git
+  GIT_TAG master
+)
+
+FetchContent_Declare(
+  libzmq
+  GIT_REPOSITORY https://github.com/zeromq/libzmq.git
+  GIT_TAG v4.3.5
+)
+
+FetchContent_Declare(
+  zmqpp
+  GIT_REPOSITORY https://github.com/zeromq/zmqpp.git
+  GIT_TAG master
+)
+
+FetchContent_Declare(
+  inja
+  GIT_REPOSITORY https://github.com/pantor/inja.git
+  GIT_TAG v3.4.0
+)
+
+FetchContent_Declare(
+  snappy
+  GIT_REPOSITORY https://github.com/google/snappy.git
+  GIT_TAG 1.2.2
+)
+
+if(MADS_ENABLE_MONGOCXX)
+  FetchContent_Declare(
+    mongo_cxx_driver
+    GIT_REPOSITORY https://github.com/mongodb/mongo-cxx-driver.git
+    GIT_TAG r3.11.1
+  )
+endif()
+
+macro(add_vendor vendor_name)
+  set(options)
+  set(one_value_args EXCLUDE)
+  set(multi_value_args)
+  cmake_parse_arguments(ADD_VENDOR "${options}" "${one_value_args}" "${multi_value_args}" ${ARGN})
+
+  if(NOT DEFINED ADD_VENDOR_EXCLUDE)
+    set(ADD_VENDOR_EXCLUDE NO)
+  endif()
+
+  # Accept common CMake booleans for EXCLUDE.
+  if(ADD_VENDOR_EXCLUDE)
+    set(_add_vendor_exclude_from_all TRUE)
+  else()
+    set(_add_vendor_exclude_from_all FALSE)
+  endif()
+
+  FetchContent_GetProperties(${vendor_name})
+  if(NOT ${vendor_name}_POPULATED)
+    FetchContent_Populate(${vendor_name})
+    if(_add_vendor_exclude_from_all)
+      set(_add_vendor_old_skip_install_rules "${CMAKE_SKIP_INSTALL_RULES}")
+      set(CMAKE_SKIP_INSTALL_RULES ON)
+      add_subdirectory(
+        ${${vendor_name}_SOURCE_DIR}
+        ${${vendor_name}_BINARY_DIR}
+        EXCLUDE_FROM_ALL
+      )
+      if(DEFINED _add_vendor_old_skip_install_rules)
+        set(CMAKE_SKIP_INSTALL_RULES "${_add_vendor_old_skip_install_rules}")
+      else()
+        unset(CMAKE_SKIP_INSTALL_RULES)
+      endif()
+    else()
+      add_subdirectory(
+        ${${vendor_name}_SOURCE_DIR}
+        ${${vendor_name}_BINARY_DIR}
+      )
+    endif()
+  endif()
+
+  set(_vendor_source_dir "${${vendor_name}_SOURCE_DIR}")
+  set(_vendor_binary_dir "${${vendor_name}_BINARY_DIR}")
+
+  # Install vendor headers into the main include prefix so installed public
+  # Mads headers can resolve third-party includes.
+  if(NOT _add_vendor_exclude_from_all)
+    if(EXISTS "${_vendor_source_dir}/include")
+      install(
+        DIRECTORY "${_vendor_source_dir}/include/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+        COMPONENT MadsCore
+        FILES_MATCHING
+          PATTERN "*.h"
+          PATTERN "*.hh"
+          PATTERN "*.hpp"
+          PATTERN "*.hxx"
+          PATTERN "*.inc"
+      )
+    endif()
+
+    if(EXISTS "${_vendor_source_dir}/src")
+      install(
+        DIRECTORY "${_vendor_source_dir}/src/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+        COMPONENT MadsCore
+        FILES_MATCHING
+          PATTERN "*.h"
+          PATTERN "*.hh"
+          PATTERN "*.hpp"
+          PATTERN "*.hxx"
+          PATTERN "*.inc"
+      )
+    endif()
+
+    file(
+      GLOB _vendor_root_headers
+      "${_vendor_source_dir}/*.h"
+      "${_vendor_source_dir}/*.hh"
+      "${_vendor_source_dir}/*.hpp"
+      "${_vendor_source_dir}/*.hxx"
+      "${_vendor_source_dir}/*.inc"
+    )
+    if(_vendor_root_headers)
+      install(
+        FILES ${_vendor_root_headers}
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+        COMPONENT MadsCore
+      )
+    endif()
+
+    file(
+      GLOB _vendor_generated_headers
+      "${_vendor_binary_dir}/*.h"
+      "${_vendor_binary_dir}/*.hh"
+      "${_vendor_binary_dir}/*.hpp"
+      "${_vendor_binary_dir}/*.hxx"
+      "${_vendor_binary_dir}/*.inc"
+    )
+    if(_vendor_generated_headers)
+      install(
+        FILES ${_vendor_generated_headers}
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+        COMPONENT MadsCore
+      )
+    endif()
+  endif()
+endmacro()
+
+macro(add_vendor_exclude_from_all vendor_name)
+  add_vendor(${vendor_name} EXCLUDE YES)
+endmacro()
+
+add_vendor(nlohmann_json)
+add_vendor(cxxopts)
+add_vendor(rang)
+add_vendor(tomlplusplus)
+add_vendor_exclude_from_all(pugg)
+add_vendor_exclude_from_all(libsodium)
+add_vendor_exclude_from_all(libzmq)
+add_vendor_exclude_from_all(inja)
+add_vendor_exclude_from_all(snappy)
+
+# Work around zmqpp upstream CMake: generate_export_header(zmqpp) is called
+# even when ZMQPP_BUILD_SHARED is OFF.
+if(NOT TARGET zmqpp)
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/zmqpp_dummy.cpp" "int zmqpp_dummy = 0;\n")
+  add_library(zmqpp STATIC EXCLUDE_FROM_ALL "${CMAKE_CURRENT_BINARY_DIR}/zmqpp_dummy.cpp")
+endif()
+
+# zmqpp has legacy cmake_minimum_required(2.8.12) and links to parent-defined
+# target "zmqpp" on Windows; force modern policy behavior in the subdir.
+set(CMAKE_POLICY_DEFAULT_CMP0079 NEW)
+# zmqpp unconditionally searches for zmq.h; point it to fetched libzmq headers.
+set(ZEROMQ_INCLUDE_DIR "${libzmq_SOURCE_DIR}/include" CACHE PATH "" FORCE)
+add_vendor_exclude_from_all(zmqpp)
+if(MSVC)
+  # zmqpp expects SOCKET to be available on Windows.
+  if(TARGET zmqpp-static)
+    target_compile_definitions(zmqpp-static PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_compile_options(zmqpp-static PRIVATE /FIwinsock2.h)
+  endif()
+  if(TARGET zmqpp)
+    target_compile_definitions(zmqpp PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_compile_options(zmqpp PRIVATE /FIwinsock2.h)
+  endif()
+endif()
+
+if(MADS_ENABLE_MONGOCXX)
+  # Ensure mongo-c-driver (used by mongo_cxx_driver) uses fetched Snappy.
+  set(ENABLE_SNAPPY ON CACHE STRING "" FORCE)
+  set(SNAPPY_INCLUDE_DIRS "${snappy_SOURCE_DIR}" CACHE PATH "" FORCE)
+  set(SNAPPY_LIBRARIES "$<TARGET_FILE:snappy>" CACHE STRING "" FORCE)
+
+  add_vendor_exclude_from_all(mongo_cxx_driver)
+endif()

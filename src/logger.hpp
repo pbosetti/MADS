@@ -293,7 +293,7 @@ private:
     if (paused) {
       return;
     }
-    uint32_t blob_size = get<2>(_last_blob).size();
+    uint32_t blob_size = static_cast<uint32_t>(get<2>(_last_blob).size());
     auto now = chrono::system_clock::now();
     bsoncxx::types::b_binary blob{bsoncxx::binary_sub_type::k_binary,
                                   blob_size, get<2>(_last_blob).data()};

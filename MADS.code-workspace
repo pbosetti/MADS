@@ -49,6 +49,7 @@
 			"forward_list": "cpp",
 			"fstream": "cpp",
 			"future": "cpp",
+			"ini": "toml",
 			"initializer_list": "cpp",
 			"iomanip": "cpp",
 			"ios": "cpp",

@@ -77,6 +77,7 @@ public:
   // Implement the actual functionality here
   return_type load_data(json const &input, string topic = "", vector<unsigned char> const *blob = nullptr) override {
     string id = topic + "/" + input.value("agent_id", "-");
+    (void)blob;
 
     if (topic == "agent_event")
       return return_type::retry;
@@ -117,6 +118,7 @@ public:
       _col_widths[2] = _params["col_widths"][2];
     } catch (const json::type_error &e) {
       cerr << fg::red << "Settings error: col_widths must be an array of 3 ints"
+           << " (" << e.what() << ")"
            << fg::reset << endl;
       exit(EXIT_FAILURE);
     }
@@ -150,7 +152,7 @@ INSTALL_SINK_DRIVER(Monitor_pluginPlugin, json)
 
 For testing purposes, when directly executing the plugin
 */
-int main(int argc, char const *argv[]) {
+int main(int, char const **) {
   Monitor_pluginPlugin plugin;
   json input, params;
 

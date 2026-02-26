@@ -207,7 +207,7 @@ void Agent::init(bool crypto, bool install_watchdog) {
   }
   _time_step = chrono::milliseconds(cfg["time_step"].value_or(0));
 
-  set_high_watermark(cfg["queue_size"].value_or(1000));
+  set_high_watermark((int64_t)cfg["queue_size"].value_or<int>(1000));
 
   // rename attachment if not a plugin
   if (!_attachment_path.empty()) {
@@ -241,7 +241,6 @@ Agent::~Agent() {
 
 void Agent::install_loop_watchdog(uint8_t max_count) {
   thread([max_count]() {
-    uint8_t count = 0;
     while(true) {
       if (!Mads::running) {
         std::signal(SIGINT, SIG_DFL);
@@ -401,7 +400,7 @@ void Agent::publish(nlohmann::json payload, string topic) {
   payload["hostname"] = _hostname;
   payload["timestamp"]["$date"] = get_ISODate_time(now, -offset);
   if (!payload.contains("timecode")) {
-    payload["timecode"] = timecode(now, timecode_fps) - offset;
+    payload["timecode"] = timecode(now, timecode_fps) - (offset / 1000.0);
   }
   str = payload.dump();
   if (topic.empty()) {

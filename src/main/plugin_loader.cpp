@@ -123,7 +123,6 @@ int main(int argc, char *argv[]) {
                       agent_name = AGENT_NAME_DEFAULT;
   size_t count = 0, count_err = 0;
   size_t delay = 0;
-  chrono::milliseconds time{0};
   bool crypto = false;
   filesystem::path key_dir(Mads::exec_dir() + "/../etc");
   string client_key_name = "client";
@@ -235,6 +234,7 @@ int main(int argc, char *argv[]) {
   }
   
 #if defined(PLUGIN_LOADER_SOURCE) or defined(PLUGIN_LOADER_FILTER)
+  chrono::milliseconds time{0};
   cerr << "  Sampling period:  " << style::bold;
   if (options_parsed.count("p") != 0) {
     time = chrono::milliseconds(options_parsed["p"].as<size_t>());
@@ -548,8 +548,8 @@ int main(int argc, char *argv[]) {
     case return_type::critical:
       cerr << fg::red << "Critical error loading data: " << plugin->error()
            << fg::reset << endl;
-      json msg = {{"error", {"load_data", plugin->error()}}};
-      agent.register_event(event_type::message, msg);
+      json e_msg = {{"error", {"load_data", plugin->error()}}};
+      agent.register_event(event_type::message, e_msg);
       count_err++;
       Mads::running = false;
       return 0ms;
