@@ -6,7 +6,7 @@
 # |____/ \___|\__|\__,_| .__/
 #                      |_|
 #
-cmake_minimum_required(VERSION 3.24)
+cmake_minimum_required(VERSION 3.22)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 if(POLICY CMP0169)
   cmake_policy(SET CMP0169 OLD)
