@@ -1,8 +1,8 @@
-# MADS
+# MADS v2
 
 Multi-Agent Distributed System for monitoring and control of industrial processes
 
-**NOTE**: for Windows users, please see the [Windows support](#windows-support) section below.
+> IMPORTANT: Look at <https://mads-net.github.io> for in-depth information, help, and guides.
 
 ## Architecture
 
@@ -67,7 +67,7 @@ The suggested way to install MongoDB is via Docker. The following command will i
 docker run --name mads-mongo --restart unless-stopped -v ${PWD}/db:/data/db -p27017:27017 -d mongo
 ```
 
-The `Logger` agent connects to a MongoDB instance. The URI of the database (possibly on a different machine) is specified in the `mads.ini` file, as well as the name of the database to be used.
+The `logger` agent connects to a MongoDB instance. The URI of the database (possibly on a different machine) is specified in the `mads.ini` file, as well as the name of the database to be used.
 
 For each and every message received by the `logger` agent, it saves a new document on a table named as the topic of the message. The document contains the following fields:
 
@@ -77,63 +77,6 @@ For each and every message received by the `logger` agent, it saves a new docume
 * `error`: error message when the JSON is not valid
 
 
-## Development
-
-The code is supposed to be compiled and run on Windows, Linux or MacOS, and shall be portable to x86 or ARM architecture.
-
-Project configuration is performed via cmake and compilation preferably via clang, although gcc should work as well.
-
-Third party libraries are preferably built locally (within the `external` dir), to make the code more robust and self-contained, avoiding possible issues deriving from libraries version mismatch. When possible, third party libraries are **statically compiled** and linked.
-
-Currently, the following libraries are available:
-
-* zmq (ZeroMQ)
-* zmqpp (C++ wrapper for ZeroMQ)
-* snappy (fast compression library)
-* mongocxx (MongoDB C++ driver)
-
-Also, the following header-only libraries are available:
-
-* [cxxopts](https://github.com/jarro2783/cxxopts) (command line options parser)
-* [toml](https://github.com/marzer/tomlplusplus) (TOML/INI configuration file parser)
-* [nlohmann/json](https://github.com/nlohmann/json) (JSON parser/emitter)
-
-
-### Compilation
-
-[![asciicast](https://asciinema.org/a/N5sDE7O5TDfx4rQIj6t3rt3pN.svg)](https://asciinema.org/a/N5sDE7O5TDfx4rQIj6t3rt3pN)
-
-It is supposed to be compiled **out of source**, i.e. from a separate directory, to avoid polluting the source tree with build artifacts.
-
-```bash
-cmake -Bbuild -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j8
-cmake --install build
-```
-
-In the configuration step (`cmake -Bbuild ...`) some of the targets can be explicitly disabled, so that if they are known not to compile on the current platform, they will not be built. For example, to disable the `logger` target, run:
-
-On MacOS, it is possible to build Universal binaries with:
-
-```bash
-cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" 
-cmake --build build -j8
-cmake --install build
-```
-
-```bash
-cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -DMADS_ENABLE_LOGGER=OFF
-```
-
-To see the complete list of optional targets, run CMake in interactive mode (notice the **double leading** 'c'!):
-
-```bash
-ccmake -Bbuild
-```
-
-`ccmake` can be installed via `apt install cmake-curses-gui` on Debian/Ubuntu. As an alternative, you can use the graphical `cmake-gui` tool. You can also list the available options with `cmake -Bbuild -LH | grep MIROSCIC`.
-
-**NOTE**: cmake checks-compiles external libraries, which may take some time in the making. Once the external libraries are compiled, you can disable this ckeck with the cmake option `-DMADS_SKIP_EXTERNALS=ON`. Likewise, header-only libraries are grabbed via CMake `FetchContent` module, which may take some time. You can disable this check with the cmake option `-DFETCHCONTENT_FULLY_DISCONNECTED=ON`.
 
 ### Coding style
 
@@ -175,29 +118,6 @@ In order to keep the code more readable and organized, the algorithms implemente
 
 For **plugin agents**, see the [dedicated section below](#plugins).
 
-### Windows support
-
-Most of the targets are also supported on Windows. These are tested for building with **Visual Studio 2022**. Previous releases of Visual Studio may work, but are not tested.
-
-On Windows, you have to compile **and install** with `cmake --build build --config Release -t install`, so that the commands and any possible DLL needed by them will be installed in `products/bin` and can be run directly from there, for example as `.\products\bin\broker.exe`. 
-
-Note that the DLLs are only installed in `products/bin`, so if you try to run the executables from the build directory (e.g. `build/Release/force_platform`), the progarams will not found the DLLs and crash on launch. On Windows 11 **the crash is silent**, on previous versions you will get a message box with the error.
-
-Also look at the [Development](#development) section for details about DLLs.
-
-
-### Git management
-
-Developers are supposed to work on **forked repositories** and submit pull requests to the main repository. The main repository is supposed to be read-only for all developers, and only project managers can merge pull requests.
-
-To keep the forked repository in sync with the main repository, the following steps can be followed:
-
-1. add the main repository as a remote: `git remote add upstream https://github.com/pbosetti/mads.git`
-2. fetch new changes from the main repository: `git fetch upstream`
-3. merge the new changes into the local `master` branch: `git merge upstream/master master`
-
-Once you have made your changes to the local repository, you can push them to your forked repository, and then submit a pull request to the main repository via the GitHub web interface or by using the CLI `gh` tool.
-
 # Plugins
 
 ## Rationale
@@ -220,12 +140,12 @@ The advantages of the pluging systems are:
 
 To develop a plugin follow these steps:
 
-1. use the template repo [mads_plugin](https://github.com/pbosetti/mads_plugin). Click on the green button "Use this template" to create a new repo with the same structure
-2. look at the fils within `src/plugin` dir. Duplicate one of the source or filter or sink plugins and customize it. The plugin  must have a plugin class derived from one of the base plugin classes that you find in `src`
+1. use the command `mads plugin` that creates a stub project with template files
+2. look at the files within `src/plugin` dir
 3. customize the `CMakeLists.txt` file to compile the plugin. Add any external library needed by the plugin. If the libraries are static, you won't need to install them in the target system, but the resulting plugin file would be bigger (possibly an issue if distributing plugins via broker)
 4. in developing the plugin you must also add a `main()` function, which is used to test the plugin. This function is not used in the final plugin, but it is useful to test the plugin in isolation
-5. once the plugin is ready, compile it and copy it on the target system where the Miroscic agent is supposed to run
-6. the Mads agent is `source`, `filter`, or `sink`: it takes the name of the plugin as a key for loading the proper settings section and as a publishing topic. Settings are passed to the plugin as a JSON object on loading, the name of the section being the name of the plugin file (no extension).
+5. once the plugin is ready, compile it and copy it on the target system where the Mads agent is supposed to run
+6. the Mads agent that loads the plugis are `source`, `filter`, or `sink`: they take as argument the name of the plugin as a key for loading the proper settings section and as a publishing topic. Settings are passed to the plugin as a JSON object on loading, the name of the section being the name of the plugin file (no extension).
 
 # License
 
