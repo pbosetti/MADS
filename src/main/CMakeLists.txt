@@ -7,6 +7,9 @@ if(MSVC)
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 endif()
 
+if(UNIX AND NOT APPLE)
+  set(SSL_LIBS ssl crypto)
+endif()
 
 macro(create_mads_target name main_file)
   set(options)
@@ -41,7 +44,7 @@ macro(create_mads_target name main_file)
         INSTALL_RPATH_USE_LINK_PATH FALSE
     )
   endif()
-  target_link_libraries("${_output_name}" PRIVATE MadsCore ${MADS_TARGET_LIBS})
+  target_link_libraries("${_output_name}" PRIVATE MadsCore ${SSL_LIBS} ${MADS_TARGET_LIBS})
   if(MADS_TARGET_DEFS)
     target_compile_definitions("${_output_name}" PRIVATE ${MADS_TARGET_DEFS})
   endif()
