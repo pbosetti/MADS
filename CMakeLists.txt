@@ -378,7 +378,11 @@ elseif(WIN32)
   
 
 else()
-  set(CPACK_DEBIAN_PACKAGE_DEPENDS "libzstd1, libgnutls30, openssl, libsodium23, libxrandr2, libxinerama1, libxcursor1, libxi6, libxext6")
+  if(MADS_DIRECTOR)
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libzstd1, libgnutls30, openssl, libsodium23, libxrandr2, libxinerama1, libxcursor1, libxi6, libxext6")
+  else()
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libzstd1, libgnutls30, openssl")
+  endif()
   set(CPACK_DEBIAN_PACKAGE_NAME MADS)
   set(CPACK_GENERATOR "DEB;TGZ")
 endif()
