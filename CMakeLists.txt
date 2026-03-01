@@ -308,6 +308,11 @@ install(
   COMPONENT MadsCore
 )
 
+install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/images
+  DESTINATION share
+  COMPONENT MadsApps
+)
+
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/templates
   DESTINATION share
   COMPONENT MadsApps

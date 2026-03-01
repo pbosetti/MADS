@@ -15,6 +15,7 @@ Author: Paolo Bosetti, July 2024
 #include "../agent.hpp"
 #include "../exec_path.hpp"
 #include "../https_client.hpp"
+#include "../TerminalLogoRenderer.hpp"
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -518,6 +519,7 @@ int make_service(int argc, char **argv) {
 int main(int argc, char **argv) {
   string exec_dir = Mads::exec_dir();
   auto template_dir = Mads::exec_dir("../share/templates/");
+  auto image_dir = Mads::exec_dir("../share/images/");
   bool force = false;
 
   vector<string> ext_commands;
@@ -667,23 +669,33 @@ int main(int argc, char **argv) {
     }
     return 0;
   }
-#ifdef _WIN32
-#define FIELD_WIDTH 15
-  cout << style::bold << "Available executables and subcommands:" 
-       << style::reset << endl;
-  for (auto const &cmd : ext_commands) {
-    cout << setw(FIELD_WIDTH) << string(MADS_PREFIX + cmd) << style::italic
-         << " (external executable)" << style::reset << endl;
-  }
-  cout << style::bold << "Available mads subcommands:" << style::reset << endl;
-#else
+// #ifdef _WIN32
+// #define FIELD_WIDTH 15
+//   cout << style::bold << "Available executables and subcommands:" 
+//        << style::reset << endl;
+//   for (auto const &cmd : ext_commands) {
+//     cout << setw(FIELD_WIDTH) << string(MADS_PREFIX + cmd) << style::italic
+//          << " (external executable)" << style::reset << endl;
+//   }
+//   cout << style::bold << "Available mads subcommands:" << style::reset << endl;
+// #else
 #define FIELD_WIDTH 11
-  cout << style::bold << "Available mads subcommands:" << style::reset << endl;
+  auto logo = filesystem::path(image_dir) / "logo_white.png";
+  if(filesystem::exists(logo)) {
+    terminal_logo::TerminalLogoRenderer::Options options;
+    options.width = 80;
+    options.mode = terminal_logo::TerminalLogoRenderer::ColorMode::Auto;
+    terminal_logo::TerminalLogoRenderer::render_from_path(logo, std::cout, options);
+  }
+  cout  << "MADS - Multi-Agent Distributed System" << endl
+        << "See " << style::italic << "https://mads-net.github.io"
+        << style::reset << " for help and guides" << endl
+        << style::bold << "Available mads subcommands:" << style::reset << endl;
   for (auto const &cmd : ext_commands) {
     cout << setw(FIELD_WIDTH) << cmd << style::italic << " (wraps "
          << MADS_PREFIX << cmd << ")" << style::reset << endl;
   }
-#endif
+// #endif
   cout << setw(FIELD_WIDTH) << "ini" << style::italic << " (internal)"
        << style::reset << endl;
   cout << setw(FIELD_WIDTH) << "update" << style::italic << " (internal)"
