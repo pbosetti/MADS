@@ -283,6 +283,7 @@ public:
    */
   void set_pub_topic(string topic);
 
+  string pub_topic() const { return _pub_topic; }
 
   /**
    * @brief Enables remote control for the agent.

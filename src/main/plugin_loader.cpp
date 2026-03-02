@@ -419,7 +419,10 @@ int main(int argc, char *argv[]) {
       cerr << fg::red << "Error receiving message: " << e.what()
             << fg::reset << endl;
     }
-    
+    if (agent.last_topic() == agent.pub_topic()) {
+      cerr << fg::yellow << "Warning: received message on the same topic (even partial) as the plugin publishes to, skipping to avoid loops" << fg::reset << endl;
+      return 0ms; // dont use my own messages
+    }
     // loading data into plugin
     if (type == message_type::json) {
       // agent.remote_control();
@@ -434,7 +437,11 @@ int main(int argc, char *argv[]) {
       in = json::parse(get<1>(msg_blob));
       rt = plugin->load_data(in, agent.last_topic(), &get<2>(msg_blob));
     } else {
-      goto process_output;
+      if (dont_block) {
+        goto process_output;
+      } else {
+        return plugin->next_loop_duration; // No message received, wait for next iteration
+      }
     }
 
     switch (rt) {
@@ -486,7 +493,7 @@ int main(int argc, char *argv[]) {
       return 0ms;
     }
     // publishing data
-    if (blob.empty()) {
+    if (!blob.empty()) {
       agent.publish(blob, out);
     } else {
       agent.publish(out);
