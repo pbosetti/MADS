@@ -80,7 +80,7 @@ set(PREFIX "mads")
 
 # List of filenames to be configured
 set(CONFIG_FILENAMES
-  # ${CMAKE_CURRENT_LIST_DIR}/Dockerfile
+  ${CMAKE_CURRENT_LIST_DIR}/Dockerfile
   ${SOURCE_DIR}/mads.hpp
 )
 # Loop over the filenames

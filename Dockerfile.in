@@ -16,22 +16,24 @@ RUN apt-get update && apt-get install -y \
     rm -rf /var/lib/apt/lists/* 
 
 COPY src ${BUILDDIR}/src
+COPY share ${BUILDDIR}/share
+COPY vendors ${BUILDDIR}/vendors
+COPY scripts ${BUILDDIR}/scripts
+COPY tools ${BUILDDIR}/tools
+COPY test ${BUILDDIR}/test
 COPY CMakeLists.txt ${BUILDDIR}
-COPY external.cmake ${BUILDDIR}
 COPY Dockerfile.in ${BUILDDIR}
 COPY mads.ini ${BUILDDIR}
-COPY share ${BUILDDIR}/share
-COPY scripts ${BUILDDIR}/scripts
+COPY LICENSE ${BUILDDIR}
 
 ENV CC=/usr/bin/clang
 ENV CXX=/usr/bin/clang++
 
 RUN cd ${BUILDDIR} && \
-    cmake -Bbuild -DMADS_ENABLE_METADATA=OFF -DMADS_ENABLE_LOGGER=ON -DCMAKE_BUILD_TYPE=Release && \
+    cmake -Bbuild -DMADS_DIRECTOR=OFF -DCMAKE_BUILD_TYPE=Release && \
     cmake --build build -j6 && \
     cmake --install build --prefix /usr/local && \
-    rm -rf build && \
-    cp ${BUILDDIR}/products/lib/*.so* /usr/local/lib
+    rm -rf build
 
 EXPOSE 9090 9091 9092
 
