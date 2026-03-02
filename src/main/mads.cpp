@@ -675,7 +675,7 @@ int main(int argc, char **argv) {
   if(filesystem::exists(logo)) {
     terminal_logo::TerminalLogoRenderer::Options options;
     options.width = 80;
-    options.mode = terminal_logo::TerminalLogoRenderer::ColorMode::Mono;
+    options.mode = terminal_logo::TerminalLogoRenderer::ColorMode::Auto;
     terminal_logo::TerminalLogoRenderer::render_from_path(logo, std::cout, options);
   }
 #endif
