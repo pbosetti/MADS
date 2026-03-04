@@ -146,23 +146,31 @@ static int run_windows_subcommand(const std::string &exec_dir, int argc, char **
 #endif
 
 bool save_keypair(pair<string, string> &key_files, const string &path, const string &name, bool force=false) {
-  zmqpp::curve::keypair keypair = zmqpp::curve::generate_keypair();
-  key_files.first = ( fs::path(path) / (name + ".key") ).string();
-  key_files.second = ( fs::path(path) / (name + ".pub") ).string();
-  if (!force) {
-    if (fs::exists(key_files.first) || fs::exists(key_files.second)) {
-      cerr << fg::red << "Error: key files already exist. Use -f to overwrite."
-           << fg::reset << endl;
-      return false;
-    }
-  }
   try {
+    zmqpp::curve::keypair keypair = zmqpp::curve::generate_keypair();
+    key_files.first = ( fs::path(path) / (name + ".key") ).string();
+    key_files.second = ( fs::path(path) / (name + ".pub") ).string();
+    if (!force) {
+      if (fs::exists(key_files.first) || fs::exists(key_files.second)) {
+        cerr << fg::red << "Error: key files already exist. Use -f to overwrite."
+             << fg::reset << endl;
+        return false;
+      }
+    }
     ofstream key_file(key_files.first);
     ofstream pub_file(key_files.second);
     key_file << keypair.secret_key;
     pub_file << keypair.public_key;
     key_file.close();
     pub_file.close();
+  } catch (const zmqpp::zmq_internal_exception &e) {
+    cerr << fg::red << "Error: cannot generate CURVE keypair: " << e.what()
+         << fg::reset << endl;
+    cerr << fg::yellow
+         << "This build of libzmq does not support CURVE (libsodium). "
+         << "Rebuild with ENABLE_CURVE=ON and WITH_LIBSODIUM=ON."
+         << fg::reset << endl;
+    return false;
   } catch (const std::exception &e) {
     cerr << fg::red << "Error: cannot write key files: " << e.what()
          << fg::reset << endl;

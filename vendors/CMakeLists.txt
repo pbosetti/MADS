@@ -49,6 +49,9 @@ set(ZMQPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(BUILD_STATIC ON CACHE BOOL "" FORCE)
 set(ZMQ_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ENABLE_CURVE ON CACHE BOOL "" FORCE)
+set(WITH_LIBSODIUM ON CACHE BOOL "" FORCE)
+set(WITH_LIBSODIUM_STATIC ON CACHE BOOL "" FORCE)
 set(ENABLE_WS OFF CACHE BOOL "" FORCE)
 set(WITH_TLS OFF CACHE BOOL "" FORCE)
 set(CMAKE_DISABLE_FIND_PACKAGE_GnuTLS ON CACHE BOOL "" FORCE)
@@ -274,9 +277,15 @@ add_vendor(nlohmann_json)
 add_vendor(cxxopts)
 add_vendor(rang)
 add_vendor(tomlplusplus)
-add_vendor(libzmq)
 add_vendor_exclude_from_all(pugg)
 add_vendor_exclude_from_all(libsodium)
+set(SODIUM_INCLUDE_DIRS
+    "${libsodium_SOURCE_DIR}/libsodium/src/libsodium/include"
+    CACHE PATH "" FORCE)
+set(SODIUM_LIBRARIES
+    "${libsodium_BINARY_DIR}/libsodium.a"
+    CACHE FILEPATH "" FORCE)
+add_vendor(libzmq)
 add_vendor_exclude_from_all(inja)
 add_vendor_exclude_from_all(snappy)
 
