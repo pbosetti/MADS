@@ -5,7 +5,7 @@
 #  |_|   |_|\__,_|\__, |_|_| |_|
 #                 |___/         
 {% include "header.tpl" %}
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.28)
 project({{name}} VERSION {{mads_version}} LANGUAGES CXX)
 if(CMAKE_BUILD_TYPE STREQUAL "")
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
@@ -29,6 +29,7 @@ set(SRC_DIR ${CMAKE_CURRENT_LIST_DIR}/src)
 
 if(UNIX AND NOT APPLE)
   set(LINUX TRUE)
+  add_compile_options(-fPIC)
 endif()
 
 # DEPENDENCIES #################################################################
@@ -38,6 +39,7 @@ FetchContent_Declare(pugg
   GIT_REPOSITORY https://github.com/pbosetti/pugg.git
   GIT_TAG        1.0.2
   GIT_SHALLOW    TRUE
+  EXCLUDE_FROM_ALL
 )
 
 set(BUILD_TESTING OFF CACHE INTERNAL "")
@@ -46,6 +48,7 @@ FetchContent_Declare(json
   GIT_REPOSITORY https://github.com/nlohmann/json.git
   GIT_TAG        v3.11.3
   GIT_SHALLOW    TRUE
+  EXCLUDE_FROM_ALL
 )
 
 FetchContent_MakeAvailable(pugg json)
