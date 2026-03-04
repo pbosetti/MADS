@@ -72,12 +72,7 @@ int main(int argc, char **argv) {
   string dir = "plugins/";
   auto exec_path = Mads::exec_path();
   auto template_dir = Mads::exec_dir("../share/templates/");
-  auto plugins_dir = 
-  #ifdef _WIN32
-    Mads::exec_dir("../bin/");
-  #else
-    Mads::exec_dir("../lib/");
-  #endif
+  auto plugins_dir = Mads::exec_dir("../");
   bool overwrite = false;
   string cli{argv[0]}; // Name of the executable, used
   for (int i = 1; i < argc; i++) {
