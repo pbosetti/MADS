@@ -282,9 +282,15 @@ add_vendor_exclude_from_all(libsodium)
 set(SODIUM_INCLUDE_DIRS
     "${libsodium_SOURCE_DIR}/libsodium/src/libsodium/include"
     CACHE PATH "" FORCE)
+if(WIN32)
+  set(_mads_sodium_library "${libsodium_BINARY_DIR}/sodium.lib")
+else()
+  set(_mads_sodium_library "${libsodium_BINARY_DIR}/libsodium.a")
+endif()
 set(SODIUM_LIBRARIES
-    "${libsodium_BINARY_DIR}/libsodium.a"
+    "${_mads_sodium_library}"
     CACHE FILEPATH "" FORCE)
+unset(_mads_sodium_library)
 add_vendor(libzmq)
 add_vendor_exclude_from_all(inja)
 add_vendor_exclude_from_all(snappy)
