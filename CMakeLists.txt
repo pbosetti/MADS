@@ -324,6 +324,13 @@ install(PROGRAMS ${PYTHON_SCRIPTS}
   COMPONENT MadsApps
 )
 
+if(UNIX)
+  file(GLOB MADS_SHELL_SCRPTS ${CMAKE_CURRENT_LIST_DIR}/scripts/mads-*)
+  install(PROGRAMS ${MADS_SHELL_SCRPTS}
+    DESTINATION bin
+    COMPONENT MadsApps
+  )
+endif()
 
 
 #   ____            _               _             
