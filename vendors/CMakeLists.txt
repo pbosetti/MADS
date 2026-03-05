@@ -346,5 +346,5 @@ if(MADS_ENABLE_MONGOCXX)
   set(SNAPPY_INCLUDE_DIRS "${snappy_SOURCE_DIR}" CACHE PATH "" FORCE)
   set(SNAPPY_LIBRARIES "$<TARGET_FILE:snappy>" CACHE STRING "" FORCE)
 
-  add_vendor_exclude_from_all(mongo_cxx_driver)
+  add_vendor(mongo_cxx_driver)
 endif()
