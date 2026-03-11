@@ -31,6 +31,28 @@ using namespace std::chrono;
 
 namespace Mads {
 
+unique_ptr<Agent> start_agent(string name, string settings_uri,
+                              map<string, string> crypto_settings) {
+  bool crypto = !crypto_settings.empty();
+  if (crypto) {
+    if (!crypto_settings.contains("key_dir") ||
+        !crypto_settings.contains("key_client") ||
+        !crypto_settings.contains("key_broker")) {
+      throw AgentError("Wrong crypto settings: key_dir, key_client, and "
+                       "key_broker are required");
+    }
+  }
+  unique_ptr<Agent> agent = make_unique<Agent>(name, settings_uri);
+  if (crypto) {
+    agent->set_key_dir(crypto_settings.at("key_dir"));
+    agent->client_key_name = crypto_settings.at("key_client");
+    agent->server_key_name = crypto_settings.at("key_broker");
+  }
+  agent->init(crypto);
+  agent->connect();
+  return agent;
+}
+
 // Private methods implementations
 
 tuple<string, filesystem::path> Agent::read_settings(string uri, string name, int timeout) {

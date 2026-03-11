@@ -238,6 +238,7 @@ macro(add_vendor vendor_name)
           PATTERN "*.hh"
           PATTERN "*.hpp"
           PATTERN "*.hxx"
+          PATTERN "*.inl"
           PATTERN "*.inc"
       )
     endif()
@@ -252,6 +253,7 @@ macro(add_vendor vendor_name)
           PATTERN "*.hh"
           PATTERN "*.hpp"
           PATTERN "*.hxx"
+          PATTERN "*.inl"
           PATTERN "*.inc"
       )
     endif()
@@ -262,6 +264,7 @@ macro(add_vendor vendor_name)
       "${_vendor_source_dir}/*.hh"
       "${_vendor_source_dir}/*.hpp"
       "${_vendor_source_dir}/*.hxx"
+      "${_vendor_source_dir}/*.inl"
       "${_vendor_source_dir}/*.inc"
     )
     if(_vendor_root_headers)
@@ -278,6 +281,7 @@ macro(add_vendor vendor_name)
       "${_vendor_binary_dir}/*.hh"
       "${_vendor_binary_dir}/*.hpp"
       "${_vendor_binary_dir}/*.hxx"
+      "${_vendor_binary_dir}/*.inl"
       "${_vendor_binary_dir}/*.inc"
     )
     if(_vendor_generated_headers)
@@ -365,6 +369,7 @@ if(EXISTS "${zmqpp_SOURCE_DIR}/src/zmqpp")
       PATTERN "*.hh"
       PATTERN "*.hpp"
       PATTERN "*.hxx"
+      PATTERN "*.inl"
       PATTERN "*.inc"
   )
 endif()

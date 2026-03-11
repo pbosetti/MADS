@@ -72,6 +72,25 @@ template<typename T> struct SharedLatest {
   std::optional<T> value;
 };
 
+class Agent; // forward declaration
+
+/**
+ * @brief Quick Agent initialization function.
+ *
+ * @param name Agent's name
+ * @param settings_uri URI for the settings file (e.g. "/path/to/mads.ini" or
+ * "tcp://broker:5555")
+ * @param crypto_settings A map with crypto settings. If empty, crypto is
+ * disabled. If not empty, it must contain the following keys: key_dir,
+ * key_client, key_broker.
+ * @return Agent A unique pointer to the initialized Agent object. The agent is
+ * already connected and ready to use.
+ * @throws AgentError if there is an error in the initialization (e.g. settings
+ * file
+ */
+unique_ptr<Agent> start_agent(string name, string settings_uri,
+                              map<string, string> crypto_settings = {});
+
 /**
  * @brief The Agent class represents an agent in the mads system.
  *
