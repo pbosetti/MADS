@@ -515,7 +515,7 @@ void Agent::loop(loop_fun_t const &lambda, chrono::milliseconds duration) {
   });
   chrono::milliseconds nld(0); // next loop duration
   while (Mads::running) {
-    if (duration > 0ms) {
+    if (duration > 0ms || nld > 0ms) {
       thread t([&]() { this_thread::sleep_for(nld == 0ms ? duration : nld); });
       try {
         nld = lambda();

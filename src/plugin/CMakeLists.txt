@@ -36,6 +36,14 @@ set_target_properties(monitor PROPERTIES PREFIX "" SUFFIX ".plugin")
 target_link_libraries(monitor PRIVATE MadsCore pugg rang)
 list(APPEND TARGET_LIST monitor)
 
+# replay plugin
+if(MADS_ENABLE_MONGOCXX)
+  add_library(replay SHARED ${SOURCE_DIR}/plugin/mongo_replay.cpp)
+  set_target_properties(replay PROPERTIES PREFIX "" SUFFIX ".plugin")
+  target_link_libraries(replay PRIVATE MadsCore pugg rang)
+  list(APPEND TARGET_LIST replay)
+endif()
+
 # Install plugins
 install(TARGETS ${TARGET_LIST}
   BUNDLE DESTINATION bin

@@ -153,6 +153,22 @@ FetchContent_Declare(
 )
 
 if(MADS_ENABLE_MONGOCXX)
+  set(_mads_local_mongo_c_driver_src
+      "${CMAKE_BINARY_DIR}/_deps/mongo-c-driver-src")
+  if(EXISTS "${_mads_local_mongo_c_driver_src}/CMakeLists.txt")
+    FetchContent_Declare(
+      mongo_c_driver
+      SOURCE_DIR "${_mads_local_mongo_c_driver_src}"
+    )
+  else()
+    FetchContent_Declare(
+      mongo_c_driver
+      GIT_REPOSITORY https://github.com/mongodb/mongo-c-driver.git
+      GIT_TAG 1.30.6
+    )
+  endif()
+  unset(_mads_local_mongo_c_driver_src)
+
   FetchContent_Declare(
     mongo_cxx_driver
     GIT_REPOSITORY https://github.com/mongodb/mongo-cxx-driver.git
@@ -203,10 +219,15 @@ macro(add_vendor vendor_name)
 
   set(_vendor_source_dir "${${vendor_name}_SOURCE_DIR}")
   set(_vendor_binary_dir "${${vendor_name}_BINARY_DIR}")
+  set(_add_vendor_install_public_headers TRUE)
+
+  if(vendor_name STREQUAL "mongo_c_driver" OR vendor_name STREQUAL "mongo_cxx_driver")
+    set(_add_vendor_install_public_headers FALSE)
+  endif()
 
   # Install vendor headers into the main include prefix so installed public
   # Mads headers can resolve third-party includes.
-  if(NOT _add_vendor_exclude_from_all)
+  if(NOT _add_vendor_exclude_from_all AND _add_vendor_install_public_headers)
     if(EXISTS "${_vendor_source_dir}/include")
       install(
         DIRECTORY "${_vendor_source_dir}/include/"
@@ -273,6 +294,23 @@ macro(add_vendor_exclude_from_all vendor_name)
   add_vendor(${vendor_name} EXCLUDE YES)
 endmacro()
 
+function(prune_mongo_cxx_driver_installed_headers)
+  install(CODE "
+    set(_mads_install_root \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}\")
+    file(REMOVE_RECURSE
+      \"\${_mads_install_root}/${CMAKE_INSTALL_INCLUDEDIR}/mongocxx/test\"
+      \"\${_mads_install_root}/${CMAKE_INSTALL_INCLUDEDIR}/mongocxx/cmake\"
+      \"\${_mads_install_root}/${CMAKE_INSTALL_INCLUDEDIR}/mongocxx/include\"
+      \"\${_mads_install_root}/${CMAKE_INSTALL_INCLUDEDIR}/mongocxx/lib\"
+      \"\${_mads_install_root}/${CMAKE_INSTALL_INCLUDEDIR}/bsoncxx/test\"
+      \"\${_mads_install_root}/${CMAKE_INSTALL_INCLUDEDIR}/bsoncxx/cmake\"
+      \"\${_mads_install_root}/${CMAKE_INSTALL_INCLUDEDIR}/bsoncxx/include\"
+      \"\${_mads_install_root}/${CMAKE_INSTALL_INCLUDEDIR}/bsoncxx/third_party\"
+      \"\${_mads_install_root}/${CMAKE_INSTALL_INCLUDEDIR}/bsoncxx/lib\"
+    )
+  " COMPONENT MadsCore)
+endfunction()
+
 add_vendor(nlohmann_json)
 add_vendor(cxxopts)
 add_vendor(rang)
@@ -293,7 +331,16 @@ set(SODIUM_LIBRARIES
 unset(_mads_sodium_library)
 add_vendor(libzmq)
 add_vendor_exclude_from_all(inja)
-add_vendor_exclude_from_all(snappy)
+add_vendor(snappy)
+if(TARGET snappy)
+  install(
+    TARGETS snappy
+    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    COMPONENT MadsCore
+  )
+endif()
 
 # Work around zmqpp upstream CMake: generate_export_header(zmqpp) is called
 # even when ZMQPP_BUILD_SHARED is OFF.
@@ -341,10 +388,16 @@ if(MSVC)
 endif()
 
 if(MADS_ENABLE_MONGOCXX)
+  # Force mongo-cxx-driver to bind to in-tree libmongoc/libbson targets instead
+  # of stale user-local packages cached in the build directory.
+  set(ENABLE_EXTRA_ALIGNMENT OFF CACHE BOOL "" FORCE)
+  add_vendor(mongo_c_driver)
+
   # Ensure mongo-c-driver (used by mongo_cxx_driver) uses fetched Snappy.
   set(ENABLE_SNAPPY ON CACHE STRING "" FORCE)
   set(SNAPPY_INCLUDE_DIRS "${snappy_SOURCE_DIR}" CACHE PATH "" FORCE)
   set(SNAPPY_LIBRARIES "$<TARGET_FILE:snappy>" CACHE STRING "" FORCE)
 
   add_vendor(mongo_cxx_driver)
+  prune_mongo_cxx_driver_installed_headers()
 endif()

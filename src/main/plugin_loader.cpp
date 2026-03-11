@@ -338,6 +338,8 @@ int main(int argc, char *argv[]) {
          << endl;
   }
 #if defined(PLUGIN_LOADER_SOURCE)
+// TODO: in a forthcoming plugin protocol version, add blob_format to 
+// FILTERS too, and adapt the agent_loop for filters accordingly
   string out_format = plugin->blob_format();
   cerr << "  Blob format:      " << style::bold << out_format << style::reset
        << endl;
@@ -356,7 +358,6 @@ int main(int argc, char *argv[]) {
   json out, err;
   return_type rt;
   vector<unsigned char> blob;
-  json meta;
   agent.loop([&]() -> chrono::milliseconds {
     rt = plugin->get_output(out, &blob);
     switch (rt) {
@@ -370,13 +371,11 @@ int main(int argc, char *argv[]) {
       [[fallthrough]];
     case return_type::success:
       if (blob.size() > 0) {
-        if (out.contains("format"))
-          meta["format"] = out["format"];
-        else
-          meta["format"] = out_format;
-        agent.publish(blob, meta);
+        if (!out.contains("format"))
+          out["format"] = out_format;
+        agent.publish(blob, out, out.value("topic", ""));
       } else if (!out.empty()) {
-        agent.publish(out);
+        agent.publish(out, out.value("topic", ""));
       }
       break;
     case return_type::retry:
@@ -494,9 +493,11 @@ int main(int argc, char *argv[]) {
     }
     // publishing data
     if (!blob.empty()) {
-      agent.publish(blob, out);
+      if (!out.contains("format"))
+        out["format"] = "raw";
+      agent.publish(blob, out, out.value("topic", ""));
     } else {
-      agent.publish(out);
+      agent.publish(out, out.value("topic", ""));
     }
   status_line:
     if (!silent) {
@@ -571,7 +572,7 @@ int main(int argc, char *argv[]) {
     return 0ms;
   });
 #endif
-  cerr << fg::green << PLUGIN_NAME " plugin stopped" << fg::reset << endl;
+  cerr << fg::green << "\n" PLUGIN_NAME " plugin stopped" << fg::reset << endl;
 
   // Cleanup
   agent.register_event(event_type::shutdown);

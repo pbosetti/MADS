@@ -212,8 +212,20 @@ endif()
 link_first_available(${LIB_NAME} CANDIDATES inja::inja inja)
 link_first_available(${LIB_NAME} CANDIDATES Snappy::snappy snappy)
 if(MADS_ENABLE_MONGOCXX)
-  link_first_available(${LIB_NAME} CANDIDATES mongo::mongocxx_static mongocxx_static)
-  link_first_available(${LIB_NAME} CANDIDATES mongo::bsoncxx_static bsoncxx_static)
+  link_first_available(
+    ${LIB_NAME}
+    LINK_SCOPE PUBLIC
+    CANDIDATES
+      mongo::mongocxx_static
+      mongocxx_static
+  )
+  link_first_available(
+    ${LIB_NAME}
+    LINK_SCOPE PUBLIC
+    CANDIDATES
+      mongo::bsoncxx_static
+      bsoncxx_static
+  )
 endif()
 if(APPLE)
   find_library(FOUNDATION_FRAMEWORK Foundation)
