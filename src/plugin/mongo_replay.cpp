@@ -16,7 +16,10 @@
 #include <source.hpp>
 #include <nlohmann/json.hpp>
 #include <pugg/Kernel.h>
+#include <thread>
+#include <chrono>
 #include "../mongo_fetch.hpp"
+#include <mongocxx/exception/query_exception.hpp>
 
 // other includes as needed here
 
@@ -66,8 +69,16 @@ public:
     Source::set_params(params);
     _params["db_uri"] = "mongodb://localhost:27017/";
     _params.merge_patch(params);
-    _fetcher = make_unique<Mads::MongoFetch>(_params["db_uri"].get<string>());
-    _fetcher->connect();
+    try {
+      _fetcher = make_unique<Mads::MongoFetch>(_params["db_uri"].get<string>());
+      _fetcher->connect();
+    } catch (const mongocxx::query_exception &e) {
+      cout << "Error connecting to MongoDB: " << e.what() << endl;
+      exit(EXIT_FAILURE);
+    } catch (const std::exception &e) {
+      cout << "Error initializing MongoFetch: " << e.what() << endl;
+      exit(EXIT_FAILURE);
+    }
     if (!_params.contains("db_name") || !_params["db_name"].is_string()) {
       throw std::runtime_error("Missing or invalid `db_name` parameter: expected a string.");
     }
@@ -100,10 +111,18 @@ public:
     }
     _max_loop_duration = std::chrono::milliseconds(_params.value("max_loop_duration_ms", 0));
     _fetcher->set_repeat(_params.value("repeat", false));
-    if (_params.value("reuse_view", false)) {
-      _fetched_records = _fetcher->fetch_data(_params.value("view_name", ""));
-    } else {
-      _fetched_records = _fetcher->fetch_data_from(_params.value("view_name", ""));
+    try {
+      if (_params.value("reuse_view", false)) {
+        _fetched_records = _fetcher->fetch_data(_params.value("view_name", ""));
+      } else {
+        _fetched_records = _fetcher->fetch_data_from(_params.value("view_name", ""));
+      }
+    } catch (const mongocxx::query_exception &e) {
+      cout << "Error fetching data from MongoDB: " << e.what() << endl;
+      exit(EXIT_FAILURE);
+    } catch (const std::exception &e) {
+      cout << "Unexpected error: " << e.what() << endl;
+      exit(EXIT_FAILURE);
     }
   }
 
