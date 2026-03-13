@@ -280,6 +280,16 @@ public:
 
 
   /**
+   * @brief Performs a coordinated shutdown of the agent.
+   *
+   * This ensures all background threads (drain, remote control) are properly
+   * joined before closing sockets and terminating the ZMQ context.
+   * Called automatically by the destructor.
+   */
+  void shutdown();
+
+
+  /**
    * @brief Sets the cross flag.
    *
    * If the cross flag is set, the agent will bind to the publish endpoint and
@@ -698,7 +708,10 @@ protected:
   std::unique_ptr<CurveAuth> _curve_auth = nullptr;
   std::filesystem::path _key_dir;
   bool _last_value_only = false;
+  bool _shutdown_done = false;
   SharedLatest<zmqpp::message_t> _latest_message;
+  std::thread _drain_thread;
+  std::thread _rc_thread;
 public:
   bool dummy = false;
 };

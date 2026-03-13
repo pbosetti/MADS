@@ -259,13 +259,40 @@ void Agent::init(bool crypto, bool install_watchdog) {
 void Agent::load_settings() {}
 
 Agent::~Agent() {
-  if (_init_done) {
-    disconnect();
+  shutdown();
+}
+
+void Agent::shutdown() {
+  if (_shutdown_done) return;
+  _shutdown_done = true;
+
+  // 1. Signal all threads to stop
+  Mads::running = false;
+
+  // 2. Unblock any cv.wait() in receive_raw() LKV mode
+  {
+    std::lock_guard<std::mutex> lock(_latest_message.mtx);
+    _latest_message.cv.notify_all();
   }
+
+  // 3. Join background threads (bounded by their receive timeouts)
+  if (_drain_thread.joinable()) _drain_thread.join();
+  if (_rc_thread.joinable()) _rc_thread.join();
+
+  // 4. Disconnect sockets
+  if (_init_done && _connected) {
+    try {
+      _publisher.disconnect(_pub_endpoint);
+      _subscriber.disconnect(_sub_endpoint);
+    } catch (...) {}
+    _connected = false;
+  }
+
+  // 5. Close sockets and terminate context
   _curve_auth = nullptr;
-  _publisher.close();
-  _subscriber.close();
-  _context.terminate();
+  try { _publisher.close(); } catch (...) {}
+  try { _subscriber.close(); } catch (...) {}
+  try { _context.terminate(); } catch (...) {}
 }
 
 void Agent::install_loop_watchdog(uint8_t max_count) {
@@ -365,8 +392,20 @@ void Agent::disconnect() {
     throw AgentError("Agent not initialized");
   if (!_connected)
     return;
+
+  Mads::running = false;
+
+  // Unblock LKV cv.wait()
+  {
+    std::lock_guard<std::mutex> lock(_latest_message.mtx);
+    _latest_message.cv.notify_all();
+  }
+
+  // Join background threads before touching sockets
+  if (_drain_thread.joinable()) _drain_thread.join();
+  if (_rc_thread.joinable()) _rc_thread.join();
+
   try {
-    Mads::running = false;
     _publisher.disconnect(_pub_endpoint);
     _subscriber.disconnect(_sub_endpoint);
   } catch (...) {
@@ -617,7 +656,7 @@ void Agent::enable_remote_control(bool threaded) {
   _remote_controlled = true;
   _sub_topic.push_back("control");
   if (threaded)
-    thread([&]() {
+    _rc_thread = thread([this]() {
       _subscriber.set(zmqpp::socket_option::receive_timeout, 500);
       message msg;
       string topic, payload, j;
@@ -631,7 +670,7 @@ void Agent::enable_remote_control(bool threaded) {
           }
         }
       }
-    }).detach();
+    });
 }
 
 
@@ -701,7 +740,7 @@ void Agent::connect_sub() {
   // Drain thread
   // this keeps the queue updated to the LKV when its size is 1
   if (_last_value_only) {
-    thread([&]() {
+    _drain_thread = thread([this]() {
       zmqpp::message_t msg;
       while(Mads::running && _connected) {
         try {
@@ -711,7 +750,7 @@ void Agent::connect_sub() {
           _latest_message.cv.notify_one();
         } catch (...) {}
       }
-    }).detach();
+    });
   }
 }
 
