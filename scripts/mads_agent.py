@@ -114,7 +114,7 @@ lib.agent_set_receive_timeout.restype = None
 lib.agent_receive_timeout.argtypes = [c_void_p]
 lib.agent_receive_timeout.restype = c_int
 
-lib.agent_last_error.argtypes = [c_void_p]
+lib.agent_last_error.argtypes = []
 lib.agent_last_error.restype = c_char_p
 
 # Settings functions

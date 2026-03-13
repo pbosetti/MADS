@@ -488,6 +488,10 @@ void Agent::publish(const char *payload, size_t len,
   chrono::system_clock::time_point now = chrono::system_clock::now();
   meta["timestamp"]["$date"] = get_ISODate_time(now);
   meta["timecode"] = timecode(now, timecode_fps);
+  if (!meta.contains("agent_id"))
+    meta["agent_id"] = _agent_id;
+  if (!meta.contains("hostname"))
+    meta["hostname"] = _hostname;
   if (topic.empty())
     topic = _pub_topic;
   message << topic << meta.dump();
@@ -497,6 +501,8 @@ void Agent::publish(const char *payload, size_t len,
 
 void Agent::publish(const vector<unsigned char> &payload,
            nlohmann::json meta, string topic) {
+  if (!_init_done)
+    throw AgentError("Agent not initialized");
   if (!meta.contains("agent_id"))
     meta["agent_id"] = _agent_id;
   if (!meta.contains("hostname"))
@@ -843,7 +849,7 @@ string Agent::settings_uri() { return _settings_uri; }
 // Apparently, conflate maked the socket irresponsive
 // TODO: investigate
 void Agent::set_conflate(bool conflate) {
-  if (_connected) throw runtime_error("Cannot set_conflate after connection");
+  if (_connected) throw AgentError("Cannot set_conflate after connection");
   _subscriber.set(socket_option::conflate, conflate);
   _conflate = conflate;
 }
@@ -854,7 +860,7 @@ bool Agent::conflate() {
 
 
 void Agent::set_high_watermark(int i) {
-  if (_connected) throw runtime_error("Cannot set_high_watermark after connection");
+  if (_connected) throw AgentError("Cannot set_high_watermark after connection");
   if (i == 0) i = 1;
   _last_value_only = (i == 1);
   _subscriber.set(socket_option::receive_high_water_mark, i);

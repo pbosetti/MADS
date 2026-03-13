@@ -42,6 +42,10 @@ void agent_destroy(agent_t agent) {
 
 int agent_init(agent_t agent, bool crypto) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
+  if(ag->is_connected()) {
+    snprintf(_err_msg, ERR_MSG_SIZE, "Error initializing agent: Agent already connected");
+    return -1;
+  }
   try {
     ag->init(crypto, false);
   } catch (const std::exception &e) {
@@ -109,6 +113,10 @@ void agent_set_auth_verbose(agent_t agent, bool verbose) {
 // Std ops
 int agent_connect(agent_t agent, int delay_ms) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
+  if(ag->is_connected()) {
+    snprintf(_err_msg, ERR_MSG_SIZE, "Error connecting agent: Agent already connected");
+    return -1;
+  }
   try {
     ag->connect(chrono::milliseconds(delay_ms));
   } catch (const std::exception &e) {
@@ -124,6 +132,10 @@ int agent_connect(agent_t agent, int delay_ms) {
 int agent_register_event(agent_t agent, event_type_t event,
                          const char *info_json) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
+  if(!ag->is_connected()) {
+    snprintf(_err_msg, ERR_MSG_SIZE, "Error registering event: Agent not connected");
+    return -1;
+  }
   try {
     if (info_json == nullptr) {
       ag->register_event(static_cast<Mads::event_type>(event));
@@ -143,6 +155,7 @@ int agent_register_event(agent_t agent, event_type_t event,
 
 int agent_disconnect(agent_t agent) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
+  if (!ag->is_connected()) return 0;
   Mads::running = false;
   try {
     ag->disconnect();
@@ -220,6 +233,10 @@ int agent_high_watermark(agent_t agent) {
 int agent_publish(agent_t agent, const char *message, const char *topic) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
   nlohmann::json j;
+  if(!ag->is_connected()) {
+    snprintf(_err_msg, ERR_MSG_SIZE, "Error publishing message: Agent not connected");
+    return -1;
+  }
   try {
     j = nlohmann::json::parse(string(message));
   } catch (...) {
@@ -241,6 +258,10 @@ int agent_publish(agent_t agent, const char *message, const char *topic) {
 message_type_t agent_receive(agent_t agent, bool dont_block) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
   message_type type = message_type::none;
+  if(!ag->is_connected()) {
+    snprintf(_err_msg, ERR_MSG_SIZE, "Error receiving message: Agent not connected");
+    return static_cast<message_type_t>(type);
+  }
   try {
     type = ag->receive(dont_block);
   } catch (const std::exception &e) {
