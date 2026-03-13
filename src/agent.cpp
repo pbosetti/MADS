@@ -477,7 +477,9 @@ inline bool Agent::receive_raw(message &message, bool dont_block) {
     // _latest_message.cv.wait(lock, [&]() -> bool {
     //   return true;
     // });
-    _latest_message.cv.wait(lock);
+    _latest_message.cv.wait(lock, [&] {
+       return _latest_message.value.has_value() || !Mads::running;
+    });
     if (_latest_message.value.has_value()) {
       message = _latest_message.value.value().copy();
       _latest_message.value.reset();
@@ -517,14 +519,20 @@ message_type Agent::receive(bool dont_block) {
       remote_control(j);
       break;
     }
-    _status[topic] = j;
-    _last_message = make_tuple(topic, j);
+    {
+      std::lock_guard<std::mutex> lock(_message_state_mutex);
+      _status[topic] = j;
+      _last_message = make_tuple(topic, j);
+    }
     result = message_type::json;
     break;
   case 3: // Payload is a binary blob, type is in message[1]
     message >> topic >> format >> payload;
-    _last_blob = make_tuple(
-        topic, format, vector<unsigned char>(payload.begin(), payload.end()));
+    {
+      std::lock_guard<std::mutex> lock(_message_state_mutex);
+      _last_blob = make_tuple(
+          topic, format, vector<unsigned char>(payload.begin(), payload.end()));
+    }
     result = message_type::blob;
     break;
   default:
@@ -722,15 +730,25 @@ void Agent::set_agent_id(string id) { _agent_id = id; }
 
 string Agent::get_agent_id() { return _agent_id; }
 
-map<string, string> Agent::status() { return _status; }
+map<string, string> Agent::status() {
+  std::lock_guard<std::mutex> lock(_message_state_mutex);
+  return _status;
+}
 
 string Agent::name() { return _name; }
 
-tuple<string, string> Agent::last_message() { return _last_message; }
+tuple<string, string> Agent::last_message() {
+  std::lock_guard<std::mutex> lock(_message_state_mutex);
+  return _last_message;
+}
 
-string Agent::last_topic() { return get<0>(_last_message); }
+string Agent::last_topic() {
+  std::lock_guard<std::mutex> lock(_message_state_mutex);
+  return get<0>(_last_message);
+}
 
 tuple<string, string, vector<unsigned char>> Agent::last_blob() {
+  std::lock_guard<std::mutex> lock(_message_state_mutex);
   return _last_blob;
 }
 

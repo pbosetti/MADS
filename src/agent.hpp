@@ -682,6 +682,7 @@ protected:
   std::map<std::string, std::string> _status;
   std::tuple<std::string, std::string> _last_message;
   std::tuple<std::string, std::string, std::vector<unsigned char>> _last_blob;
+  mutable std::mutex _message_state_mutex;
   bool _cross = false;
   bool _connected = false;
   int _receive_timeout = 500;

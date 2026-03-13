@@ -36,13 +36,14 @@ agent_t agent_create(const char *name, const char *settings_uri) {
 
 void agent_destroy(agent_t agent) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
+  Mads::running = false;
   delete ag;
 }
 
 int agent_init(agent_t agent, bool crypto) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
   try {
-    ag->init(crypto);
+    ag->init(crypto, true);
   } catch (const std::exception &e) {
     snprintf(_err_msg, ERR_MSG_SIZE, "Error initializing agent: %s", e.what());
     return -1;
