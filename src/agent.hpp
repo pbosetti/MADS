@@ -57,11 +57,6 @@ Author(s): Paolo Bosetti
 using namespace rang;
 #endif
 
-using namespace std::string_view_literals;
-using namespace std::string_literals;
-using namespace zmqpp;
-using namespace std;
-
 #define STARTUP_SHUTDOWN_DELAY 500
 
 namespace Mads {
@@ -88,8 +83,8 @@ class Agent; // forward declaration
  * @throws AgentError if there is an error in the initialization (e.g. settings
  * file
  */
-unique_ptr<Agent> start_agent(string name, string settings_uri,
-                              map<string, string> crypto_settings = {});
+std::unique_ptr<Agent> start_agent(std::string name, std::string settings_uri,
+                                   std::map<std::string, std::string> crypto_settings = {});
 
 /**
  * @brief The Agent class represents an agent in the mads system.
@@ -143,9 +138,9 @@ private:
    * @return a tuple with the settings and possibly the path of the attachemnt.
    * @throws AgentError if timed out in reading settings from broker.
    */
-  tuple<string, filesystem::path> read_settings(string uri, string name, int timeout = 2000);
+  std::tuple<std::string, std::filesystem::path> read_settings(std::string uri, std::string name, int timeout = 2000);
 
-  double get_broker_timecode(string uri, int timeout = 2000);
+  double get_broker_timecode(std::string uri, int timeout = 2000);
 
 public:
 /*
@@ -165,7 +160,7 @@ public:
    * @param name The name of the agent. If it is a path, it take the filename.
    * @param settings_path The path or URI to the settings file for the agent.
    */
-  Agent(string name, string settings_uri);
+  Agent(std::string name, std::string settings_uri);
 
 
   /**
@@ -180,7 +175,7 @@ public:
    * @param key_dir The directory where the CURVE keys are stored.
    * @throws AgentError if timed out in reading settings from broker.
    */
-  void init(string name, string settings_uri, bool crypto = false, filesystem::path const &key_dir = "", bool install_watchdog = true);
+  void init(std::string name, std::string settings_uri, bool crypto = false, std::filesystem::path const &key_dir = "", bool install_watchdog = true);
 
 
   /**
@@ -231,7 +226,7 @@ public:
    * @param path
    * @throws AgentError if not initialized or settings are local.
    */
-  void save_settings(const string path = SETTINGS_PATH);
+  void save_settings(const std::string path = SETTINGS_PATH);
 
 
   /**
@@ -251,7 +246,7 @@ public:
    * @param out The output stream to be used (default is cout).
    * @throws AgentError if not initialized
    */
-  virtual void info(ostream &out = cout);
+  virtual void info(std::ostream &out = std::cout);
 #endif
 
 
@@ -275,7 +270,7 @@ public:
    * @param delay The delay in milliseconds after connecting.
    * @throws AgentError if not initialized
    */
-  void connect(chrono::milliseconds delay = chrono::milliseconds(0));
+  void connect(std::chrono::milliseconds delay = std::chrono::milliseconds(250));
 
 
   /**
@@ -300,9 +295,9 @@ public:
    *
    * @param topic The topic to be used for publishing messages.
    */
-  void set_pub_topic(string topic);
+  void set_pub_topic(std::string topic);
 
-  string pub_topic() const { return _pub_topic; }
+  std::string pub_topic() const { return _pub_topic; }
 
   /**
    * @brief Enables remote control for the agent.
@@ -336,7 +331,7 @@ public:
    */
   void register_event(const event_type event = event_type::marker,
                       const nlohmann::json &info = nlohmann::json(),
-                      const string &info_name = "info");
+                      const std::string &info_name = "info");
 
 
   /**
@@ -345,7 +340,7 @@ public:
    * @param payload The JSON payload of the message.
    * @throws AgentError if not initialized
    */
-  void publish(nlohmann::json payload, string topic = "");
+  void publish(nlohmann::json payload, std::string topic = "");
 
 
   /**
@@ -358,7 +353,7 @@ public:
    */
   void publish(const char *payload, size_t len,
                nlohmann::json meta = nlohmann::json{{"format", "raw"}},
-               string topic = "");
+               std::string topic = "");
 
   
   /**
@@ -369,9 +364,9 @@ public:
    * @param topic The topic of the message.
    * @throws AgentError if not initialized
    */
-  void publish(const vector<unsigned char> &payload,
+  void publish(const std::vector<unsigned char> &payload,
                nlohmann::json meta = nlohmann::json{{"format", "raw"}},
-               string topic = "");
+               std::string topic = "");
 
 
   /**
@@ -406,9 +401,9 @@ public:
    * @param duration the duration of the loop (default 0, max speed)
    * @throws AgentError if not initialized
    */
-  using loop_fun_t = std::function<chrono::milliseconds()>;
+  using loop_fun_t = std::function<std::chrono::milliseconds()>;
   void loop(loop_fun_t const &lambda,
-            chrono::milliseconds duration);
+            std::chrono::milliseconds duration);
 
 
   /**
@@ -450,7 +445,7 @@ public:
    * 
    * @param id The agent ID
    */
-   void set_agent_id(string id);
+   void set_agent_id(std::string id);
 
 
   
@@ -459,7 +454,7 @@ public:
    * 
    * @return The agent ID
    */
-  string get_agent_id();
+  std::string get_agent_id();
 
 
   /**
@@ -467,7 +462,7 @@ public:
    *
    * @return A map containing the last messages for each subscribed topic.
    */
-  map<string, string> status();
+  std::map<std::string, std::string> status();
 
 
   /**
@@ -475,7 +470,7 @@ public:
    *
    * @return The name of the agent.
    */
-  string name();
+  std::string name();
 
 
   /**
@@ -484,7 +479,7 @@ public:
    * @return A tuple containing the topic and payload of the last received
    * message.
    */
-  tuple<string, string> last_message();
+  std::tuple<std::string, std::string> last_message();
 
 
   /**
@@ -492,7 +487,7 @@ public:
    *
    * @return The topic of the last received message.
    */
-  string last_topic();
+  std::string last_topic();
 
 
   /**
@@ -501,7 +496,7 @@ public:
    * @return A tuple containing the topic, format, and payload of the last
    * received blob.
    */
-  tuple<string, string, vector<unsigned char>> last_blob();
+  std::tuple<std::string, std::string, std::vector<unsigned char>> last_blob();
 
 
   /**
@@ -572,7 +567,7 @@ public:
    *
    * @return The path to the attachment file.
    */
-  filesystem::path attachment_path();
+  std::filesystem::path attachment_path();
 
 
   /**
@@ -596,7 +591,7 @@ public:
    * 
    * @return unique_ptr<CurveAuth>* 
    */
-  unique_ptr<CurveAuth> *curve_auth();
+  std::unique_ptr<CurveAuth> *curve_auth();
 
 
   /**
@@ -604,7 +599,7 @@ public:
    * 
    * @return filesystem::path 
    */
-  filesystem::path key_dir();
+  std::filesystem::path key_dir();
 
 
   /**
@@ -612,22 +607,27 @@ public:
    * 
    * @param path 
    */
-  void set_key_dir(const filesystem::path &path);
+  void set_key_dir(const std::filesystem::path &path);
 
-  string settings_uri();
+  std::string settings_uri();
 
   
   void set_conflate(bool conflate);
   bool conflate();
 
+  /**
+   * @brief Set the high watermark object
+   * 
+   * @param i The queue size. I set to 1 or 0, the agent will only keep the last message received, implementing a LastKnown Value (LKV) semantic. 
+   */
   void set_high_watermark(int i = 1000);
   int high_watermark();
 
 
   double timecode_fps = MADS_FPS;
   Mads::auth_verbose auth_verbose = auth_verbose::off;
-  string server_key_name = "broker";
-  string client_key_name = "client";
+  std::string server_key_name = "broker";
+  std::string client_key_name = "client";
 
   /*
     ____       _            _
@@ -644,7 +644,7 @@ protected:
    *
    * @param delay The delay in milliseconds after connecting.
    */
-  void connect_pub(chrono::milliseconds delay = chrono::milliseconds(0));
+  void connect_pub(std::chrono::milliseconds delay = std::chrono::milliseconds(0));
 
 
   /**
@@ -662,26 +662,26 @@ protected:
    * @return true new message
    * @return false no new message (when non blocking or timeout)
    */
-  bool receive_raw(message &message, bool dont_block = false);
+  bool receive_raw(zmqpp::message &message, bool dont_block = false);
 
-  static tuple<string, string, string> split_URL(const string &url);
+  static std::tuple<std::string, std::string, std::string> split_URL(const std::string &url);
 
   // Member variables
-  string _hostname;
-  string _name;
-  string _settings_uri;
-  string _raw_settings;
+  std::string _hostname;
+  std::string _name;
+  std::string _settings_uri;
+  std::string _raw_settings;
   toml::table _config;
-  string _pub_endpoint, _sub_endpoint;
-  string _pub_topic;
-  string _agent_id;
-  vector<string> _sub_topic;
-  context _context;
+  std::string _pub_endpoint, _sub_endpoint;
+  std::string _pub_topic;
+  std::string _agent_id;
+  std::vector<std::string> _sub_topic;
+  zmqpp::context _context;
   zmqpp::socket _publisher;
   zmqpp::socket _subscriber;
-  map<string, string> _status;
-  tuple<string, string> _last_message;
-  tuple<string, string, vector<unsigned char>> _last_blob;
+  std::map<std::string, std::string> _status;
+  std::tuple<std::string, std::string> _last_message;
+  std::tuple<std::string, std::string, std::vector<unsigned char>> _last_blob;
   bool _cross = false;
   bool _connected = false;
   int _receive_timeout = 500;
@@ -689,13 +689,13 @@ protected:
   bool _init_done = false;
   bool _restart = false;
   bool _remote_controlled = false;
-  chrono::milliseconds _time_step = chrono::milliseconds(0);
+  std::chrono::milliseconds _time_step = std::chrono::milliseconds(0);
   double _timecode_offset = 0.0;
-  filesystem::path _attachment_path;
+  std::filesystem::path _attachment_path;
   bool _crypto = false;
   bool _conflate = false;
-  unique_ptr<CurveAuth> _curve_auth = nullptr;
-  filesystem::path _key_dir;
+  std::unique_ptr<CurveAuth> _curve_auth = nullptr;
+  std::filesystem::path _key_dir;
   bool _last_value_only = false;
   SharedLatest<zmqpp::message_t> _latest_message;
 public:

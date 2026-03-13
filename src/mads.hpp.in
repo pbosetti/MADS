@@ -157,7 +157,7 @@ namespace Mads {
  * @brief Library version.
  *
  */
-static std::string version() { return LIB_VERSION; }
+inline std::string version() { return LIB_VERSION; }
 
 /**
  * @brief Checks if the given version matches the library version.
@@ -166,7 +166,7 @@ static std::string version() { return LIB_VERSION; }
  * @return true if the version matches, false otherwise.
  * @throws std::runtime_error if the version string is invalid.
  */
-static bool check_version(const std::string &version) {
+inline bool check_version(const std::string &version) {
   size_t last_dot = version.find_last_of('.');
   std::string version_cmp;
   if (last_dot != std::string::npos) {
@@ -181,7 +181,7 @@ static bool check_version(const std::string &version) {
  * @brief Global flag for stopping the main loop in Mads agents.
  *
  */
-static bool running = true;
+inline std::atomic<bool> running{true};
 
 /**
  * @brief Enumeration of event types for agents.
@@ -206,7 +206,7 @@ enum class message_type { none = 0, json = 1, blob };
  * @brief Map of event types to strings.
  *
  */
-static const std::map<event_type, std::string> event_map = {
+inline const std::map<event_type, std::string> event_map = {
     {event_type::marker, "marker"},
     {event_type::marker_in, "marker in"},
     {event_type::marker_out, "marker out"},
@@ -226,7 +226,7 @@ inline std::string event_name(event_type type) { return event_map.at(type); }
  * @param time
  * @return string
  */
-static std::string
+inline std::string
 get_ISODate_time(const std::chrono::system_clock::time_point &time,
                  int32_t offset = 0) {
   const auto adjusted_time = time + std::chrono::milliseconds(offset);
@@ -247,7 +247,7 @@ get_ISODate_time(const std::chrono::system_clock::time_point &time,
   return ss.str();
 }
 
-static double timecode(const std::chrono::system_clock::time_point &now,
+inline double timecode(const std::chrono::system_clock::time_point &now,
                        unsigned int fps = 25) {
   time_t now_c = std::chrono::system_clock::to_time_t(now);
   tm *lt = localtime(&now_c);
@@ -261,7 +261,7 @@ static double timecode(const std::chrono::system_clock::time_point &now,
 }
 
 #ifndef _WIN32
-static std::chrono::milliseconds tv_to_milliseconds(struct timeval &tv)
+inline std::chrono::milliseconds tv_to_milliseconds(struct timeval &tv)
 {
     using namespace std::chrono;
 
@@ -270,7 +270,7 @@ static std::chrono::milliseconds tv_to_milliseconds(struct timeval &tv)
     return sec + usec;
 }
 
-static void milliseconds_to_tv(std::chrono::milliseconds const &ms,
+inline void milliseconds_to_tv(std::chrono::milliseconds const &ms,
                         struct timeval &tv)
 {
     using namespace std::chrono;

@@ -23,7 +23,7 @@ class Dealer : public Agent {
 public:
   Dealer(string name, string settings_path) : 
     Agent(name, settings_path), 
-    _sender(_context, socket_type::push) {
+    _sender(_context, zmqpp::socket_type::push) {
     load_settings();
   }
 

@@ -102,6 +102,9 @@ tuple<string, filesystem::path> Agent::read_settings(string uri, string name, in
       throw AgentError("Failed to open temporary file for writing attachment from broker");
     }
     ofs.write(msg_in.get(2).data(), msg_in.get(2).size());
+    if (!ofs.good()) {
+      throw AgentError("Failed to write attachment from broker to temporary file");
+    }
     ofs.close();
     result = make_tuple(msg_in.get(1), tmp_file);
   } else {
@@ -116,8 +119,10 @@ double Agent::get_broker_timecode(string uri, int timeout) {
     _curve_auth->setup_curve_client(socket, client_key_name, server_key_name);
   }
   message msg;
-  if (timeout > 0)
+  if (timeout > 0) {
     socket.set(zmqpp::socket_option::receive_timeout, timeout);
+    socket.set(zmqpp::socket_option::send_timeout, timeout);
+  }
   socket.connect(uri);
   msg << string("v") + LIB_VERSION << "timecode";
   socket.send(msg);
@@ -254,7 +259,9 @@ void Agent::init(bool crypto, bool install_watchdog) {
 void Agent::load_settings() {}
 
 Agent::~Agent() {
-  disconnect();
+  if (_init_done) {
+    disconnect();
+  }
   _curve_auth = nullptr;
   _publisher.close();
   _subscriber.close();
@@ -451,7 +458,11 @@ void Agent::publish(const char *payload, size_t len,
 
 void Agent::publish(const vector<unsigned char> &payload,
            nlohmann::json meta, string topic) {
-  char *data = (char *)payload.data();
+  if (!meta.contains("agent_id"))
+    meta["agent_id"] = _agent_id;
+  if (!meta.contains("hostname"))
+    meta["hostname"] = _hostname;
+  const char *data = reinterpret_cast<const char *>(payload.data());
   publish(data, payload.size(), meta, topic);
 }
 
@@ -523,7 +534,7 @@ message_type Agent::receive(bool dont_block) {
   return result;
 }
 
-
+#ifdef MADS_LOOP_USES_THREADS
 void Agent::loop(loop_fun_t const &lambda, chrono::milliseconds duration) {
   if (!_init_done)
     throw AgentError("Agent not initialized");
@@ -554,6 +565,37 @@ void Agent::loop(loop_fun_t const &lambda, chrono::milliseconds duration) {
     }
   }
 }
+#else
+void Agent::loop(loop_fun_t const &lambda, chrono::milliseconds duration) {
+  if (!_init_done)
+    throw AgentError("Agent not initialized");
+  std::signal(SIGINT, [](int signum) {
+    UNUSED(signum);
+    Mads::running = false;
+  });
+  std::signal(SIGTERM, [](int signum) {
+    UNUSED(signum);
+    Mads::running = false;
+  });
+  chrono::milliseconds nld(0); // next loop duration
+  while (Mads::running) {
+    chrono::milliseconds sleep_duration = nld == 0ms ? duration : nld;
+    auto start = chrono::steady_clock::now();
+    try {
+      nld = lambda();
+    } catch (...) {
+      Mads::running = false;
+    }
+    if (sleep_duration > 0ms) {
+      auto elapsed = chrono::duration_cast<chrono::milliseconds>(
+          chrono::steady_clock::now() - start);
+      if (elapsed < sleep_duration) {
+        this_thread::sleep_for(sleep_duration - elapsed);
+      }
+    }
+  }
+}
+#endif
 
 void Agent::loop(loop_fun_t const &lambda) {
   loop(lambda, _time_step);
@@ -746,7 +788,7 @@ string Agent::settings_uri() { return _settings_uri; }
 void Agent::set_conflate(bool conflate) {
   if (_connected) throw runtime_error("Cannot set_conflate after connection");
   _subscriber.set(socket_option::conflate, conflate);
-  _conflate = true;
+  _conflate = conflate;
 }
 
 bool Agent::conflate() {

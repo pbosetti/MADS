@@ -22,7 +22,7 @@ class Worker : public Agent {
 public:
   Worker(string name, string settings_path) : 
     Agent(name, settings_path), 
-    _receiver(_context, socket_type::pull) {
+    _receiver(_context, zmqpp::socket_type::pull) {
     load_settings();
   }
 
@@ -38,7 +38,7 @@ public:
 
   json pull() {
     string payload;
-    message msg;
+    zmqpp::message msg;
     json j;
 
     _receiver.receive(msg);
