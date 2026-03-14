@@ -41,6 +41,8 @@ if(MADS_ENABLE_MONGOCXX)
   add_library(replay SHARED ${SOURCE_DIR}/plugin/mongo_replay.cpp)
   set_target_properties(replay PROPERTIES PREFIX "" SUFFIX ".plugin")
   target_link_libraries(replay PRIVATE MadsCore pugg rang)
+  link_first_available(replay CANDIDATES mongo::mongocxx_static mongocxx_static)
+  link_first_available(replay CANDIDATES mongo::bsoncxx_static bsoncxx_static)
   list(APPEND TARGET_LIST replay)
 endif()
 

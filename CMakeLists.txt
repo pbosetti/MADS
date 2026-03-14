@@ -214,14 +214,12 @@ link_first_available(${LIB_NAME} CANDIDATES Snappy::snappy snappy)
 if(MADS_ENABLE_MONGOCXX)
   link_first_available(
     ${LIB_NAME}
-    LINK_SCOPE PUBLIC
     CANDIDATES
       mongo::mongocxx_static
       mongocxx_static
   )
   link_first_available(
     ${LIB_NAME}
-    LINK_SCOPE PUBLIC
     CANDIDATES
       mongo::bsoncxx_static
       bsoncxx_static
@@ -309,6 +307,25 @@ install(
 install(
   EXPORT MadsTargets
   NAMESPACE Mads::
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Mads
+  COMPONENT MadsCore
+)
+
+include(CMakePackageConfigHelpers)
+configure_package_config_file(
+  ${CMAKE_CURRENT_LIST_DIR}/cmake/MadsConfig.cmake.in
+  ${CMAKE_CURRENT_BINARY_DIR}/MadsConfig.cmake
+  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Mads
+)
+write_basic_package_version_file(
+  ${CMAKE_CURRENT_BINARY_DIR}/MadsConfigVersion.cmake
+  VERSION ${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}
+  COMPATIBILITY SameMajorVersion
+)
+install(
+  FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/MadsConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/MadsConfigVersion.cmake
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Mads
   COMPONENT MadsCore
 )
