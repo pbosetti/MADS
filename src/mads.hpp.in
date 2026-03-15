@@ -23,6 +23,7 @@ Author(s): Paolo Bosetti
 #include <map>
 #include <sstream>
 #include <string>
+#include <atomic>
 
 
 /*
