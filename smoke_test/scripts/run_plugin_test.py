@@ -15,9 +15,17 @@ def main():
 
     cmd = sys.argv[1:]
     try:
-        proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
+        popen_kwargs = {
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+        }
+        if sys.platform == "win32":
+            # CREATE_NEW_PROCESS_GROUP is required for CTRL_BREAK_EVENT to be
+            # delivered to the child process only. Without it, the signal is
+            # broadcast to the entire console group (including CTest and other
+            # test processes), potentially killing the whole test suite.
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        proc = subprocess.Popen(cmd, **popen_kwargs)
     except FileNotFoundError:
         print(f"FAIL: executable not found: {cmd[0]}", file=sys.stderr)
         return 1

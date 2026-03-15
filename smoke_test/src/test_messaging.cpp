@@ -45,9 +45,10 @@ static int test_blocking(const string &settings_uri) {
   pub_agent.init();
   pub_agent.connect();
 
-  // Publish a message after a short delay
+  // Publish a message after a delay (long enough for subscriber to connect,
+  // retrieve settings from broker, and establish ZMQ subscription)
   thread publisher([&]() {
-    this_thread::sleep_for(chrono::milliseconds(500));
+    this_thread::sleep_for(chrono::milliseconds(2000));
     json msg = {{"test", "blocking"}, {"value", 42}};
     pub_agent.publish(msg);
   });
@@ -90,8 +91,9 @@ static int test_lkv(const string &settings_uri) {
   sub_agent.set_receive_timeout(3000);
   sub_agent.connect();
 
-  // Give subscription time to establish
-  this_thread::sleep_for(chrono::milliseconds(300));
+  // Give subscription time to establish (ZMQ "slow joiner" problem;
+  // needs more time on Windows where socket operations have higher latency)
+  this_thread::sleep_for(chrono::milliseconds(1000));
 
   // Publish 10 messages rapidly
   for (int i = 0; i < 10; i++) {
@@ -99,8 +101,8 @@ static int test_lkv(const string &settings_uri) {
     pub_agent.publish(msg);
   }
 
-  // Small delay for delivery
-  this_thread::sleep_for(chrono::milliseconds(500));
+  // Delay for message delivery through the broker
+  this_thread::sleep_for(chrono::milliseconds(1000));
 
   // Receive — in LKV mode we should get a message (likely the last one)
   auto mt = sub_agent.receive(false);
@@ -133,7 +135,8 @@ static int test_queue(const string &settings_uri) {
   sub_agent.set_receive_timeout(3000);
   sub_agent.connect();
 
-  this_thread::sleep_for(chrono::milliseconds(300));
+  // Give subscription time to establish (generous for cross-platform reliability)
+  this_thread::sleep_for(chrono::milliseconds(1000));
 
   // Publish 5 messages
   for (int i = 0; i < 5; i++) {
@@ -141,7 +144,8 @@ static int test_queue(const string &settings_uri) {
     pub_agent.publish(msg);
   }
 
-  this_thread::sleep_for(chrono::milliseconds(500));
+  // Delay for message delivery through the broker
+  this_thread::sleep_for(chrono::milliseconds(1000));
 
   // Receive multiple messages
   int count = 0;

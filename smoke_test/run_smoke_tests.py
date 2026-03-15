@@ -51,7 +51,11 @@ def find_mads_prefix(build_dir):
 
 def wait_for_broker(timeout=5):
     """Wait for broker to be ready (simple sleep-based approach)."""
-    time.sleep(min(timeout, 2))
+    if sys.platform == "win32":
+        # Windows needs more time for process startup and ZMQ socket binding
+        time.sleep(min(timeout, 4))
+    else:
+        time.sleep(min(timeout, 2))
 
 
 def main():
@@ -115,7 +119,17 @@ def main():
         nonlocal broker_proc
         if broker_proc and broker_proc.poll() is None:
             print("\nStopping broker...")
-            broker_proc.terminate()
+            if sys.platform == "win32":
+                # Use CTRL_BREAK_EVENT for cleaner shutdown on Windows.
+                # The default console control handler calls ExitProcess(), which
+                # is much cleaner than TerminateProcess() (used by terminate()).
+                # Requires CREATE_NEW_PROCESS_GROUP in the Popen call above.
+                try:
+                    broker_proc.send_signal(signal.CTRL_BREAK_EVENT)
+                except OSError:
+                    broker_proc.terminate()
+            else:
+                broker_proc.terminate()
             try:
                 broker_proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
@@ -149,21 +163,27 @@ def main():
         return 1
 
     print(f"Starting broker: {broker_exe} -s {config_path}")
+    # Use DEVNULL for broker output to prevent pipe buffer deadlock on Windows.
+    # Windows pipe buffers are only 4KB; if the broker's stdout/stderr fill up
+    # (from startup messages, settings logging, etc.) and the parent never reads,
+    # the broker's settings thread blocks on cout and can't serve agent requests.
+    popen_kwargs = {
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    if sys.platform == "win32":
+        # Create broker in its own process group so we can send CTRL_BREAK_EVENT
+        # for clean shutdown (default handler calls ExitProcess) instead of
+        # TerminateProcess which is an instant kill with no cleanup.
+        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
     broker_proc = subprocess.Popen(
         [broker_exe, "-s", config_path],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        **popen_kwargs,
     )
     wait_for_broker()
 
     if broker_proc.poll() is not None:
-        stdout = broker_proc.stdout.read().decode() if broker_proc.stdout else ""
-        stderr = broker_proc.stderr.read().decode() if broker_proc.stderr else ""
         print(f"Error: broker exited immediately (code {broker_proc.returncode})")
-        if stdout:
-            print(f"stdout: {stdout}")
-        if stderr:
-            print(f"stderr: {stderr}")
         return 1
 
     print(f"Broker started (PID {broker_proc.pid})")
