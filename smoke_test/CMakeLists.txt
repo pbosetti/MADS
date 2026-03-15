@@ -99,15 +99,15 @@ set(MADS_PLUGINS
 )
 
 foreach(plugin IN LISTS MADS_PLUGINS)
-  add_test(
-    NAME plugin_exists_${plugin}
-    COMMAND ${CMAKE_COMMAND} -E env test -f "${MADS_PLUGIN_DIR}/${plugin}"
-  )
-  # Use cmake -E to check file existence cross-platform
   if(WIN32)
     add_test(
       NAME plugin_exists_${plugin}
       COMMAND ${CMAKE_COMMAND} -E cat "${MADS_PLUGIN_DIR}/${plugin}"
+    )
+  else()
+    add_test(
+      NAME plugin_exists_${plugin}
+      COMMAND test -f "${MADS_PLUGIN_DIR}/${plugin}"
     )
   endif()
   set_tests_properties(plugin_exists_${plugin} PROPERTIES
