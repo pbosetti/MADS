@@ -57,6 +57,17 @@ CmakePluginPopulatePattern = re.compile(
 
 CmakeGitTagPattern = re.compile(r'(\bGIT_TAG\b\s+)(\S+)')
 
+CmakeJsonDeclarePattern = re.compile(
+  r'FetchContent_Declare\s*\(\s*json\b(?P<body>.*?)\)',
+  re.DOTALL,
+)
+
+JsonGitRepositoryPattern = re.compile(
+  r'\bGIT_REPOSITORY\b\s+https://github\.com/nlohmann/json\.git\b'
+)
+
+JsonGitTagPattern = re.compile(r'\bGIT_TAG\b\s+v3\.11\.3\b')
+
 
 def normalize_cmake_plugin_git_tag(content: str) -> tuple[str, int]:
   """Force GIT_TAG for FetchContent_Populate(plugin ...) blocks."""
@@ -79,6 +90,29 @@ def normalize_cmake_plugin_git_tag(content: str) -> tuple[str, int]:
     return match.group(0).replace(body, updated_body, 1)
 
   updated_content = CmakePluginPopulatePattern.sub(update_populate_block, content)
+  return updated_content, replacement_count
+
+
+def normalize_cmake_json_fetch_content(content: str) -> tuple[str, int]:
+  """Replace old nlohmann_json FetchContent blocks with the tarball form."""
+  replacement_count = 0
+
+  def replace_json_block(match: re.Match) -> str:
+    nonlocal replacement_count
+    body = match.group('body')
+    if not JsonGitRepositoryPattern.search(body):
+      return match.group(0)
+    if not JsonGitTagPattern.search(body):
+      return match.group(0)
+    replacement_count += 1
+    return (
+      'FetchContent_Declare(json\n'
+      '  URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz\n'
+      '  DOWNLOAD_EXTRACT_TIMESTAMP TRUE\n'
+      ')'
+    )
+
+  updated_content = CmakeJsonDeclarePattern.sub(replace_json_block, content)
   return updated_content, replacement_count
 
 
@@ -144,6 +178,8 @@ def replace_in_file(file_path: str) -> int:
     # If this is CMakeLists.txt, patch plugin FetchContent GIT_TAG.
     if file_path.name == 'CMakeLists.txt':
       content, count = normalize_cmake_plugin_git_tag(content)
+      replacement_count += count
+      content, count = normalize_cmake_json_fetch_content(content)
       replacement_count += count
     
     # Write back only if content changed
