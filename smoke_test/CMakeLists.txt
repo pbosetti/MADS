@@ -38,11 +38,17 @@ else()
   set(MADS_LIB_SUFFIX ".so")
   set(MADS_PLUGIN_DIR "${MADS_PREFIX}/lib")
 endif()
+if(NOT WIN32)
+  set(MADS_LIB_PREFIX "lib")
+endif()
 
 set(MADS_BIN_DIR "${MADS_PREFIX}/bin")
 set(MADS_PYTHON_DIR "${MADS_PREFIX}/python")
-set(MADS_LIB_DIR "${MADS_PREFIX}/lib")
-
+if(WIN32)
+  set(MADS_LIB_DIR "${MADS_PREFIX}/bin")
+else()
+  set(MADS_LIB_DIR "${MADS_PREFIX}/lib")
+endif()
 enable_testing()
 include(CTest)
 
@@ -308,7 +314,7 @@ if(Python3_FOUND)
   set_tests_properties(python_agent PROPERTIES
     TIMEOUT 15
     LABELS "runtime;broker_required;python"
-    ENVIRONMENT "MADS_LIB_PATH=${MADS_LIB_DIR}/libMadsCore${MADS_LIB_SUFFIX};PYTHONPATH=${MADS_PYTHON_DIR}"
+    ENVIRONMENT "MADS_LIB_PATH=${MADS_LIB_DIR}/${MADS_LIB_PREFIX}MadsCore${MADS_LIB_SUFFIX};PYTHONPATH=${MADS_PYTHON_DIR}"
   )
 else()
   message(WARNING "Python3 not found — skipping Python wrapper tests")
