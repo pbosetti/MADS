@@ -23,7 +23,7 @@ static int test_nonblocking(const string &settings_uri) {
   // Non-blocking receive should return NONE when no message is available
   Agent agent("smoke_cpp", settings_uri);
   agent.set_settings_timeout(5000);
-  agent.init();
+  agent.init(false, false);
   agent.connect();
 
   auto mt = agent.receive(true); // dont_block = true
@@ -42,7 +42,7 @@ static int test_blocking(const string &settings_uri) {
   // Start a publisher thread, then receive with blocking
   Agent pub_agent("smoke_cpp", settings_uri);
   pub_agent.set_settings_timeout(5000);
-  pub_agent.init();
+  pub_agent.init(false, false);
   pub_agent.connect();
 
   // Publish a message after a delay (long enough for subscriber to connect,
@@ -56,7 +56,7 @@ static int test_blocking(const string &settings_uri) {
   // Create a subscriber to receive it
   Agent sub_agent("feedback", settings_uri);
   sub_agent.set_settings_timeout(5000);
-  sub_agent.init();
+  sub_agent.init(false, false);
   sub_agent.set_receive_timeout(5000);
   sub_agent.connect();
 
@@ -81,12 +81,12 @@ static int test_lkv(const string &settings_uri) {
   // With queue_size=1 (LKV mode), only the latest message should survive
   Agent pub_agent("smoke_cpp", settings_uri);
   pub_agent.set_settings_timeout(5000);
-  pub_agent.init();
+  pub_agent.init(false, false);
   pub_agent.connect();
 
   Agent sub_agent("feedback", settings_uri);
   sub_agent.set_settings_timeout(5000);
-  sub_agent.init();
+  sub_agent.init(false, false);
   sub_agent.set_high_watermark(1); // LKV mode
   sub_agent.set_receive_timeout(3000);
   sub_agent.connect();
@@ -125,12 +125,12 @@ static int test_queue(const string &settings_uri) {
   // With default queue (1000), multiple messages should be queued
   Agent pub_agent("smoke_cpp", settings_uri);
   pub_agent.set_settings_timeout(5000);
-  pub_agent.init();
+  pub_agent.init(false, false);
   pub_agent.connect();
 
   Agent sub_agent("feedback", settings_uri);
   sub_agent.set_settings_timeout(5000);
-  sub_agent.init();
+  sub_agent.init(false, false);
   sub_agent.set_high_watermark(1000);
   sub_agent.set_receive_timeout(3000);
   sub_agent.connect();
@@ -173,7 +173,7 @@ static int test_timeout(const string &settings_uri) {
   // Use smoke_cpp (queue_size=1000) to avoid LKV mode which ignores socket timeout
   Agent agent("smoke_cpp", settings_uri);
   agent.set_settings_timeout(5000);
-  agent.init();
+  agent.init(false, false);
   agent.set_receive_timeout(500); // 500ms timeout
   agent.connect();
 

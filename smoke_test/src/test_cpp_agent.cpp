@@ -27,7 +27,11 @@ int main(int argc, char *argv[]) {
     // Create and initialize agent
     Agent agent("smoke_cpp", settings_uri);
     agent.set_settings_timeout(5000);
-    agent.init();
+    // install_watchdog=false: the watchdog spawns a detached thread that can
+    // crash on Windows/MSVC during process exit (CRT terminates detached threads
+    // via ExitProcess, causing undefined behavior). Watchdog is only needed for
+    // long-running agents using Agent::loop(), not short-lived test processes.
+    agent.init(false, false);
     cout << "Agent created and initialized: " << agent.name() << endl;
 
     // Verify settings were loaded
