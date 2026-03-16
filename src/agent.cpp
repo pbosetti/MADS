@@ -289,7 +289,12 @@ void Agent::shutdown() {
   }
 
   // 5. Close sockets and terminate context
+  // Set linger to 0 so zmq_ctx_term() doesn't block on undelivered messages.
+  // Default linger is -1 (infinite), which causes the context to block forever
+  // if any messages remain in the send buffer after disconnect().
   _curve_auth = nullptr;
+  try { _publisher.set(zmqpp::socket_option::linger, 0); } catch (...) {}
+  try { _subscriber.set(zmqpp::socket_option::linger, 0); } catch (...) {}
   try { _publisher.close(); } catch (...) {}
   try { _subscriber.close(); } catch (...) {}
   try { _context.terminate(); } catch (...) {}
