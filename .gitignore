@@ -22,3 +22,5 @@ vendor/libsodium
 *.key
 *.pub
 checks.json
+
+TODO.md
