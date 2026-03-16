@@ -17,6 +17,7 @@ Options:
   --mads-build-dir PATH  MADS build directory (default: ../build)
   --prefix PATH          MADS install prefix (default: ../products)
   --build-dir PATH       Smoke test build directory (default: build)
+    --build-config NAME    Build/CTest configuration (default: Release on Windows)
   --skip-install         Skip the install step (use existing install)
   --skip-build           Skip configure+build (use existing build)
   --label LABEL          Only run tests matching this CTest label
@@ -69,6 +70,10 @@ def main():
     parser.add_argument(
         "--build-dir", default="build",
         help="Smoke test build directory (default: build)"
+    )
+    parser.add_argument(
+        "--build-config", default=("Release" if sys.platform == "win32" else None),
+        help="Build/CTest configuration (default: Release on Windows)"
     )
     parser.add_argument(
         "--skip-install", action="store_true",
@@ -144,7 +149,12 @@ def main():
 
         # Step 3: Build smoke test project
         run_cmd(
-            ["cmake", "--build", smoke_build_dir],
+            [
+                "cmake",
+                "--build",
+                smoke_build_dir,
+                *(["--config", args.build_config] if args.build_config else []),
+            ],
             "Building smoke test project"
         )
 
@@ -155,6 +165,8 @@ def main():
         "--mads-prefix", prefix,
         "--build-dir", args.build_dir,
     ]
+    if args.build_config:
+        runner_args += ["--build-config", args.build_config]
     if args.label:
         runner_args += ["--label", args.label]
     if args.no_broker:

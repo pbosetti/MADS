@@ -12,6 +12,7 @@ Options:
   --mads-prefix PATH   Path to MADS install prefix (default: auto-detect)
   --config PATH        Path to smoke test INI (default: mads_smoke.ini)
   --build-dir PATH     CTest build directory (default: build)
+    --build-config NAME  CTest configuration to run (default: Release on Windows)
   --label LABEL        Only run tests with this CTest label
   --no-broker          Skip broker start (for no_broker tests only)
   --verbose            Verbose CTest output
@@ -73,6 +74,10 @@ def main():
     parser.add_argument(
         "--build-dir", default="build",
         help="CTest build directory (default: build)"
+    )
+    parser.add_argument(
+        "--build-config", default=("Release" if sys.platform == "win32" else None),
+        help="CTest configuration to run (default: Release on Windows)"
     )
     parser.add_argument(
         "--label", default=None,
@@ -149,6 +154,8 @@ def main():
 
     # Build CTest command
     ctest_cmd = ["ctest", "--test-dir", build_dir, "--output-on-failure"]
+    if args.build_config:
+        ctest_cmd += ["-C", args.build_config]
 
     if args.no_broker:
         # Only run tests that don't need a broker

@@ -33,6 +33,16 @@ Or use the all-in-one pipeline script:
 python3 setup_and_run.py --skip-install
 ```
 
+On Windows with Visual Studio or any other multi-config generator, build and run
+the smoke tests in `Release` so the external C++ test binaries match the
+installed `MadsCore.dll` configuration:
+
+```powershell
+cmake -B build -DCMAKE_PREFIX_PATH="$(mads -p)"
+cmake --build build --config Release
+python run_smoke_tests.py --build-config Release
+```
+
 ## Directory Structure
 
 ```
@@ -72,7 +82,8 @@ Main test runner. Optionally starts a broker, invokes CTest, then cleans up.
 
 ```
 usage: run_smoke_tests.py [-h] [--mads-prefix PATH] [--config PATH]
-                          [--build-dir PATH] [--label LABEL]
+                          [--build-dir PATH] [--build-config NAME]
+                          [--label LABEL]
                           [--no-broker] [--verbose]
 ```
 
@@ -81,6 +92,7 @@ usage: run_smoke_tests.py [-h] [--mads-prefix PATH] [--config PATH]
 | `--mads-prefix PATH` | Auto-detect from `CMakeCache.txt` or `mads -p` | Path to MADS install prefix |
 | `--config PATH` | `mads_smoke.ini` | Path to the smoke test TOML config file |
 | `--build-dir PATH` | `build` | CTest build directory |
+| `--build-config NAME` | `Release` on Windows | CTest configuration to run |
 | `--label LABEL` | *(all tests)* | Run only tests matching this CTest label (e.g. `broker_required`, `no_broker`, `messaging`, `plugin`, `python`) |
 | `--no-broker` | off | Skip broker startup; automatically filters to `no_broker` label |
 | `--verbose` | off | Pass `-V` to CTest for verbose output |
@@ -110,7 +122,8 @@ All-in-one pipeline: installs MADS, configures/builds the smoke tests, and runs 
 
 ```
 usage: setup_and_run.py [-h] [--mads-build-dir PATH] [--prefix PATH]
-                        [--build-dir PATH] [--skip-install] [--skip-build]
+                        [--build-dir PATH] [--build-config NAME]
+                        [--skip-install] [--skip-build]
                         [--label LABEL] [--no-broker]
 ```
 
@@ -119,6 +132,7 @@ usage: setup_and_run.py [-h] [--mads-build-dir PATH] [--prefix PATH]
 | `--mads-build-dir PATH` | `../build` | MADS build directory (for the install step) |
 | `--prefix PATH` | Auto-detect via `mads -p` | MADS install prefix |
 | `--build-dir PATH` | `build` | Smoke test build directory |
+| `--build-config NAME` | `Release` on Windows | Build and CTest configuration |
 | `--skip-install` | off | Skip `cmake --install` (use existing installation) |
 | `--skip-build` | off | Skip configure + build steps (use existing build) |
 | `--label LABEL` | *(all tests)* | Only run tests matching this CTest label |

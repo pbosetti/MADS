@@ -52,6 +52,12 @@ endif()
 enable_testing()
 include(CTest)
 
+if(CMAKE_CONFIGURATION_TYPES)
+  set(SMOKE_TEST_BUILD_CONFIG_ARGS --config $<CONFIG>)
+else()
+  set(SMOKE_TEST_BUILD_CONFIG_ARGS)
+endif()
+
 # Find Python for wrapper tests
 find_package(Python3 COMPONENTS Interpreter)
 
@@ -163,7 +169,7 @@ set_tests_properties(plugin_stub_configure PROPERTIES
 
 add_test(
   NAME plugin_stub_build
-  COMMAND ${CMAKE_COMMAND} --build "${STUB_GEN_DIR}/build"
+  COMMAND ${CMAKE_COMMAND} --build "${STUB_GEN_DIR}/build" ${SMOKE_TEST_BUILD_CONFIG_ARGS}
 )
 set_tests_properties(plugin_stub_build PROPERTIES
   TIMEOUT 300
@@ -191,7 +197,7 @@ target_link_libraries(test_messaging PRIVATE Mads::Mads)
 # Compile-only tests (no broker needed, just verify linkage)
 add_test(
   NAME compile_cpp_agent
-  COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" --target test_cpp_agent
+  COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" ${SMOKE_TEST_BUILD_CONFIG_ARGS} --target test_cpp_agent
 )
 set_tests_properties(compile_cpp_agent PROPERTIES
   TIMEOUT 30
@@ -200,7 +206,7 @@ set_tests_properties(compile_cpp_agent PROPERTIES
 
 add_test(
   NAME compile_c_agent
-  COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" --target test_c_agent
+  COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" ${SMOKE_TEST_BUILD_CONFIG_ARGS} --target test_c_agent
 )
 set_tests_properties(compile_c_agent PROPERTIES
   TIMEOUT 30
@@ -209,7 +215,7 @@ set_tests_properties(compile_c_agent PROPERTIES
 
 add_test(
   NAME compile_messaging
-  COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" --target test_messaging
+  COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}" ${SMOKE_TEST_BUILD_CONFIG_ARGS} --target test_messaging
 )
 set_tests_properties(compile_messaging PROPERTIES
   TIMEOUT 30
