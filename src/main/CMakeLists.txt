@@ -76,6 +76,8 @@ create_mads_target(filter plugin_loader.cpp DEFS "PLUGIN_LOADER_FILTER")
 create_mads_target(sink plugin_loader.cpp DEFS "PLUGIN_LOADER_SINK")
 set_target_properties(${MADS_EXECUTABLE_PREFIX}-make_plugin PROPERTIES OUTPUT_NAME "${MADS_EXECUTABLE_PREFIX}-plugin")
 
+target_link_libraries(mads-fsm PRIVATE Gv2Fsm::Gv2Fsm)
+
 if(MADS_MAIN_TARGETS)
   list(REMOVE_DUPLICATES MADS_MAIN_TARGETS)
   install(

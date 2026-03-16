@@ -94,62 +94,79 @@ endif()
 
 FetchContent_Declare(
   nlohmann_json
-  GIT_REPOSITORY https://github.com/nlohmann/json.git
-  GIT_TAG v3.11.3
+  URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 
 FetchContent_Declare(
   cxxopts
   GIT_REPOSITORY https://github.com/jarro2783/cxxopts.git
   GIT_TAG v3.2.0
+  GIT_SHALLOW TRUE
 )
 
 FetchContent_Declare(
   rang
   GIT_REPOSITORY https://github.com/agauniyal/rang.git
   GIT_TAG v3.2
+  GIT_SHALLOW TRUE
 )
 
 FetchContent_Declare(
   tomlplusplus
   GIT_REPOSITORY https://github.com/pbosetti/tomlplusplus.git
   GIT_TAG master
+  GIT_SHALLOW TRUE
 )
 
 FetchContent_Declare(
   pugg
   GIT_REPOSITORY https://github.com/pbosetti/pugg.git
   GIT_TAG master
+  GIT_SHALLOW TRUE
 )
 
 FetchContent_Declare(
   libsodium
   GIT_REPOSITORY https://github.com/robinlinden/libsodium-cmake.git
   GIT_TAG master
+  GIT_SHALLOW TRUE
 )
 
 FetchContent_Declare(
   libzmq
   GIT_REPOSITORY https://github.com/zeromq/libzmq.git
   GIT_TAG v4.3.5
+  GIT_SHALLOW TRUE
 )
 
 FetchContent_Declare(
   zmqpp
   GIT_REPOSITORY https://github.com/zeromq/zmqpp.git
   GIT_TAG master
+  GIT_SHALLOW TRUE
 )
 
 FetchContent_Declare(
   inja
   GIT_REPOSITORY https://github.com/pantor/inja.git
   GIT_TAG v3.4.0
+  GIT_SHALLOW TRUE
 )
 
+set(GV2FSM_STATIC_ONLY ON CACHE BOOL "" FORCE)
 FetchContent_Declare(
   snappy
   GIT_REPOSITORY https://github.com/google/snappy.git
   GIT_TAG 1.2.2
+  GIT_SHALLOW TRUE
+)
+
+FetchContent_Declare(
+  gv2fsm
+  GIT_REPOSITORY https://github.com/pbosetti/gv2fsm.git
+  GIT_TAG HEAD
+  GIT_SHALLOW TRUE
 )
 
 if(MADS_ENABLE_MONGOCXX)
@@ -165,6 +182,7 @@ if(MADS_ENABLE_MONGOCXX)
       mongo_c_driver
       GIT_REPOSITORY https://github.com/mongodb/mongo-c-driver.git
       GIT_TAG 1.30.6
+      GIT_SHALLOW TRUE
     )
   endif()
   unset(_mads_local_mongo_c_driver_src)
@@ -173,6 +191,7 @@ if(MADS_ENABLE_MONGOCXX)
     mongo_cxx_driver
     GIT_REPOSITORY https://github.com/mongodb/mongo-cxx-driver.git
     GIT_TAG r3.11.1
+    GIT_SHALLOW TRUE
   )
 endif()
 
@@ -319,6 +338,7 @@ add_vendor(nlohmann_json)
 add_vendor(cxxopts)
 add_vendor(rang)
 add_vendor(tomlplusplus)
+add_vendor(gv2fsm)
 add_vendor_exclude_from_all(pugg)
 add_vendor_exclude_from_all(libsodium)
 set(SODIUM_INCLUDE_DIRS

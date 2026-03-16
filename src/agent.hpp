@@ -560,6 +560,15 @@ public:
    */
   void set_receive_timeout(int to);
 
+  /**
+   * @brief Sets the value of timeout in receiving messages. Set to 0 for no
+   * timeout.
+   *
+   * @param to the timeout.
+   * @throws AgentError if already initialized
+   */
+  void set_receive_timeout(std::chrono::milliseconds to);
+
 
   /**
    * @brief Returns wheter a restart has been requested.

@@ -820,6 +820,10 @@ void Agent::set_receive_timeout(int to) {
   _subscriber.set(zmqpp::socket_option::receive_timeout, _receive_timeout);
 }
 
+void Agent::set_receive_timeout(std::chrono::milliseconds to) {
+  set_receive_timeout(to.count());
+}
+
 bool Agent::restart() { return _restart; }
 
 filesystem::path Agent::attachment_path() {
