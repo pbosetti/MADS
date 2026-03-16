@@ -354,6 +354,20 @@ set(SODIUM_LIBRARIES
     CACHE FILEPATH "" FORCE)
 unset(_mads_sodium_library)
 add_vendor(libzmq)
+if(ANDROID)
+  foreach(_mads_zmq_target libzmq libzmq-static)
+    if(TARGET "${_mads_zmq_target}")
+      get_target_property(_mads_zmq_link_libs "${_mads_zmq_target}" INTERFACE_LINK_LIBRARIES)
+      if(_mads_zmq_link_libs)
+        list(REMOVE_ITEM _mads_zmq_link_libs "-lpthreads")
+        set_target_properties(
+          "${_mads_zmq_target}"
+          PROPERTIES INTERFACE_LINK_LIBRARIES "${_mads_zmq_link_libs}"
+        )
+      endif()
+    endif()
+  endforeach()
+endif()
 add_vendor_exclude_from_all(inja)
 add_vendor(snappy)
 if(TARGET snappy)

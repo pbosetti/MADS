@@ -42,11 +42,21 @@ HttpsClient::Response HttpsClient::get() {
 
 #ifdef _WIN32
     return _get_windows();
+#elif __ANDROID__
+    return _get_unsupported();
 #elif __APPLE__
     return _get_macos();
 #else
     return _get_linux();
 #endif
 }
+
+#ifdef __ANDROID__
+
+HttpsClient::Response HttpsClient::_get_unsupported() {
+    throw std::runtime_error("HttpsClient is not supported on Android builds");
+}
+
+#endif
 
 } // namespace Mads

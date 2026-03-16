@@ -165,6 +165,22 @@ if(NOT MSVC)
   add_compile_options(-Wno-unused-function)
 endif()
 
+if(ANDROID)
+  list(REMOVE_ITEM LIB_SOURCES ${SOURCE_DIR}/mongo_fetch.cpp)
+  list(REMOVE_ITEM LIB_SOURCES ${SOURCE_DIR}/https_client_linux.cpp)
+  list(REMOVE_ITEM LIB_SOURCES ${SOURCE_DIR}/https_client_windows.cpp)
+  list(REMOVE_ITEM LIB_SOURCES ${SOURCE_DIR}/https_client_macos.mm)
+elseif(WIN32)
+  list(REMOVE_ITEM LIB_SOURCES ${SOURCE_DIR}/https_client_linux.cpp)
+  list(REMOVE_ITEM LIB_SOURCES ${SOURCE_DIR}/https_client_macos.mm)
+elseif(APPLE)
+  list(REMOVE_ITEM LIB_SOURCES ${SOURCE_DIR}/https_client_linux.cpp)
+  list(REMOVE_ITEM LIB_SOURCES ${SOURCE_DIR}/https_client_windows.cpp)
+else()
+  list(REMOVE_ITEM LIB_SOURCES ${SOURCE_DIR}/https_client_windows.cpp)
+  list(REMOVE_ITEM LIB_SOURCES ${SOURCE_DIR}/https_client_macos.mm)
+endif()
+
 add_library(
   ${LIB_NAME}
   SHARED

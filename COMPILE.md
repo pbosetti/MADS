@@ -100,3 +100,59 @@ Then you have to enable the traffic on those ports through the firewall (if it i
 **PLEASE NOTE**: the IP address of the WSL2 machine is not granted to remain the same upon reboots. So if suddenly the broker stops working, then check if the address has changed (`wsl hostname -I` from powershell) and execute again the above three commands.
 
 **ALSO NOTE**: This is only needed when you have **external agents** that want to connect with a `mads-broker` running in a WSL2 environment. Conversely, if you want to connect from any agent running in a WSL2 instance to a broker running on an external Linux/Mac machine, there is no problem (provided that the other machine is reachable!)
+
+## On Android
+
+At the moment, Android builds are intended for `MadsCore` and related native libraries, not for the desktop applications.
+
+### Requirements
+
+- Android NDK installed locally (the examples below use `android-ndk-r29`)
+- cmake
+- Ninja
+- git
+
+### Build
+
+Choose your NDK path and ABI, then configure and build with the Android toolchain file:
+
+```PowerShell
+git clone https://github.com/pbosetti/MADS.git
+cd MADS
+# Optional:
+# git switch <your desired branch>
+
+$NDK="C:/Users/<your-user>/Devel/android-ndk-r29"
+$ABI="arm64-v8a"
+
+cmake -S . -B build-android-auto -G Ninja `
+  -DCMAKE_BUILD_TYPE=Release `
+  -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" `
+  -DANDROID_ABI="$ABI" `
+  -DANDROID_PLATFORM=android-24 `
+  -DCMAKE_INSTALL_PREFIX="products/android/$ABI-auto" `
+  -DMADS_ENABLE_MONGOCXX=OFF `
+  -DMADS_BUILD_APPS=OFF `
+  -DMADS_DIRECTOR=OFF
+
+cmake --build build-android-auto --target MadsCore
+cmake --install build-android-auto
+```
+
+After the first successful configure, if you want to rebuild without letting `FetchContent` check remote repositories again, you can re-run configure with:
+
+```PowerShell
+cmake -S . -B build-android-auto -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+```
+
+The compiled Android library will be installed under `products/android/<abi>-auto/lib`, for example:
+
+```text
+products/android/arm64-v8a-auto/lib/libMadsCore.so
+```
+
+### Notes
+
+- The currently validated configuration is `arm64-v8a` with `android-24`.
+- `MADS_ENABLE_MONGOCXX=OFF` is required for Android.
+- `MADS_BUILD_APPS=OFF` and `MADS_DIRECTOR=OFF` are recommended, since the Android flow is for the core native library rather than the desktop tools.

@@ -12,6 +12,7 @@ namespace Mads {
  * Uses platform-native APIs:
  * - macOS: Foundation framework (CFNetwork)
  * - Linux: OpenSSL (system library)
+ * - Android: not currently implemented
  * - Windows: WinHTTP
  */
 class HttpsClient {
@@ -75,6 +76,8 @@ private:
 
 #ifdef _WIN32
     Response _get_windows();
+#elif __ANDROID__
+    Response _get_unsupported();
 #elif __APPLE__
     Response _get_macos();
 #else
