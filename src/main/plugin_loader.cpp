@@ -419,7 +419,7 @@ int main(int argc, char *argv[]) {
             << fg::reset << endl;
     }
     if (agent.last_topic() == agent.pub_topic()) {
-      cerr << fg::yellow << "Warning: received message on the same topic (even partial) as the plugin publishes to, skipping to avoid loops" << fg::reset << endl;
+      cerr << fg::yellow << "Warning: received message on the same topic (even partial) as the plugin published to, skipping to avoid loops" << fg::reset << endl;
       return 0ms; // dont use my own messages
     }
     // loading data into plugin

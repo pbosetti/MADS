@@ -113,9 +113,9 @@ public:
     _fetcher->set_repeat(_params.value("repeat", false));
     try {
       if (_params.value("reuse_view", false)) {
-        _fetched_records = _fetcher->fetch_data(_params.value("view_name", ""));
-      } else {
         _fetched_records = _fetcher->fetch_data_from(_params.value("view_name", ""));
+      } else {
+        _fetched_records = _fetcher->fetch_data(_params.value("view_name", ""));
       }
     } catch (const mongocxx::query_exception &e) {
       cout << "Error fetching data from MongoDB: " << e.what() << endl;
