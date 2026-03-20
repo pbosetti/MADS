@@ -140,14 +140,14 @@ public:
 
   /**
    * @brief Set whether replay restarts from the beginning after the last record.
-   * @param repeat If `true`, `load_next()` loops over the cached data; otherwise it stops at the end.
+   * @param repeat If `true`, `load_next()` loops over the replay view; otherwise it stops at the end.
    */
   void set_repeat(bool repeat) { _repeat = repeat; }
 
   /**
    * @brief Load the next record from the replay view.
    *
-   * Only the `data` field of the cached record is loaded into `out`, while `collection_name`
+   * Only the `data` field of the current record is loaded into `out`, while `collection_name`
    * receives the originating collection name.
    *
    * @param out JSON object populated with the next record payload.
@@ -157,7 +157,14 @@ public:
   std::chrono::milliseconds load_next(nlohmann::json &out, std::string &collection_name);
 
 private:
+  struct ReplayRow {
+    std::chrono::milliseconds timestamp{0};
+    std::string collection_name;
+    nlohmann::json data;
+  };
+
   std::size_t activate_view(const std::string &view_name, bool owns_view);
+  void reset_replay_stream();
   void validate_replay_view(mongocxx::database &database, const std::string &view_name) const;
   void drop_owned_view() noexcept;
 
@@ -173,6 +180,9 @@ private:
   std::size_t _view_size{0};
   std::size_t _next_index{0};
   bool _repeat{false};
+  std::optional<mongocxx::cursor> _cursor;
+  std::optional<mongocxx::cursor::iterator> _cursor_it;
+  std::optional<ReplayRow> _next_row;
 };
 
 }  // namespace Mads

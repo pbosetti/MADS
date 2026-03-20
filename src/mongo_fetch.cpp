@@ -217,6 +217,29 @@ std::string make_view_name() {
   return "mongo_fetch_view_" + std::to_string(now.count()) + "_" + std::to_string(thread_id);
 }
 
+struct ReplayRowData {
+  std::chrono::milliseconds timestamp{0};
+  std::string collection_name;
+  nlohmann::json data;
+};
+
+ReplayRowData parse_replay_row(const bsoncxx::document::view &row) {
+  ReplayRowData parsed_row;
+  const auto data = row["data"];
+  const auto source_collection = row["collection_name"];
+  if (!data || data.type() != bsoncxx::type::k_document) {
+    throw std::runtime_error("Replay view row is missing the `data` document.");
+  }
+  if (!source_collection || source_collection.type() != bsoncxx::type::k_utf8) {
+    throw std::runtime_error("Replay view row is missing the `collection_name` field.");
+  }
+
+  parsed_row.timestamp = extract_timestamp(row);
+  parsed_row.collection_name = std::string{source_collection.get_string().value};
+  parsed_row.data = nlohmann::json::parse(bsoncxx::to_json(data.get_document().value));
+  return parsed_row;
+}
+
 bsoncxx::document::value make_project_stage(const std::string &collection_name) {
   return make_document(
     kvp(
@@ -315,6 +338,9 @@ void MongoFetch::connect() {
 }
 
 void MongoFetch::disconnect() {
+  _cursor.reset();
+  _cursor_it.reset();
+  _next_row.reset();
   drop_owned_view();
   _client.reset();
   _view_name.clear();
@@ -432,50 +458,42 @@ std::chrono::milliseconds MongoFetch::load_next(
   if (_view_size == 0) {
     return std::chrono::milliseconds{-1};
   }
-
-  if (_next_index >= _view_size) {
-    if (!_repeat) {
+  if (!_next_row) {
+    if (!_repeat || _next_index < _view_size) {
       return std::chrono::milliseconds{-1};
     }
-    _next_index = 0;
+    reset_replay_stream();
+    if (!_next_row) {
+      return std::chrono::milliseconds{-1};
+    }
   }
 
-  mongocxx::options::find find_options;
-  find_options.skip(static_cast<std::int64_t>(_next_index));
-  find_options.limit(2);
-
-  auto view_collection = (*_client)[_database_name][_view_name];
-  auto cursor = view_collection.find({}, find_options);
-
-  std::vector<bsoncxx::document::value> rows;
-  for (const auto &document : cursor) {
-    rows.emplace_back(document);
-  }
-
-  if (rows.empty()) {
-    return std::chrono::milliseconds{-1};
-  }
-
+  ReplayRow current = std::move(*_next_row);
+  _next_row.reset();
   ++_next_index;
 
-  const auto current = rows.front().view();
-  const auto data = current["data"];
-  const auto source_collection = current["collection_name"];
-  if (!data || data.type() != bsoncxx::type::k_document) {
-    throw std::runtime_error("Replay view row is missing the `data` document.");
-  }
-  if (!source_collection || source_collection.type() != bsoncxx::type::k_utf8) {
-    throw std::runtime_error("Replay view row is missing the `collection_name` field.");
+  if (_cursor && _cursor_it) {
+    auto cursor_end = _cursor->end();
+    if (*_cursor_it != cursor_end) {
+      auto next_row = parse_replay_row(**_cursor_it);
+      ReplayRow replay_row;
+      replay_row.timestamp = next_row.timestamp;
+      replay_row.collection_name = std::move(next_row.collection_name);
+      replay_row.data = std::move(next_row.data);
+      _next_row = std::move(replay_row);
+      ++(*_cursor_it);
+    }
   }
 
-  collection_name = std::string{source_collection.get_string().value};
-  out = nlohmann::json::parse(bsoncxx::to_json(data.get_document().value));
+  collection_name = current.collection_name;
+  out = current.data;
 
-  if (rows.size() > 1) {
-    return extract_timestamp(rows[1].view()) - extract_timestamp(current);
+  if (_next_row) {
+    return _next_row->timestamp - current.timestamp;
   }
 
   if (_repeat) {
+    _next_index = _view_size;
     return std::chrono::milliseconds{0};
   }
 
@@ -487,7 +505,39 @@ std::size_t MongoFetch::activate_view(const std::string &view_name, bool owns_vi
   _owns_view = owns_view;
   _next_index = 0;
   _view_size = (*_client)[_database_name][_view_name].count_documents({});
+  reset_replay_stream();
   return _view_size;
+}
+
+void MongoFetch::reset_replay_stream() {
+  _cursor.reset();
+  _cursor_it.reset();
+  _next_row.reset();
+
+  if (!_client || _database_name.empty() || _view_name.empty()) {
+    return;
+  }
+
+  mongocxx::options::find find_options;
+  find_options.batch_size(128);
+
+  auto view_collection = (*_client)[_database_name][_view_name];
+  _cursor.emplace(view_collection.find({}, find_options));
+
+  auto cursor_it = _cursor->begin();
+  const auto cursor_end = _cursor->end();
+  if (cursor_it == cursor_end) {
+    return;
+  }
+
+  auto next_row = parse_replay_row(*cursor_it);
+  ReplayRow replay_row;
+  replay_row.timestamp = next_row.timestamp;
+  replay_row.collection_name = std::move(next_row.collection_name);
+  replay_row.data = std::move(next_row.data);
+  _next_row = std::move(replay_row);
+  ++cursor_it;
+  _cursor_it = std::move(cursor_it);
 }
 
 void MongoFetch::validate_replay_view(
@@ -527,6 +577,10 @@ void MongoFetch::validate_replay_view(
 }
 
 void MongoFetch::drop_owned_view() noexcept {
+  _cursor.reset();
+  _cursor_it.reset();
+  _next_row.reset();
+
   if (!_client || _database_name.empty() || _view_name.empty() || !_owns_view) {
     return;
   }
