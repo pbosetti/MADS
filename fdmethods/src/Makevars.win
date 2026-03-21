@@ -1,0 +1,2 @@
+PKG_CPPFLAGS = -I../include
+CXX_STD = CXX20

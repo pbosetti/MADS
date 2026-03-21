@@ -1,0 +1,11 @@
+^\.github($|/)
+^\.gitignore$
+^\.r-lib($|/)
+^LICENSE$
+^build($|/)
+^build-.*($|/)
+^cmake($|/)
+^CMakeLists\.txt$
+^python($|/)
+^tests($|/)
+^fdmethods_.*\.tar\.gz$

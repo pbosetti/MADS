@@ -1,0 +1,18 @@
+Package: fdmethods
+Type: Package
+Title: Frequency Domain Methods: Goertzel Algorithm and Sliding DFT
+Version: 1.0
+Date: 2024-01-01
+Author: Helena Schmidt
+Maintainer: Helena Schmidt <helena.schmidt@ktrask.de>
+Description: Provides two frequency-domain analysis methods: the Goertzel
+  algorithm for evaluating individual DFT terms without computing a full FFT
+  (useful for targeted tone detection such as DTMF decoding), and the Sliding
+  Discrete Fourier Transform (SlidingDFT) for maintaining a running DFT over a
+  fixed-size window of real-valued samples. Both methods are available as C and
+  C++ libraries; the Goertzel algorithm also has R and Python interfaces.
+License: GPL (>= 2)
+SystemRequirements: C++20
+NeedsCompilation: yes
+Imports: Rcpp (>= 0.12.3)
+LinkingTo: Rcpp

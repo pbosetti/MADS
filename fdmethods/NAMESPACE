@@ -1,0 +1,3 @@
+useDynLib(fdmethods)
+export(goertzel)
+importFrom(Rcpp, evalCpp)
