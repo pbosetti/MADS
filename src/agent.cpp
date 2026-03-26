@@ -617,7 +617,8 @@ void Agent::loop(loop_fun_t const &lambda, chrono::milliseconds duration) {
     } else {
       try {
         nld = lambda();
-      } catch (...) {
+      } catch (std::exception &e) {
+        cerr << "Exception in loop: " << e.what() << endl;
         Mads::running = false;
       }
     }
@@ -641,7 +642,8 @@ void Agent::loop(loop_fun_t const &lambda, chrono::milliseconds duration) {
     auto start = chrono::steady_clock::now();
     try {
       nld = lambda();
-    } catch (...) {
+    } catch (std::exception &e) {
+      cerr << "Exception in loop: " << e.what() << endl;
       Mads::running = false;
     }
     if (sleep_duration > 0ms) {

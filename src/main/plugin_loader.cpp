@@ -360,6 +360,12 @@ int main(int argc, char *argv[]) {
   vector<unsigned char> blob;
   agent.loop([&]() -> chrono::milliseconds {
     rt = plugin->get_output(out, &blob);
+    if (out.empty()) {
+      err = {{"error", {"process", "Plugin did not return any output"}}};
+      agent.register_event(event_type::message, err);
+      count_err++;
+      goto status_line;
+    }
     switch (rt) {
     case return_type::warning:
       try {
@@ -393,7 +399,7 @@ int main(int argc, char *argv[]) {
       throw std::runtime_error(string("Critical error in getting data: ") + plugin->error());
       return 0ms;
     }
-
+  status_line:
     if (!silent) {
       cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
             << fg::reset << " total, " << fg::red << count_err << fg::reset
@@ -469,6 +475,12 @@ int main(int argc, char *argv[]) {
   process_output:
     rt = plugin->process(out, &blob);
     if (!err.empty()) out.merge_patch(err);
+    if (out.empty()) {
+      err = {{"error", {"process", "Plugin did not return any output"}}};
+      agent.register_event(event_type::message, err);
+      count_err++;
+      goto status_line;
+    }
     switch (rt) {
     case return_type::warning:
       out["warning"] = {{"process", plugin->error()}};
