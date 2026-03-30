@@ -104,9 +104,10 @@ add_subdirectory(vendors)
 if(MADS_DIRECTOR)
   set(GLFW_BUILD_DOCS OFF)
   set(GLFW_LIBRARY_TYPE "STATIC")
+  set(MADS_DIRECTOR_EXAMPLE_CONFIG ON)
   FetchContent_Declare(mads-director
     GIT_REPOSITORY https://github.com/mads-net/mads_director.git
-    GIT_TAG HEAD
+    GIT_TAG v2.0.3
     GIT_SHALLOW TRUE
   )
   FetchContent_MakeAvailable(mads-director)
