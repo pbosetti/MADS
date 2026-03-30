@@ -32,6 +32,11 @@ using json = nlohmann::json;
 class {{class_name}} : public {{parent}}<json> {
 
 public:
+  // Don't forget to inherit the constructors of the parent class
+  // If you really need to implement your own constructor, make sure to call 
+  // the parent constructor. Normally, use set_params() to set the parameters
+  // instead of the constructor.
+  using {{parent}}::{{parent}}; // inherit constructors
 
   // Typically, no need to change this
   string kind() override { return PLUGIN_NAME; }
