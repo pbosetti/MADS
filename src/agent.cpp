@@ -391,7 +391,14 @@ void Agent::info(ostream &out) {
 void Agent::connect(chrono::milliseconds delay) {
   if (!_init_done)
     throw AgentError("Agent not initialized");
-  if (_connected) return;
+  if (_connected) {
+    try {
+      _publisher.disconnect(_pub_endpoint);
+      _subscriber.disconnect(_sub_endpoint);
+    } catch (...) {
+      // NOOP
+    } 
+  }
   if (!_pub_topic.empty()) {
     connect_pub(delay);
     _connected = true;

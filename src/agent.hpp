@@ -462,6 +462,34 @@ public:
   std::string get_agent_id();
 
   /**
+   * @brief Set the subscribe endpoint URL
+   * 
+   * @param endpoint in the form tcp://hostname:port
+   */
+  void set_sub_endpoint(std::string endpoint) { _sub_endpoint = endpoint; }
+
+  /**
+   * @brief Get the subscribe endpoint URL
+   * 
+   * @return The subscribe endpoint URL
+   */
+  std::string sub_endpoint() const { return _sub_endpoint; }
+
+  /**
+   * @brief Set the publish endpoint URL
+   * 
+   * @param endpoint in the form tcp://hostname:port
+   */
+  void set_pub_endpoint(std::string endpoint) { _pub_endpoint = endpoint; }
+
+  /**
+   * @brief Get the publish endpoint URL
+   * 
+   * @return The publish endpoint URL
+   */
+  std::string pub_endpoint() const { return _pub_endpoint; }
+
+  /**
    * @brief Sets the publish topic.
    *
    * @param topic The topic to be used for publishing messages.
