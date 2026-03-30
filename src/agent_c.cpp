@@ -229,6 +229,19 @@ int agent_high_watermark(agent_t agent) {
   return ag->high_watermark();
 }
 
+void agent_set_pub_topic(agent_t agent, const char *topic) {
+  Agent *ag = reinterpret_cast<Agent *>(agent);
+  ag->set_pub_topic(string(topic));
+}
+
+void agent_set_sub_topics(agent_t agent, const char **topics, int n_topics) {
+  Agent *ag = reinterpret_cast<Agent *>(agent);
+  vector<string> t;
+  for (int i = 0; i < n_topics; i++) {
+    t.push_back(string(topics[i]));
+  }
+  ag->set_sub_topic(t);
+}
 
 int agent_publish(agent_t agent, const char *message, const char *topic) {
   Agent *ag = reinterpret_cast<Agent *>(agent);

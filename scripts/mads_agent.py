@@ -117,6 +117,12 @@ lib.agent_receive_timeout.restype = c_int
 lib.agent_last_error.argtypes = []
 lib.agent_last_error.restype = c_char_p
 
+lib.agent_set_pub_topic.argtypes = [c_void_p, c_char_p]
+lib.agent_set_pub_topic.restype = None
+
+lib.agent_set_sub_topics.argtypes = [c_void_p, ctypes.POINTER(c_char_p), c_int]
+lib.agent_set_sub_topics.restype = None
+
 # Settings functions
 lib.agent_get_settings.argtypes = [c_void_p, c_int]
 lib.agent_get_settings.restype = c_char_p
@@ -239,6 +245,17 @@ class Agent:
         """Get the last error message."""
         result = lib.agent_last_error(self._agent)
         return result.decode('utf-8') if result else None
+    
+    def set_pub_topic(self, topic: str):
+        """Set the publish topic."""
+        lib.agent_set_pub_topic(self._agent, topic.encode('utf-8'))
+    
+    def set_sub_topics(self, topics: list):
+        """Set the subscribe topics."""
+        topic_ptrs = (c_char_p * len(topics))()
+        for i, topic in enumerate(topics):
+            topic_ptrs[i] = topic.encode('utf-8')
+        lib.agent_set_sub_topics(self._agent, topic_ptrs, len(topics))
     
     # Settings methods
     def settings(self) -> str:

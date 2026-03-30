@@ -257,6 +257,25 @@ MADS_EXPORT const char *agent_get_settings(agent_t agent, int n);
 MADS_EXPORT void agent_set_settings_timeout(agent_t agent, int to_ms);
 
 /**
+ * @brief  Sets the publish topic for the agent.
+ * 
+ * @param agent Agent handle.
+ * @param topic Publish topic.
+ * @return MADS_export 
+ */
+MADS_EXPORT void agent_set_pub_topic(agent_t agent, const char *topic);
+
+/**
+ * @brief Sets the subscribe topics for the agent.
+ * 
+ * @param agent Agent handle.
+ * @param topics Array of null-terminated topic strings.
+ * @param n_topics Number of topics in the array.
+ * @return MADS_export 
+ */
+MADS_EXPORT void agent_set_sub_topics(agent_t agent, const char **topics, int n_topics);
+
+/**
  * @brief Returns the current settings timeout.
  *
  * @param agent Agent handle.

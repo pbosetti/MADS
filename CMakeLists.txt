@@ -122,7 +122,7 @@ if(MSVC)
   add_compile_options(/W4 /permissive- /wd4505 /wd4005 /wd4244 /wd4996 /wd4459)
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 else()
-  add_compile_options(-Wall -Wextra -Wpedantic)
+  add_compile_options(-Wall -Wextra -Wpedantic -Wno-deprecated-literal-operator)
 endif()
 
 

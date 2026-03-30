@@ -187,8 +187,18 @@ void Agent::init(bool crypto, bool install_watchdog) {
     _curve_auth->setup_curve_client(_subscriber, client_key_name, server_key_name);
     _curve_auth->setup_curve_client(_publisher, client_key_name, server_key_name);
   }
+  if (_settings_uri.empty()) {
+    throw AgentError("Settings URI cannot be empty");
+  }
+  if (_settings_uri == "none") {
+    stringstream ss;
+    ss << "[" << _name << "]\n";
+    ss << "pub_topic = \"" << _name << "\"\n";
+    ss << "sub_topic = [\"\"]\n";
+    _config = toml::parse(ss.str());
+  }
   // Load config URI/file
-  if (settings_are_local()) {
+  else if (settings_are_local()) {
     _config = (toml::table)toml::parse_file(_settings_uri);
   } else {
     double broker_tc;

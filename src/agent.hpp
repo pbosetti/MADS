@@ -168,6 +168,10 @@ public:
    *
    * This function loads the settings file and sets the member variables of the
    * agent.
+   * 
+   * If the `settings_uri` is "none", the agent is initialized with default 
+   * settings and does not attempt to load any settings file. This is useful 
+   * for testing purposes.
    *
    * @param name The name of the agent (as it is).
    * @param settings_uri The path or URI to the settings file for the agent.
@@ -298,16 +302,7 @@ public:
    * @param cross The value of the cross flag.
    */
   void set_cross(bool cross);
-
-
-  /**
-   * @brief Sets the publish topic.
-   *
-   * @param topic The topic to be used for publishing messages.
-   */
-  void set_pub_topic(std::string topic);
-
-  std::string pub_topic() const { return _pub_topic; }
+  
 
   /**
    * @brief Enables remote control for the agent.
@@ -465,6 +460,34 @@ public:
    * @return The agent ID
    */
   std::string get_agent_id();
+
+  /**
+   * @brief Sets the publish topic.
+   *
+   * @param topic The topic to be used for publishing messages.
+   */
+  void set_pub_topic(std::string topic);
+
+  /**
+   * @brief Gets the publish topic.
+   *
+   * @return The publish topic.
+   */
+  std::string pub_topic() const { return _pub_topic; }
+
+  /**
+   * @brief Sets the subscribe topics.
+   *
+   * @param topics The topics to be used for subscribing to messages.
+   */
+  void set_sub_topic(std::vector<std::string> topics) { _sub_topic = topics; }
+  
+  /**
+   * @brief Gets the subscribe topics.
+   *
+   * @return The subscribe topics.
+   */
+  std::vector<std::string> sub_topic() const { return _sub_topic; }
 
 
   /**
