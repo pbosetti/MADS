@@ -451,7 +451,7 @@ int main(int argc, char *argv[]) {
 
     switch (rt) {
     case return_type::warning:
-      err = {{"warning", {"load_data", plugin->error()}}};
+      err["warning"]["load_data"] = plugin->error();
       agent.register_event(event_type::message, err);
       [[fallthrough]];
     case return_type::success:
@@ -459,14 +459,14 @@ int main(int argc, char *argv[]) {
     case return_type::retry:
       return 0ms; // next iteration
     case return_type::error:
-      err = {{"error", {"load_data", plugin->error()}}};
+      err["error"]["load_data"] = plugin->error();
       agent.register_event(event_type::message, err);
       count_err++;
       goto status_line;
     case return_type::critical:
       cerr << fg::red << "Critical error loading data: " << plugin->error()
             << fg::reset << endl;
-      err = {{"error", {"load_data", plugin->error()}}};
+      err["error"]["load_data"] = plugin->error();
       agent.register_event(event_type::message, err);
       Mads::running = false;
       return 0ms;
@@ -474,23 +474,23 @@ int main(int argc, char *argv[]) {
     // processing data in the plugin
   process_output:
     rt = plugin->process(out, &blob);
-    if (!err.empty()) out.merge_patch(err);
     if (out.empty()) {
       err = {{"error", {"process", "Plugin did not return any output"}}};
       agent.register_event(event_type::message, err);
       count_err++;
       goto status_line;
     }
+    if (!err.empty()) out.merge_patch(err);
     switch (rt) {
     case return_type::warning:
-      out["warning"] = {{"process", plugin->error()}};
+      out["warning"]["process"] = plugin->error();
       [[fallthrough]];
     case return_type::success:
       break; // next step
     case return_type::retry:
       return 0ms; // next iteration
     case return_type::error:
-      err = {{"error", {"process", plugin->error()}}};
+      err["error"]["process"] = plugin->error();
       agent.register_event(event_type::message, err);
       count_err++;
       goto status_line;
@@ -498,7 +498,7 @@ int main(int argc, char *argv[]) {
       cerr << fg::red
             << "Critical error processing data: " << plugin->error()
             << fg::reset << endl;
-      err = {{"error", {"process", plugin->error()}}};
+      err["error"]["process"] = plugin->error();
       agent.register_event(event_type::message, err);
       Mads::running = false;
       return 0ms;
