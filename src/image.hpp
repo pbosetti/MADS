@@ -187,7 +187,6 @@ private:
     kevent(_kq, _events, n, NULL, 0, NULL);
 
 #elif __linux__
-    char buffer[EVENT_BUF_LEN];
     cfg["watch_list"].as_table()->for_each([&](const auto &k, const auto &v) {
       fname = v.value_or("undefined");
       topic = static_cast<string>(k);
