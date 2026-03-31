@@ -360,12 +360,6 @@ int main(int argc, char *argv[]) {
   vector<unsigned char> blob;
   agent.loop([&]() -> chrono::milliseconds {
     rt = plugin->get_output(out, &blob);
-    if (out.empty()) {
-      err = {{"error", {"process", "Plugin did not return any output"}}};
-      agent.register_event(event_type::message, err);
-      count_err++;
-      goto status_line;
-    }
     switch (rt) {
     case return_type::warning:
       try {
@@ -376,6 +370,9 @@ int main(int argc, char *argv[]) {
       }
       [[fallthrough]];
     case return_type::success:
+      if (out.empty()) {
+        out["warning"]["get_output"] = "Plugin did not return any output";
+      }
       if (blob.size() > 0) {
         if (!out.contains("format"))
           out["format"] = out_format;
@@ -474,18 +471,15 @@ int main(int argc, char *argv[]) {
     // processing data in the plugin
   process_output:
     rt = plugin->process(out, &blob);
-    if (out.empty()) {
-      err = {{"error", {"process", "Plugin did not return any output"}}};
-      agent.register_event(event_type::message, err);
-      count_err++;
-      goto status_line;
-    }
     if (!err.empty()) out.merge_patch(err);
     switch (rt) {
     case return_type::warning:
       out["warning"]["process"] = plugin->error();
       [[fallthrough]];
     case return_type::success:
+      if (out.empty()) {
+        out["warning"]["process"] = "Plugin did not return any output";
+      }
       break; // next step
     case return_type::retry:
       return 0ms; // next iteration
