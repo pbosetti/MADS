@@ -396,7 +396,6 @@ int main(int argc, char *argv[]) {
       throw std::runtime_error(string("Critical error in getting data: ") + plugin->error());
       return 0ms;
     }
-  status_line:
     if (!silent) {
       cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count
             << fg::reset << " total, " << fg::red << count_err << fg::reset
