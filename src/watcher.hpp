@@ -77,12 +77,12 @@ public:
 private:
   std::string _file_name;
   std::chrono::duration<float> _timeout;
-  struct timespec _ts;
 #if defined(__linux__)
   char _buffer[BUF_LEN];
   int _inotify_fd;
   int _watch;
 #elif defined(__APPLE__)
+  struct timespec _ts;
   int _fd;
   int _kq = kqueue();
   struct kevent _change;

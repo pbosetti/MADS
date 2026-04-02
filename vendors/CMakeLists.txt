@@ -338,6 +338,9 @@ add_vendor(nlohmann_json)
 add_vendor(cxxopts)
 add_vendor(rang)
 add_vendor(tomlplusplus)
+# gv2fsm also FetchContent's inja; configure it here first so gv2fsm reuses the
+# existing target instead of reconfiguring inja with a conflicting json setup.
+add_vendor_exclude_from_all(inja)
 add_vendor(gv2fsm)
 add_vendor_exclude_from_all(pugg)
 add_vendor_exclude_from_all(libsodium)
@@ -368,7 +371,6 @@ if(ANDROID)
     endif()
   endforeach()
 endif()
-add_vendor_exclude_from_all(inja)
 add_vendor(snappy)
 if(TARGET snappy)
   install(
