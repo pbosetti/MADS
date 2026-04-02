@@ -22,6 +22,7 @@ COPY vendors ${BUILDDIR}/vendors
 COPY scripts ${BUILDDIR}/scripts
 COPY tools ${BUILDDIR}/tools
 COPY test ${BUILDDIR}/test
+COPY cmake ${BUILDDIR}/cmake
 COPY CMakeLists.txt ${BUILDDIR}
 COPY Dockerfile.in ${BUILDDIR}
 COPY mads.ini ${BUILDDIR}
