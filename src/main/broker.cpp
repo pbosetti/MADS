@@ -25,11 +25,14 @@ Author(s): Paolo Bosetti
 #include "../watcher.hpp"
 #include "../curve.hpp"
 #include "../keypress.hpp"
+#include "../goback.hpp"
 #include <cstring>
 #include <cxxopts.hpp>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <vector>
+#include <map>
 #include <rang.hpp>
 #include <regex>
 #include <string>
@@ -62,6 +65,7 @@ using namespace std::string_view_literals;
 using namespace std;
 using namespace cxxopts;
 using namespace rang;
+using namespace Mads;
 
 /*
   _   _ _   _ _ _ _
@@ -103,103 +107,97 @@ void relaunch() {
 }
 #endif
 
-bool get_nic_ip(string &ip, const string nic) {
+map<string, string> list_ip() {
+  map<string, string> result;
 #ifdef _WIN32
-  PIP_ADAPTER_INFO pAdapterInfo;
-  PIP_ADAPTER_INFO pAdapter = NULL;
-  DWORD dwRetVal = 0;
-  ULONG ulOutBufLen = sizeof(IP_ADAPTER_INFO);
-
-  pAdapterInfo = (IP_ADAPTER_INFO *)malloc(sizeof(IP_ADAPTER_INFO));
-  if (pAdapterInfo == NULL) {
-    cerr << "Error allocating memory needed to call GetAdaptersinfo" << endl;
-    return false;
+  ULONG out_buf_len = sizeof(IP_ADAPTER_INFO);
+  PIP_ADAPTER_INFO adapter_info =
+    static_cast<PIP_ADAPTER_INFO>(malloc(out_buf_len));
+  if (adapter_info == nullptr) {
+    cerr << "Error allocating memory needed to call GetAdaptersInfo" << endl;
+    return result;
   }
 
-  if (GetAdaptersInfo(pAdapterInfo, &ulOutBufLen) == ERROR_BUFFER_OVERFLOW) {
-    free(pAdapterInfo);
-    pAdapterInfo = (IP_ADAPTER_INFO *)malloc(ulOutBufLen);
-    if (pAdapterInfo == NULL) {
-      cerr << "Error allocating memory needed to call GetAdaptersinfo" << endl;
-      return false;
+  DWORD ret = GetAdaptersInfo(adapter_info, &out_buf_len);
+  if (ret == ERROR_BUFFER_OVERFLOW) {
+    free(adapter_info);
+    adapter_info = static_cast<PIP_ADAPTER_INFO>(malloc(out_buf_len));
+    if (adapter_info == nullptr) {
+      cerr << "Error allocating memory needed to call GetAdaptersInfo" << endl;
+      return result;
     }
+    ret = GetAdaptersInfo(adapter_info, &out_buf_len);
   }
 
-  if ((dwRetVal = GetAdaptersInfo(pAdapterInfo, &ulOutBufLen)) == NO_ERROR) {
-    pAdapter = pAdapterInfo;
-    if (nic == "list") {
-      cout << fg::yellow << "Available network adapters:" << fg::reset << endl;
-      while (pAdapter) {
-        cout << "[" << fg::yellow << setw(2) << pAdapter->Index << fg::reset
-             << "] - " << pAdapter->Description << " -> " << fg::yellow
-             << pAdapter->IpAddressList.IpAddress.String << fg::reset << endl;
-        pAdapter = pAdapter->Next;
-      }
-    } else {
-      while (pAdapter) {
-        if (nic == std::to_string(pAdapter->Index)) {
-          ip = pAdapter->IpAddressList.IpAddress.String;
-          free(pAdapterInfo);
-          return true;
-        }
-        pAdapter = pAdapter->Next;
-      }
+  if (ret == NO_ERROR) {
+    for (PIP_ADAPTER_INFO adapter = adapter_info; adapter != nullptr;
+         adapter = adapter->Next) {
+      result[std::to_string(adapter->Index)] =
+        adapter->IpAddressList.IpAddress.String;
     }
   } else {
-    cerr << "GetAdaptersInfo failed with error: " << dwRetVal << endl;
+    cerr << "GetAdaptersInfo failed with error: " << ret << endl;
   }
 
-  if (pAdapterInfo)
-    free(pAdapterInfo);
-  return false;
+  free(adapter_info);
 #else
-  int fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-
-  if (nic == "list") {
-    struct ifaddrs *ptr_ifaddrs = nullptr;
-
-    auto result = getifaddrs(&ptr_ifaddrs);
-    if (result != 0) {
-      cout << fg::red << "`getifaddrs()` failed: " << strerror(errno)
-           << fg::reset << endl;
-      return false;
-    }
-    cout << fg::yellow << "Available network adapters:" << fg::reset << endl;
-    for (struct ifaddrs *ptr_entry = ptr_ifaddrs; ptr_entry != nullptr;
-         ptr_entry = ptr_entry->ifa_next) {
-      string ipaddress_human_readable_form;
-      string interface_name = string(ptr_entry->ifa_name);
-      if (!ptr_entry->ifa_addr) {
-        continue;
-      }
-      sa_family_t address_family = ptr_entry->ifa_addr->sa_family;
-      if (address_family == AF_INET) {
-        if (ptr_entry->ifa_addr != nullptr) {
-          char buffer[INET_ADDRSTRLEN] = {0};
-          inet_ntop(address_family,
-                    &((struct sockaddr_in *)(ptr_entry->ifa_addr))->sin_addr,
-                    buffer, INET_ADDRSTRLEN);
-          ipaddress_human_readable_form = string(buffer);
-        }
-
-        cout << "[" << fg::yellow << setw(10) << interface_name << fg::reset
-             << "] - " << ipaddress_human_readable_form << endl;
-      }
-    }
-    freeifaddrs(ptr_ifaddrs);
-    return true;
+  struct ifaddrs *ptr_ifaddrs = nullptr;
+  if (getifaddrs(&ptr_ifaddrs) != 0) {
+    cerr << "`getifaddrs()` failed: " << strerror(errno) << endl;
+    return result;
   }
 
-  struct ifreq ifr {};
-  strcpy(ifr.ifr_name, nic.c_str());
-  if (ioctl(fd, SIOCGIFADDR, &ifr) == -1) {
-    cerr << "ioctl error: " << string(strerror(errno)) << endl;
-    return false;
+  for (struct ifaddrs *ptr_entry = ptr_ifaddrs; ptr_entry != nullptr;
+       ptr_entry = ptr_entry->ifa_next) {
+    if (ptr_entry->ifa_addr == nullptr ||
+        ptr_entry->ifa_addr->sa_family != AF_INET) {
+      continue;
+    }
+
+    char buffer[INET_ADDRSTRLEN] = {0};
+    auto *addr = reinterpret_cast<struct sockaddr_in *>(ptr_entry->ifa_addr);
+    if (inet_ntop(AF_INET, &addr->sin_addr, buffer, sizeof(buffer)) !=
+        nullptr) {
+      result[ptr_entry->ifa_name] = buffer;
+    }
   }
-  close(fd);
-  ip = inet_ntoa(((sockaddr_in *)&ifr.ifr_addr)->sin_addr);
-  return true;
+
+  freeifaddrs(ptr_ifaddrs);
 #endif
+  return result;
+}
+
+
+map<string, string> settings_urls(string const &base_url) {
+  map<string, string> urls;
+  string port = base_url.substr(base_url.find_last_of(":") + 1);
+  auto ips = list_ip();
+  for (const auto &[name, address] : ips) {
+    urls[name] = "tcp://" + address + ":" + port;
+  }
+  return urls;
+}
+
+void print_instructions() {
+  cout << style::italic << "CTRL-C to immediate exit" << style::reset << endl;
+
+  cout << fg::green
+       << "Type P to pause, R to resume, I for information, Q to clean quit\n"
+       << "N to show next IP address"
+#ifndef _WIN32
+       << ", X to restart and reload settings"
+#endif
+       << fg::reset << endl
+       << endl;
+}
+
+string timestamp() {
+  auto now = chrono::system_clock::now();
+  auto in_time_t = chrono::system_clock::to_time_t(now);
+
+  stringstream ss;
+  ss << put_time(localtime(&in_time_t), "[%Y-%m-%d %H:%M:%S] ");
+  return ss.str();
 }
 
 #ifdef __linux__
@@ -247,17 +245,15 @@ int main(int argc, char **argv) {
   unique_ptr<Mads::CurveAuth> curve_auth_ptr = nullptr;
   Options options(argv[0]);
   string nic = "lo0";
-  string ip = "127.0.0.1";
   string key_name;
   bool crypto = false;
+  bool daemon = false;
   vector<string> desc{"FRONTEND msg in   ", "FRONTEND bytes in ",
                       "FRONTEND msg out  ", "FRONTEND bytes out",
                       "BACKEND msg in    ", "BACKEND bytes in  ",
                       "BACKEND msg out   ", "BACKEND bytes out "};
   // clang-format off
   options.add_options()
-    ("n,nic", "Network interface name (-n list to list'em all)",
-      value<string>())
     ("s,settings", "Settings file path", value<string>())
     ("d,daemon", "Run as daemon")
     ("crypto", "Enable CURVE encryption (requires proper setup)", value<string>()->implicit_value("broker"))
@@ -277,11 +273,9 @@ int main(int argc, char **argv) {
     cout << LIB_VERSION << endl;
     return 0;
   }
-  if (options_parsed.count("nic") && options_parsed["nic"].as<string>() == "list") {
-    get_nic_ip(ip, "list");
-    return 0;
+  if (options_parsed.count("daemon")) {
+    daemon = true;
   }
-
   if (options_parsed.count("settings") != 0) {
     settings_path = options_parsed["settings"].as<string>();
   } else {
@@ -326,16 +320,6 @@ int main(int argc, char **argv) {
   frontend_address = config[name]["frontend_address"].value_or(BROKER_FRONTEND);
   backend_address = config[name]["backend_address"].value_or(BROKER_BACKEND);
   settings_address = config[name]["settings_address"].value_or(BROKER_SETTINGS);
-  nic = config[name]["nic"].value_or(nic);
-  if (options_parsed.count("nic") != 0) {
-    nic = options_parsed["nic"].as<string>();
-    cout << "Using network interface " << style::bold << nic << style::reset
-         << endl;
-  }
-  if (!get_nic_ip(ip, nic)) {
-    cerr << fg::red << "Cannot get IP address for NIC " << nic << fg::reset
-         << endl;
-  }
 
   // Create broker sockets
   zmqpp::context context;
@@ -407,7 +391,8 @@ int main(int argc, char **argv) {
       content << LIB_VERSION;
       if (settings.receive(msg)) {
         if (msg.parts() < 2) {
-          cerr << fg::red << "Received malformed message from agent, "
+          cerr << goback(1, !daemon) << fg::red << timestamp() 
+               <<"Received malformed message from agent, "
                << "expected at least 2 parts" << fg::reset << endl;
           continue;
         }
@@ -419,13 +404,14 @@ int main(int argc, char **argv) {
         } 
         if (cmd == "settings") {
           if (!Mads::check_version(agent_version)) {
-            cerr << fg::red
+            cerr << goback(1, !daemon) << fg::red << timestamp() 
                  << "Received settings request from agent with wrong version: "
                  << agent_version << " (vs. " << LIB_VERSION << ")" << fg::reset
                  << endl;
           } else {
-            cout << "Sending settings to agent " << agent_name << " ("
-                << agent_version << ")" << endl;
+            cout << goback(1, !daemon) << timestamp()
+                 << "Sending settings to agent " << agent_name << " ("
+                 << agent_version << ")" << endl;
             {
               std::lock_guard<std::mutex> lock(ini_table_mutex);
               content << ini_table;
@@ -436,15 +422,17 @@ int main(int argc, char **argv) {
                 attachment_path = Mads::exec_dir(attachment_path);
               }
               if (!filesystem::exists(attachment_path)) {
-                cerr << fg::red << "attachment path does not exist: "
-                    << attachment_path << fg::reset << endl;
+                cerr << goback(1, !daemon) << fg::red << timestamp() 
+                     << "Attachment path does not exist: "
+                     << attachment_path << fg::reset << endl;
               } else {
                 ifstream attachment_file(attachment_path, ios::in | ios::binary);
                 stringstream attachment_content;
-                cout << fg::yellow << "  Attaching binary object: "
-                    << style::bold << attachment_path
-                    << " (" << filesystem::file_size(attachment_path) << " bytes)"
-                    << fg::reset << endl;
+                cout << goback(1, !daemon) << fg::yellow << timestamp()
+                     << "  Attaching binary object: "
+                     << style::bold << attachment_path
+                     << " (" << filesystem::file_size(attachment_path) 
+                     << " bytes)" << fg::reset << endl;
                 attachment_content << attachment_file.rdbuf();
                 content << attachment_content.str();
               }
@@ -455,8 +443,9 @@ int main(int argc, char **argv) {
           chrono::system_clock::time_point now = chrono::system_clock::now();
           settings.send(to_string(Mads::timecode(now, timecode_fps)));
         } else {
-          cerr << fg::yellow << "Got unexpected command " << cmd << fg::reset
-               << endl;
+          cerr << goback(1, !daemon) << fg::yellow << timestamp()
+               << "Got unexpected command " 
+               << cmd << fg::reset << endl;
           settings.send(content);
         }
       }
@@ -469,15 +458,16 @@ int main(int argc, char **argv) {
 
   // print settings URI for clients
   string port = settings_address.substr(settings_address.find_last_of(":") + 1);
-  cout << "Settings are provided via " << style::bold << "tcp://" << ip << ":"
-       << port << style::reset << endl;
+  cout << "Settings are provided on " << style::bold << "tcp://127.0.0.1:"
+       << port << style::reset
+       << style::italic << " (loopback)" << style::reset << endl;
 
   thread([&]() {
     Mads::Watcher watcher(settings_path, 1s);
     string ini_tmp = "";
     watcher.watch([&](const std::string &file_name) {
-      cout << fg::yellow << "Settings file " << file_name
-            << " has been modified, reloading...";
+      cout << goback(1, !daemon) << fg::yellow << timestamp() 
+           << "Reloading settings " << file_name << "... ";
       ini_tmp = read_settings_file(settings_path);
       try {
         auto i = toml::parse(ini_tmp);
@@ -487,27 +477,25 @@ int main(int argc, char **argv) {
         }
         cout << " done." << fg::reset << endl;
       } catch (const exception &e) {
-        cerr << fg::red << " INI file read error: " << e.what() 
-             << " - skipping changes" << fg::reset << endl;
+        cerr << endl << fg::red << timestamp() << " INI file read error: " 
+             << e.what() << " - skipping changes" << fg::reset << endl;
       }
     });
   }).detach();
 
-#ifndef _WIN32
-  if (options_parsed.count("daemon") != 0) {
+  if (daemon) {
     cout << fg::yellow
+#ifndef _WIN32
          << "Running as daemon with PID " << getpid()
-         << ", will watch for changes to " << settings_path << endl;
-    zmqpp::proxy(frontend, backend);
-    exit(EXIT_SUCCESS);
-  }
 #else
-  if (options_parsed.count("daemon") != 0) {
-    cout << "Running as daemon with PID " << getpid << endl;
+         << "Running as daemon with PID " << getpid
+#endif
+         << ", will watch for changes to " << settings_path << endl 
+         << fg::reset << endl;
     zmqpp::proxy(frontend, backend);
     cerr << "Proxy exited" << endl;
+    exit(EXIT_SUCCESS);
   }
-#endif
 
   // Run interactively as a steerable proxy
   else {
@@ -516,18 +504,11 @@ int main(int argc, char **argv) {
     zmqpp::socket controller(context, zmqpp::socket_type::req);
     controller.connect("inproc://broker-ctrl");
 
+    auto settings_url_list = settings_urls(settings_address);
+    auto current_url = settings_url_list.begin();
+
     thread(proxy, ref(frontend), ref(backend), ref(controlled)).detach();
-    cout << style::italic << "CTRL-C to immediate exit" << style::reset << endl;
-#ifdef _WIN32
-    cout << fg::green
-         << "Type P to pause, R to resume, I for information, Q to clean quit"
-         << fg::reset << endl;
-#else
-    cout << fg::green
-         << "Type P to pause, R to resume, I for information, Q to clean "
-            "quit, X to restart and reload settings"
-         << fg::reset << endl;
-#endif
+    print_instructions();
 
     while (running) {
       zmqpp::message msg;
@@ -585,18 +566,19 @@ int main(int argc, char **argv) {
              << endl;
         break;
       }
+      case 'n':
+      case 'N': {
+        cout << goback(5) << "Settings are provided on "
+             << style::bold << current_url->second << style::reset 
+             << style::italic << " (" << current_url->first << ")" 
+             << style::reset << endl;
+        if (++current_url == settings_url_list.end()) {
+          current_url = settings_url_list.begin();
+        }
+        print_instructions();
+        break;
+      }
       default:
-#ifdef _WIN32
-        cout << fg::green
-             << "Type P to pause, R to resume, I for information, Q to clean "
-                "quit"
-             << fg::reset << endl;
-#else
-        cout << fg::green
-             << "Type P to pause, R to resume, I for information, Q to clean "
-                "quit, X to restart and reload settings"
-             << fg::reset << endl;
-#endif
         break;
       }
     }

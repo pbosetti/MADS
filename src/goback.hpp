@@ -118,8 +118,11 @@ private:
   }
 };
 
-inline GoBack goback(std::size_t lines) {
-  return GoBack(lines);
+inline GoBack goback(std::size_t lines, bool really = false) {
+  if (really) {
+    return GoBack(lines);
+  }
+  return GoBack(0);
 }
 
 } // namespace Mads
