@@ -118,7 +118,7 @@ private:
   }
 };
 
-inline GoBack goback(std::size_t lines, bool really = false) {
+inline GoBack goback(std::size_t lines, bool really = true) {
   if (really) {
     return GoBack(lines);
   }
