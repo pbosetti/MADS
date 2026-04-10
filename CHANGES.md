@@ -1,4 +1,4 @@
-# Release v2.0.3-6-g722b6ce
+# Release v2.0.4
 
 This document summarizes what changed between `v2.0.3` and `v2.0.4`.
 
