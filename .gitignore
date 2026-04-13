@@ -24,3 +24,8 @@ vendor/libsodium
 checks.json
 
 TODO.md
+
+*.ini
+*.toml
+
+!mads.ini

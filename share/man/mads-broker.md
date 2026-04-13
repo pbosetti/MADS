@@ -5,7 +5,7 @@
 
 # SYNOPSIS
 
-**mads-broker** [**\-n, \-\-nic**] [**\-s, \-\-settings** *arg*] [**\-d, \-\-daemon**] [**\-\-crypto[=arg]**] [**\-\-keys_dir[=arg]**] [**\-v, \-\-version**] [**\-h, \-\-help**]
+**mads-broker** [**\-s, \-\-settings** *arg*] [**\-d, \-\-daemon**] [**\-\-crypto[=arg]**] [**\-\-keys_dir[=arg]**] [**\-v, \-\-version**] [**\-h, \-\-help**]
 
 # DESCRIPTION
 
@@ -16,9 +16,6 @@ The broker will watch for changes to the INI file, automatically reload it, and 
 Note that if you change broker's settings in the INI file, then you want to also relaunch the broker itself.
 
 # OPTIONS
-
-**\-n**, **\-\-nic**
-:  select the network interface (a string representing the nic name). This is purely cosmetic: the broker will listen on all interfaces anyway, but will use this nic name to identify the proper IP address and use it upon launch to provide the user with the correct IP address to be used for initializing the agents. Use **-n list** to list all available network interfaces.
 
 **\-s**, **\-\-settings** *arg*
 :  specify the settings file to be used. If not specified, the default settings file is used (usually /usr/local/etc/mads.ini).
