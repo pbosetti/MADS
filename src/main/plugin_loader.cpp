@@ -434,7 +434,8 @@ int main(int argc, char *argv[]) {
       try {
         in = json::parse(get<1>(msg));
       } catch (json::parse_error &e) {
-        cerr << fg::red << "Error parsing message content:" << fg::reset 
+        cerr << fg::red << e.what() << endl
+             <<"Error parsing message content:" << fg::reset 
              << endl << get<1>(msg) << endl;
         return 0ms;
       }
@@ -547,7 +548,8 @@ int main(int argc, char *argv[]) {
       try {
         in = json::parse(get<1>(msg));
       } catch (json::parse_error &e) {
-        cerr << fg::red << "Error parsing message content:" << fg::reset 
+        cerr << fg::red << e.what() << endl
+             <<"Error parsing message content:" << fg::reset 
              << endl << get<1>(msg) << endl;
         return 0ms;
       }
