@@ -137,7 +137,12 @@ int main(int argc, char *argv[]) {
     auto msg = logger.last_message();
     // check for pause/unpause message
     if (get<0>(msg) == "metadata") {
-      auto j = json::parse(get<1>(msg));
+      json j;
+      try {
+        j = json::parse(get<1>(msg));
+      } catch (json::parse_error &e) {
+        type = message_type::error;
+      }
       if (!j["pause"].is_null()) {
         logger.paused = j["pause"].get<bool>();
         if (logger.paused) 
@@ -160,7 +165,10 @@ int main(int argc, char *argv[]) {
               << style::bold << get<0>(logger.last_blob()) << ": "
               << style::reset << get<1>(logger.last_blob()) << "("
               << get<2>(logger.last_blob()).size() << " bytes)" << endl;
-      } 
+      } else if (type == message_type::error) { 
+        cerr << fg::red << "Error parsing message content:" << fg::reset << endl;
+        cerr << get<1>(msg) << endl;
+      }
       cout << fg::reset << style::reset << endl;
     }
 

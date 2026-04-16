@@ -206,7 +206,7 @@ enum class event_type {
  * @brief Enumeration of message types for agents.
  *
  */
-enum class message_type { none = 0, json = 1, blob };
+enum class message_type { none = 0, json = 1, blob, error };
 
 /**
  * @brief Map of event types to strings.
