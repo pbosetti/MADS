@@ -107,7 +107,7 @@ if(MADS_DIRECTOR)
   set(MADS_DIRECTOR_EXAMPLE_CONFIG ON)
   FetchContent_Declare(mads-director
     GIT_REPOSITORY https://github.com/mads-net/mads_director.git
-    GIT_TAG v2.0.3
+    GIT_TAG v2.0.4
     GIT_SHALLOW TRUE
   )
   FetchContent_MakeAvailable(mads-director)

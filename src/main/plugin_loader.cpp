@@ -431,7 +431,13 @@ int main(int argc, char *argv[]) {
         return 0ms; // Control message, already handled
       }
       msg = agent.last_message();
-      in = json::parse(get<1>(msg));
+      try {
+        in = json::parse(get<1>(msg));
+      } catch (json::parse_error &e) {
+        cerr << fg::red << "Error parsing message content:" << fg::reset 
+             << endl << get<1>(msg) << endl;
+        return 0ms;
+      }
       rt = plugin->load_data(in, agent.last_topic());
     } else if (type == message_type::blob) {
       msg_blob = agent.last_blob();
@@ -538,7 +544,13 @@ int main(int argc, char *argv[]) {
       if (agent.last_topic() == "control") {
         return 0ms; // Control message, already handled
       }
-      in = json::parse(get<1>(msg));
+      try {
+        in = json::parse(get<1>(msg));
+      } catch (json::parse_error &e) {
+        cerr << fg::red << "Error parsing message content:" << fg::reset 
+             << endl << get<1>(msg) << endl;
+        return 0ms;
+      }
       rt = plugin->load_data(in, agent.last_topic());
     }
     switch (rt) {
