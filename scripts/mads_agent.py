@@ -128,7 +128,7 @@ lib.agent_get_settings.argtypes = [c_void_p, c_int]
 lib.agent_get_settings.restype = c_char_p
 
 lib.agent_set_settings_timeout.argtypes = [c_void_p, c_int]
-lib.agent_set_settings_timeout.restype = None
+lib.agent_set_settings_timeout.restype = c_int
 
 lib.agent_settings_timeout.argtypes = [c_void_p]
 lib.agent_settings_timeout.restype = c_int
@@ -140,7 +140,7 @@ lib.agent_settings_uri.argtypes = [c_void_p]
 lib.agent_settings_uri.restype = c_char_p
 
 lib.agent_set_high_watermark.argtypes = [c_void_p, c_int]
-lib.agent_set_high_watermark.restype = None
+lib.agent_set_high_watermark.restype = c_int
 
 lib.agent_high_watermark.argtypes = [c_void_p]
 lib.agent_high_watermark.restype = c_int
@@ -264,7 +264,7 @@ class Agent:
     
     def set_settings_timeout(self, timeout_ms: int):
         """Set the settings timeout in milliseconds."""
-        lib.agent_set_settings_timeout(self._agent, timeout_ms)
+        return lib.agent_set_settings_timeout(self._agent, timeout_ms)
     
     def settings_timeout(self) -> int:
         """Get the settings timeout."""
@@ -281,10 +281,10 @@ class Agent:
     
     def set_queue_size(self, size: 1000):
         """Set the receive queue size"""
-        lib.agent_set_high_watermark(self._agent, size)
+        return lib.agent_set_high_watermark(self._agent, size)
     
     def queue_size(self) -> int:
-        """Set the receive queue size"""
+        """Get the receive queue size"""
         return lib.agent_high_watermark(self._agent)
     
     # Messaging methods

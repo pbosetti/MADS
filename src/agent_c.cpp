@@ -176,9 +176,18 @@ const char *agent_get_settings(agent_t agent, int n) {
   return s.c_str();
 }
 
-void agent_set_settings_timeout(agent_t agent, int to_ms) {
+int agent_set_settings_timeout(agent_t agent, int to_ms) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
-  ag->set_settings_timeout(to_ms);
+  try {
+    ag->set_settings_timeout(to_ms);
+  } catch (const std::exception &e) {
+    snprintf(_err_msg, ERR_MSG_SIZE, "Error setting settings timeout: %s", e.what());
+    return -1;
+  } catch (...) {
+    snprintf(_err_msg, ERR_MSG_SIZE, "Error setting settings timeout: Unexpected");
+    return -1;
+  }
+  return 0;
 }
 
 int agent_settings_timeout(agent_t agent) {
@@ -219,9 +228,18 @@ const char *agent_settings_uri(agent_t agent) {
   return s.c_str();
 }
 
-void agent_set_high_watermark(agent_t agent, int n) {
+int agent_set_high_watermark(agent_t agent, int n) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
-  ag->set_high_watermark(n);
+  try {
+    ag->set_high_watermark(n);
+  } catch (const std::exception &e) {
+    snprintf(_err_msg, ERR_MSG_SIZE, "Error setting high watermark: %s", e.what());
+    return -1;
+  } catch (...) {
+    snprintf(_err_msg, ERR_MSG_SIZE, "Error setting high watermark: Unexpected");
+    return -1;
+  }
+  return 0;
 }
 
 int agent_high_watermark(agent_t agent) {

@@ -253,8 +253,9 @@ MADS_EXPORT const char *agent_get_settings(agent_t agent, int n);
  *
  * @param agent Agent handle.
  * @param to_ms Timeout in milliseconds.
+ * @return `0` on success, `-1` on error.
  */
-MADS_EXPORT void agent_set_settings_timeout(agent_t agent, int to_ms);
+MADS_EXPORT int agent_set_settings_timeout(agent_t agent, int to_ms);
 
 /**
  * @brief  Sets the publish topic for the agent.
@@ -341,8 +342,9 @@ MADS_EXPORT const char *agent_settings_uri(agent_t agent);
  *
  * @param agent Agent handle.
  * @param n High watermark value.
+ * @return `0` on success, `-1` on error.
  */
-MADS_EXPORT void agent_set_high_watermark(agent_t agent, int n);
+MADS_EXPORT int agent_set_high_watermark(agent_t agent, int n);
 
 /**
  * @brief Returns the outgoing message high watermark.
