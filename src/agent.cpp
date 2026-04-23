@@ -180,7 +180,7 @@ void Agent::init(string name, string settings_uri, bool crypto, filesystem::path
 
 void Agent::init(bool crypto, bool install_watchdog) {
   _crypto = crypto;
-  if (_crypto) {
+  if (_crypto && !_curve_auth) {
     _curve_auth = make_unique<CurveAuth>(_context);
     _curve_auth->set_key_dir(_key_dir);
     _curve_auth->setup_auth(auth_verbose);
@@ -545,7 +545,7 @@ inline bool Agent::receive_raw(message &message, bool dont_block) {
     //   return true;
     // });
     _latest_message.cv.wait(lock, [&] {
-       return _latest_message.value.has_value() || !Mads::running;
+       return _latest_message.value.has_value() || !Mads::running || dont_block;
     });
     if (_latest_message.value.has_value()) {
       message = _latest_message.value.value().copy();
