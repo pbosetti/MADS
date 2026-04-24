@@ -124,7 +124,7 @@ int main(int argc, char *argv[]) {
                       agent_name = AGENT_NAME_DEFAULT;
   size_t count = 0, count_err = 0;
   size_t delay = 0;
-  bool crypto = false;
+  bool crypto = false, silent = false;
   filesystem::path key_dir(Mads::exec_dir() + "/../etc");
   string client_key_name = "client";
   string server_key_name = "broker";
@@ -138,7 +138,8 @@ int main(int argc, char *argv[]) {
     ("n,name", "Agent name (default to plugin name)", value<string>())
     ("i,agent-id", "Agent ID to be added to JSON frames", value<string>())
     ("d,delay", "Initial delay before forst message in ms (default 0)", value<size_t>())
-    ("o,option", "Additional plugin options (may be repeated)", value<vector<string>>());
+    ("o,option", "Additional plugin options (may be repeated)", value<vector<string>>())
+    ("silent", "Silent mode (don't print status line)");
   #if defined(PLUGIN_LOADER_SOURCE) or defined(PLUGIN_LOADER_FILTER)
   options.add_options()
     ("p,period", "Sampling period (default 100 ms)", value<size_t>());
@@ -182,6 +183,9 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  if (options_parsed.count("silent") != 0) {
+    silent = true;
+  }
   // Core stuff
   Agent agent(agent_name, settings_uri);
   if (crypto) {
@@ -215,7 +219,6 @@ int main(int argc, char *argv[]) {
     agent.set_agent_id(options_parsed["agent-id"].as<string>());
   }
   settings["prefix"] = Mads::prefix();
-  bool silent = settings.value("silent", false);
   if (settings["receive_timeout"].is_number()) {
     agent.set_receive_timeout(settings["receive_timeout"].get<int>());
   }
