@@ -119,5 +119,10 @@
 			"PLUGIN_LOADER_SINK=1"
 		],
 		"C_Cpp.default.cppStandard": "c++20"
+	},
+	"extensions": {
+		"recommendations": [
+			"mads-net.madscode"
+		]
 	}
 }
