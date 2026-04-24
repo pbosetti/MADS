@@ -15,6 +15,7 @@ Author(s): Paolo Bosetti
 #include "../mads.hpp"
 #include <cxxopts.hpp>
 #include <filesystem>
+#include <memory>
 #include <pugg/Kernel.h>
 #include <regex>
 
@@ -315,7 +316,7 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
   // Create the class from the plugin:
-  Plugin *plugin = plugin_driver->create();
+  auto plugin = std::unique_ptr<Plugin>(plugin_driver->create());
 
   cerr << style::bold << "Plugin settings:" << style::reset << endl
        << "  Plugin:           " << style::bold << plugin_file 
@@ -329,7 +330,7 @@ int main(int argc, char *argv[]) {
          << MADS_PLUGIN_MIN_PROTOCOL << ".\n"
          << "Recompile the plugin (see https://github.com/pbosetti/mads_plugin)"
          << fg::reset << style::reset << endl;
-    exit(EXIT_FAILURE);
+    return EXIT_FAILURE;
   }
 
   plugin->set_params(settings);
@@ -359,6 +360,8 @@ int main(int argc, char *argv[]) {
   return_type rt;
   vector<unsigned char> blob;
   agent.loop([&]() -> chrono::milliseconds {
+    out.clear();
+    blob.clear();
     rt = plugin->get_output(out, &blob);
     switch (rt) {
     case return_type::warning:
@@ -376,9 +379,11 @@ int main(int argc, char *argv[]) {
       if (blob.size() > 0) {
         if (!out.contains("format"))
           out["format"] = out_format;
-        agent.publish(blob, out, out.value("topic", ""));
+        auto topic = out.value("topic", "");
+        agent.publish(blob, std::move(out), topic);
       } else if (!out.empty()) {
-        agent.publish(out, out.value("topic", ""));
+        auto topic = out.value("topic", "");
+        agent.publish(std::move(out), topic);
       }
       break;
     case return_type::retry:
@@ -413,7 +418,11 @@ int main(int argc, char *argv[]) {
   tuple<string, string, vector<unsigned char>> msg_blob;
   vector<unsigned char> blob{};
   agent.loop([&]() -> chrono::milliseconds {
+    type = message_type::none;
+    in.clear();
+    out.clear();
     err.clear();
+    blob.clear();
     try {
       type = agent.receive(dont_block);
     } catch (const AgentError &e) {
@@ -507,9 +516,11 @@ int main(int argc, char *argv[]) {
     if (!blob.empty()) {
       if (!out.contains("format"))
         out["format"] = "raw";
-      agent.publish(blob, out, out.value("topic", ""));
+      auto topic = out.value("topic", "");
+      agent.publish(blob, std::move(out), topic);
     } else {
-      agent.publish(out, out.value("topic", ""));
+      auto topic = out.value("topic", "");
+      agent.publish(std::move(out), topic);
     }
   status_line:
     if (!silent) {
@@ -527,6 +538,9 @@ int main(int argc, char *argv[]) {
   tuple<string, string> msg;
   tuple<string, string, vector<unsigned char>> msg_blob;
   agent.loop([&]() -> chrono::milliseconds {
+    type = message_type::none;
+    in.clear();
+    err.clear();
     try {
       type = agent.receive();
     } catch (const AgentError &e) {
@@ -596,7 +610,7 @@ int main(int argc, char *argv[]) {
   // Cleanup
   agent.register_event(event_type::shutdown);
   agent.disconnect();
-  delete plugin;
+  plugin.reset();
   kernel.clear_drivers();
 
   if (agent.restart()) {
