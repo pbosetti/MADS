@@ -1,4 +1,4 @@
-/*
+/*******************************************************************************
                    __
   _ __   ___ _ __ / _|  __ _ ___ ___  ___  ___ ___
  | '_ \ / _ \ '__| |_  / _` / __/ __|/ _ \/ __/ __|
@@ -10,9 +10,10 @@
 Assess network performance.
 
 Author(s): Paolo Bosetti
-*/
+*******************************************************************************/
+
 #include "../mads.hpp"
-#include "../agent.hpp"
+#include "../agent_app.hpp"
 #include <cxxopts.hpp>
 
 using namespace std;
@@ -22,26 +23,27 @@ using namespace Mads;
 
 
 int main(int argc, char *argv[]) {
-  string settings_uri = SETTINGS_URI;
   size_t i = 0, len = 10;
   json payload;
   char *buf;
   chrono::milliseconds time{100};
-  bool crypto = false;
-  filesystem::path key_dir(Mads::exec_dir() + "/../etc");
-  string client_key_name = "client";
-  string server_key_name = "broker";
-  auth_verbose auth_verbose = auth_verbose::off;
-  string agent_name = argv[0], agent_id;
 
   // CLI options
-  Options options(argv[0]);
-  options.add_options()
+  AgentApp agent(argv[0], SETTINGS_URI);
+  agent.add_agent_identity_options();
+  // clang-format off
+  agent.options()
     ("p", "Sampling period (default 100 ms)", value<size_t>())
-    ("n,name", "Agent name (default to plugin name)", value<string>())
-    ("i,agent-id", "Agent ID to be added to JSON frames", value<string>())
     ("l", "Byte length of Payload", value<size_t>());
-  SETUP_OPTIONS(options, Agent);
+  // clang-format on
+  agent.add_common_options();
+  
+  auto options_parsed = agent.parse_options(argc, argv);
+  if (int rc = AgentApp::handle_standard_exit_options<AgentApp>(
+          options_parsed, agent.raw_options(), argv);
+      rc >= 0) {
+    return rc;
+  }
 
   // Settings
   if (options_parsed.count("p") != 0) {
@@ -49,25 +51,6 @@ int main(int argc, char *argv[]) {
   }
   if (options_parsed.count("l") != 0) {
     len = options_parsed["l"].as<size_t>();
-  }
-  if (options_parsed.count("name") != 0) {
-    agent_name = options_parsed["name"].as<string>();
-  }
-
-  if (options_parsed.count("crypto") != 0) {
-    crypto = true;
-    if (options_parsed.count("keys_dir") != 0) {
-      key_dir = options_parsed["keys_dir"].as<string>();
-    }
-    if (options_parsed.count("key_broker") != 0) {
-      server_key_name = options_parsed["key_broker"].as<string>();
-    }
-    if (options_parsed.count("key_client") != 0) {
-      client_key_name = options_parsed["key_client"].as<string>();
-    }
-    if (options_parsed.count("auth_verbose") != 0) {
-      auth_verbose = auth_verbose::on;
-    }
   }
 
   // Core stuff
@@ -78,26 +61,16 @@ int main(int argc, char *argv[]) {
   }
   buf[len - 1] = 0;  // null-terminate the string
 
-  Agent agent(agent_name, settings_uri);
-  if (options_parsed.count("agent-id")) {
-    agent.set_agent_id(options_parsed["agent-id"].as<string>());
-  }
-  if (crypto) {
-    agent.set_key_dir(key_dir);
-    agent.client_key_name = client_key_name;
-    agent.server_key_name = server_key_name;
-    agent.auth_verbose = auth_verbose;
-  }
   try {
-    agent.init(crypto);
+    agent.init(options_parsed);
   } catch (const std::exception &e) {
     std::cout << fg::red << "Error initializing agent: " << e.what()
               << fg::reset << endl;
     exit(EXIT_FAILURE);
   }
   agent.enable_threaded_remote_control();
+  agent.enable_events();
   agent.connect();
-  agent.register_event(event_type::startup);
   agent.info();
 
   // Main loop
@@ -120,12 +93,7 @@ int main(int argc, char *argv[]) {
        << fg::reset << endl;
 
   // Cleanup
-  agent.register_event(event_type::shutdown);
   agent.disconnect();
-  if (agent.restart()) {
-    auto cmd = string(MADS_PREFIX) + argv[0];
-    cout << "Restarting " << cmd << "..." << endl;
-    execvp(cmd.c_str(), argv);
-  }
+  agent.restart_if_requested(argv);
   return 0;
 }
