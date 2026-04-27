@@ -29,3 +29,7 @@ TODO.md
 *.toml
 
 !mads.ini
+
+_*.md
+
+/*.json

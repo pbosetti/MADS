@@ -78,6 +78,32 @@ option(MADS_DIRECTOR "Also build the director app (requires graphical interface)
 set(APP_NAME ${LIB_NAME})
 set(PREFIX "mads")
 
+#
+#  ____
+# |  _ \  ___   ___ ___
+# | | | |/ _ \ / __/ __|
+# | |_| | (_) | (__\__ \
+# |____/ \___/ \___|___/
+#
+find_package(Doxygen QUIET)
+set(MADS_DOXYGEN_SOURCE "${CMAKE_CURRENT_LIST_DIR}/doc/Doxyfile")
+
+if(DOXYGEN_FOUND)
+  add_custom_target(doc
+    COMMAND "${DOXYGEN_EXECUTABLE}" "${MADS_DOXYGEN_SOURCE}"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}"
+    COMMENT "Generating Doxygen documentation in ${CMAKE_CURRENT_LIST_DIR}/doc"
+    VERBATIM
+  )
+else()
+  add_custom_target(doc
+    COMMAND "${CMAKE_COMMAND}" -E echo
+      "Doxygen was not found. Install doxygen to build the doc target."
+    COMMAND "${CMAKE_COMMAND}" -E false
+    VERBATIM
+  )
+endif()
+
 # List of filenames to be configured
 set(CONFIG_FILENAMES
   ${CMAKE_CURRENT_LIST_DIR}/Dockerfile
