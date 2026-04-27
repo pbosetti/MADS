@@ -67,10 +67,13 @@ const cxxopts::Options &AgentApp::raw_options() const {
 
 void AgentApp::add_common_options() {
   _options.add_options()
+    // clang-format off
     ("s,settings", "Settings file path/URI",
      cxxopts::value<string>())
     ("S,save-settings", "Save settings to ini file",
      cxxopts::value<string>())
+    ("settings-timeout", "Timeout in milliseconds for reading settings from broker ('0' = no timeout)",
+     cxxopts::value<int>()->default_value("0"))
     ("crypto", "Enable CURVE encryption for broker communication")
     ("keys_dir", "Directory where CURVE keys are stored",
      cxxopts::value<string>()->implicit_value(Mads::exec_dir("../etc")))
@@ -81,13 +84,16 @@ void AgentApp::add_common_options() {
     ("auth_verbose", "Enable verbose authentication messages")
     ("v,version", "Print version")
     ("h,help", "Print usage");
+    // clang-format on
 }
 
 void AgentApp::add_agent_identity_options() {
   _options.add_options()
+    // clang-format off
     ("n,name", "Agent name", cxxopts::value<string>())
     ("i,agent-id", "Agent ID to be added to JSON frames",
      cxxopts::value<string>());
+    // clang-format on
 }
 
 void AgentApp::add_dont_block_option() {
@@ -95,9 +101,14 @@ void AgentApp::add_dont_block_option() {
     ("b,dont-block", "don't block on read");
 }
 
-cxxopts::ParseResult AgentApp::parse_options(int argc, char *argv[]) {
+void AgentApp::add_queue_size_option() {
+  _options.add_options()
+    ("q,queue-size", "ZMQ socket queue size (default 1000)", cxxopts::value<int>());
+}
+
+cxxopts::ParseResult &AgentApp::parse_options(int argc, char *argv[]) {
   try {
-    return _options.parse(argc, argv);
+    _parsed_options = _options.parse(argc, argv);
   } catch (const cxxopts::exceptions::exception &e) {
 #ifndef MADS_AGENT_NO_INFO
     cerr << fg::red;
@@ -113,12 +124,14 @@ cxxopts::ParseResult AgentApp::parse_options(int argc, char *argv[]) {
     }
     exit(EXIT_FAILURE);
   }
+  return _parsed_options;
 }
 
 AgentApp::CliOptions AgentApp::cli_options_from_parse_result(
     const cxxopts::ParseResult &parsed, string default_settings_uri) {
   CliOptions options;
   options.settings_uri = std::move(default_settings_uri);
+  options.settings_timeout = option_value<int>(parsed, "settings-timeout").value_or(0);
 
   if (auto settings = option_value<string>(parsed, "settings")) {
     options.settings_uri = *settings;
@@ -174,17 +187,18 @@ void AgentApp::configure_from_cli_options(const CliOptions &options) {
   }
 }
 
-void AgentApp::init_from_cli_options(const CliOptions &options,
-                                     bool install_watchdog) {
-  configure_from_cli_options(options);
-  init(options.crypto.enabled, install_watchdog);
-}
-
 void AgentApp::init(const cxxopts::ParseResult &parsed,
                     string default_settings_uri, bool install_watchdog) {
-  init_from_cli_options(
-      cli_options_from_parse_result(parsed, std::move(default_settings_uri)),
-      install_watchdog);
+  auto options =
+      cli_options_from_parse_result(parsed, std::move(default_settings_uri));
+  configure_from_cli_options(options);
+  if (options.settings_timeout > 0) {
+    print_status(cout, "Using settings timeout of " +
+                         to_string(options.settings_timeout) + " ms");
+    set_settings_timeout(options.settings_timeout);
+  }
+  Agent::init(options.crypto.enabled, install_watchdog);
+  _settings = get_settings();
 }
 
 void AgentApp::enable_events(bool enabled) {
@@ -205,49 +219,32 @@ void AgentApp::disconnect() {
   Agent::disconnect();
 }
 
-nlohmann::json AgentApp::settings_json() {
-  return get_settings();
+const nlohmann::json &AgentApp::settings_json() const {
+  return _settings;
 }
 
-void AgentApp::apply_receive_timeout_from_settings(
-    const nlohmann::json &settings) {
-  if (!settings.contains("receive_timeout")) {
+void AgentApp::apply_receive_timeout() {
+  if (!_settings.contains("receive_timeout") ||
+      _settings.at("receive_timeout").is_null()) {
     return;
   }
-  const auto &receive_timeout = settings.at("receive_timeout");
+  const auto &receive_timeout = _settings.at("receive_timeout");
   if (receive_timeout.is_number_integer()) {
     set_receive_timeout(receive_timeout.get<int>());
   }
 }
 
-void AgentApp::apply_high_watermark_from_settings(
-    const nlohmann::json &settings, ostream &out) {
-  if (!settings.contains("high_watermark") ||
-      settings.at("high_watermark").is_null()) {
+void AgentApp::apply_queue_size() {
+  if (_parsed_options.count("queue-size") != 0) {
+    int queue_size = _parsed_options["queue-size"].as<int>();
+    set_high_watermark(queue_size);
     return;
   }
-  set_high_watermark(settings.value("high_watermark", 1000));
-  print_warning(out,
-                "Warning: high_watermark setting is deprecated, use queue_size");
-}
-
-bool AgentApp::resolve_dont_block(const cxxopts::ParseResult &parsed,
-                                  const nlohmann::json &settings,
-                                  ostream &out) {
-  bool dont_block = false;
-  if (settings.contains("dont-block") && !settings.at("dont-block").is_null()) {
-    dont_block = settings.value("dont-block", false);
-    print_warning(out,
-                  "Warning: dont-block setting is deprecated, use dont_block");
+  if (!_settings.contains("queue_size") ||
+      _settings.at("queue_size").is_null()) {
+    return;
   }
-  dont_block = settings.value("dont_block", dont_block);
-  if (has_option(parsed, "dont-block")) {
-    dont_block = true;
-  }
-  if (dont_block) {
-    print_status(out, "Running in non-blocking mode");
-  }
-  return dont_block;
+  set_high_watermark(_settings.value("queue_size", 1000));
 }
 
 bool AgentApp::restart_if_requested(char *argv[], ostream &out) {
