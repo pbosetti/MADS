@@ -46,7 +46,7 @@ namespace Mads {
  *   // clang-format off
  *     ("my-option", "An additional option flag");
  *.  // clang-format on
- 
+
  *   auto parsed = agent.parse_options(argc, argv);
  *   if (int rc = Mads::AgentApp::handle_standard_exit_options<Mads::AgentApp>(
  *           parsed, agent.raw_options(), argv);
@@ -113,6 +113,9 @@ public:
 
     /** @brief CURVE encryption configuration. */
     CryptoOptions crypto;
+
+    /** @brief Timeout in milliseconds for reading settings from broker. */
+    int settings_timeout = 0;
   };
 
   /**
@@ -181,13 +184,21 @@ public:
   void add_dont_block_option();
 
   /**
+  * @brief Add the ZMQ socket queue size option.
+  *
+  * Adds --queue-size / -q to the owned parser. Executables should call this
+  * only when they support configuring the ZMQ socket queue size.
+  */
+  void add_queue_size_option();
+
+  /**
    * @brief Parse the owned cxxopts parser.
    *
    * @param argc Argument count from main().
    * @param argv Argument vector from main().
    * @return Parsed cxxopts result.
    */
-  cxxopts::ParseResult parse_options(int argc, char *argv[]);
+  cxxopts::ParseResult &parse_options(int argc, char *argv[]);
 
   /**
    * @brief Handle standard options that terminate an executable early.
@@ -326,43 +337,21 @@ public:
   /**
    * @brief Return this agent's settings section as JSON.
    *
-   * @return Settings JSON for the current agent.
+   * @return Cached settings JSON for the current agent.
    */
-  nlohmann::json settings_json();
+  const nlohmann::json &settings_json() const;
 
   /**
-   * @brief Apply receive_timeout from settings when present.
-   *
-   * @param settings Agent settings JSON.
+   * @brief Apply receive_timeout from cached settings when present.
    */
-  void apply_receive_timeout_from_settings(const nlohmann::json &settings);
+  void apply_receive_timeout();
 
   /**
-   * @brief Apply deprecated high_watermark from settings when present.
+   * @brief Apply queue_size from cached settings when present.
    *
-   * Emits the same warning text used by existing executables.
    *
-   * @param settings Agent settings JSON.
-   * @param out Stream for warning output.
    */
-  void apply_high_watermark_from_settings(const nlohmann::json &settings,
-                                          std::ostream &out = std::cerr);
-
-  /**
-   * @brief Resolve non-blocking receive behavior from CLI and settings.
-   *
-   * The deprecated settings key dont-block is accepted with a warning.
-   * The current settings key dont_block overrides the deprecated key, and the
-   * CLI option --dont-block / -b overrides both.
-   *
-   * @param parsed cxxopts parse result.
-   * @param settings Agent settings JSON.
-   * @param out Stream for warning/status output.
-   * @return true when non-blocking receive should be used.
-   */
-  static bool resolve_dont_block(const cxxopts::ParseResult &parsed,
-                                 const nlohmann::json &settings,
-                                 std::ostream &out = std::cerr);
+  void apply_queue_size();
 
   /**
    * @brief Restart the current executable if requested by remote control.
@@ -380,11 +369,10 @@ private:
 
   void configure_from_cli_options(const CliOptions &options);
 
-  void init_from_cli_options(const CliOptions &options,
-                             bool install_watchdog = true);
-
   bool _events_enabled = false;
+  nlohmann::json _settings;
   cxxopts::Options _options;
+  cxxopts::ParseResult _parsed_options;
 };
 
 } // namespace Mads
