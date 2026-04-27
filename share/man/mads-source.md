@@ -12,7 +12,13 @@
   [**\-p, \-\-period** *sampling_period*]
   [**\-s, \-\-settings** *URI*]
   [**\-S, \-\-save-settings** *filename*]
-  [**\-o, \-\-options** *key=value*]
+  [**\-o, \-\-option** *key=value*]
+  [**\-\-silent**]
+  [**\-\-crypto**]
+  [**\-\-keys_dir[=path]**]
+  [**\-\-key_broker[=name]**]
+  [**\-\-key_client[=name]**]
+  [**\-\-auth_verbose**]
   [**\-v, \-\-version**]
   [**\-h, \-\-help**]
   [*plugin*]
@@ -69,8 +75,26 @@ In case of multiple devices using the same plugin but **on different architectur
 **\-S**, **\-\-save-settings** *filename*
 :  Save the settings (loaded by the broker or via **\-s** option) to the given file (ini format).
 
-**\-o, \-\-options** *key=value*
+**\-o, \-\-option** *key=value*
 :  Override plugin-specific options that are typically set in the `mads.ini` file. Do not put spaces around the `=`. the value is interpretes as a string, an integer or a float, according to standard heuristics. This option can be repeated.
+
+**\-\-silent**
+:  Do not print the status line while messages are processed.
+
+**\-\-crypto**
+:  Enable CURVE encryption for broker communication.
+
+**\-\-keys_dir[=path]**
+:  Directory where CURVE key files are stored.
+
+**\-\-key_broker[=name]**
+:  Name of the broker key file, without the `.key` extension. Defaults to **broker**.
+
+**\-\-key_client[=name]**
+:  Name of the client key file, without the `.key` extension. Defaults to **client**.
+
+**\-\-auth_verbose**
+:  Enable verbose authentication messages.
 
 **\-v**, **\-\-version**
 : show version information.

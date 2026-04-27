@@ -39,6 +39,9 @@ In addition, the **mads** command allows to create systemd services for running 
 **\-f|\-\-force**
 : force overwrite existing files (only in conjunction with `--keypair`)
 
+**\-v**, **\-\-version**
+:   Show version information.
+
 **-h**, **\-\-help**
 :   Show summary of options.
 

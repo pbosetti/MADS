@@ -10,6 +10,11 @@
   [**\-i, \-\-agent-id** *agent-id*]
   [**\-s, \-\-settings** *URI*]
   [**\-S, \-\-save-settings** *filename*]
+  [**\-\-crypto**]
+  [**\-\-keys_dir[=path]**]
+  [**\-\-key_broker[=name]**]
+  [**\-\-key_client[=name]**]
+  [**\-\-auth_verbose**]
   [**\-v, \-\-version**]
   [**\-h, \-\-help**]
 
@@ -32,6 +37,21 @@ The dealer agent acts as a filter agent: it subscribes and receives messages fro
 
 **\-S**, **\-\-save-settings** *filename*
 :  Save the settings (loaded by the broker or via **\-s** option) to the given file (ini format).
+
+**\-\-crypto**
+:  Enable CURVE encryption for broker communication.
+
+**\-\-keys_dir[=path]**
+:  Directory where CURVE key files are stored.
+
+**\-\-key_broker[=name]**
+:  Name of the broker key file, without the `.key` extension. Defaults to **broker**.
+
+**\-\-key_client[=name]**
+:  Name of the client key file, without the `.key` extension. Defaults to **client**.
+
+**\-\-auth_verbose**
+:  Enable verbose authentication messages.
 
 **\-v**, **\-\-version**
 : show version information.
