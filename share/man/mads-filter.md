@@ -9,9 +9,17 @@
   [**\-n, \-\-name** *agent_name*] 
   [**\-i, \-\-agent-id** *agent-id*]
   [**\-d, \-\-delay** *delay in ms*]
+  [**\-p, \-\-period** *period in ms*]
+  [**\-b, \-\-dont-block**]
   [**\-s, \-\-settings** *URI*]
   [**\-S, \-\-save-settings** *filename*]
-  [**\-o, \-\-options** *key=value*]
+  [**\-o, \-\-option** *key=value*]
+  [**\-\-silent**]
+  [**\-\-crypto**]
+  [**\-\-keys_dir[=path]**]
+  [**\-\-key_broker[=name]**]
+  [**\-\-key_client[=name]**]
+  [**\-\-auth_verbose**]
   [**\-v, \-\-version**]
   [**\-h, \-\-help**]
   [*plugin*]
@@ -63,7 +71,7 @@ In case of multiple devices using the same plugin but **on different architectur
 :  The sampling period, i.e. the time between two consecutive messages sent by the agent when the **dont-block** option is set. The default is 100 ms. If the **dont-block** option is not set, this option is ignored and the agent will block until a message is received.
 
 **\-b**, **\-\-dont-block**
-:  If set, the agent will block until a message is received, then pass it to the plugin for processing. If not set, it will not block and ask the plugin for the next output. Typically, this is used wnen a plugin can act both as a filter and as a source, i.e. it can produce messages on its own, depending on circumstances. If the **period** option is set, the agent will block for that amount of time before asking the plugin for the next output (as a source plugin would do).
+:  If set, the agent will not block waiting for input and can ask the plugin for the next output even when no message has been received. Typically, this is used when a plugin can act both as a filter and as a source, i.e. it can produce messages on its own, depending on circumstances. If the **period** option is set, the agent will wait for that amount of time before asking the plugin for the next output.
 
 **\-s**, **\-\-settings** *URI*
 :  Path to the settings file (ini format). It can be a valid ZeroMQ url in the form tcp://host:port.
@@ -71,8 +79,26 @@ In case of multiple devices using the same plugin but **on different architectur
 **\-S**, **\-\-save-settings** *filename*
 :  Save the settings (loaded by the broker or via **\-s** option) to the given file (ini format).
 
-**\-o, \-\-options** *key=value*
+**\-o, \-\-option** *key=value*
 :  Override plugin-specific options that are typically set in the `mads.ini` file. Do not put spaces around the `=`. the value is interpretes as a string, an integer or a float, according to standard heuristics. This option can be repeated.
+
+**\-\-silent**
+:  Do not print the status line while messages are processed.
+
+**\-\-crypto**
+:  Enable CURVE encryption for broker communication.
+
+**\-\-keys_dir[=path]**
+:  Directory where CURVE key files are stored.
+
+**\-\-key_broker[=name]**
+:  Name of the broker key file, without the `.key` extension. Defaults to **broker**.
+
+**\-\-key_client[=name]**
+:  Name of the client key file, without the `.key` extension. Defaults to **client**.
+
+**\-\-auth_verbose**
+:  Enable verbose authentication messages.
 
 **\-v**, **\-\-version**
 : show version information.
