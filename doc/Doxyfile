@@ -31,14 +31,9 @@ INPUT                  = README.md \
                          CHANGES.md \
                          COMPILE.md \
                          CRYPTO.md \
-                         TODO.md \
                          src
 RECURSIVE              = YES
-FILE_PATTERNS          = *.c \
-                         *.cc \
-                         *.cpp \
-                         *.cxx \
-                         *.h \
+FILE_PATTERNS          = *.h \
                          *.hh \
                          *.hpp \
                          *.hxx \
