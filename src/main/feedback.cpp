@@ -25,8 +25,7 @@ int main(int argc, char *argv[]) {
   // CLI options
   AgentApp agent(argv[0], SETTINGS_URI);
   agent.add_dont_block_option();
-  agent.options()
-    ("q,queue-size", "ZMQ socket queue size (default 1000)", value<int>());
+  agent.add_queue_size_option();
   agent.add_common_options();
 
   auto options_parsed = agent.parse_options(argc, argv);

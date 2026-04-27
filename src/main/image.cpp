@@ -12,68 +12,45 @@ and it is published as such.
 Author(s): Paolo Bosetti
 */
 #include "../image.hpp"
-#include <cxxopts.hpp>
+#include "../agent_app.hpp"
 
 
 using namespace std;
-using namespace cxxopts;
 using json = nlohmann::json;
 using namespace Mads;
 
 int main(int argc, char *argv[]) {
-  string settings_uri = SETTINGS_URI;
   chrono::milliseconds sampling_time{500};
-  bool crypto = false;
-  filesystem::path key_dir(Mads::exec_dir() + "/../etc");
-  string client_key_name = "client";
-  string server_key_name = "broker";
-  auth_verbose auth_verbose = auth_verbose::off;
 
   // CLI options
-  Options options(argv[0]);
-  options.add_options()
-      ("p", "Sampling period (default 500 ms)", value<size_t>());
-  SETUP_OPTIONS(options, Image);
+  AgentAppFor<Image> image(argv[0], SETTINGS_URI);
+  image.options()
+    ("p", "Sampling period (default 500 ms)", cxxopts::value<size_t>());
+  image.add_common_options();
+
+  auto options_parsed = image.parse_options(argc, argv);
+  if (int rc = AgentApp::handle_standard_exit_options<AgentAppFor<Image>>(
+          options_parsed, image.raw_options(), argv);
+      rc >= 0) {
+    return rc;
+  }
 
   // Settings
   if (options_parsed.count("p") != 0) {
     sampling_time = chrono::milliseconds(options_parsed["p"].as<size_t>());
   }
 
-  if (options_parsed.count("crypto") != 0) {
-    crypto = true;
-    if (options_parsed.count("keys_dir") != 0) {
-      key_dir = options_parsed["keys_dir"].as<string>();
-    }
-    if (options_parsed.count("key_broker") != 0) {
-      server_key_name = options_parsed["key_broker"].as<string>();
-    }
-    if (options_parsed.count("key_client") != 0) {
-      client_key_name = options_parsed["key_client"].as<string>();
-    }
-    if (options_parsed.count("auth_verbose") != 0) {
-      auth_verbose = auth_verbose::on;
-    }
-  }
-
   // Core stuff
-  Image image(argv[0], settings_uri);
-  if (crypto) {
-    image.set_key_dir(key_dir);
-    image.client_key_name = client_key_name;
-    image.server_key_name = server_key_name;
-    image.auth_verbose = auth_verbose;
-  }
   try {
-    image.init(crypto);
+    image.init(options_parsed);
   } catch (const std::exception &e) {
     std::cout << fg::red << "Error initializing agent: " << e.what()
               << fg::reset << endl;
     exit(EXIT_FAILURE);
   }
   image.enable_remote_control();
+  image.enable_events();
   image.connect();
-  image.register_event(event_type::startup);
   image.info();
 
   // Main loop
@@ -85,12 +62,7 @@ int main(int argc, char *argv[]) {
   cout << fg::green << "Image process stopped" << fg::reset << endl;
 
   // Cleanup
-  image.register_event(event_type::shutdown);
   image.disconnect();
-  if (image.restart()) {
-    auto cmd = string(MADS_PREFIX) + argv[0];
-    cout << "Restarting " << cmd << "..." << endl;
-    execvp(cmd.c_str(), argv);
-  }
+  image.restart_if_requested(argv);
   return 0;
 }

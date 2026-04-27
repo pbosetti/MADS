@@ -12,33 +12,35 @@ Run this like:
 
 Author: Paolo Bosetti
 */
+#include "../agent_app.hpp"
 #include "../bridge.hpp"
-#include <cxxopts.hpp>
 
 using namespace std;
-using namespace cxxopts;
 using json = nlohmann::json;
 using namespace Mads;
 
-int main(int argc, char const *argv[]) {
-  string settings_uri = SETTINGS_URI;
+int main(int argc, char *argv[]) {
   string topic = "bridge";
   string message = "";
   json j{};
   chrono::milliseconds sleep_time{100};
   bool single_shot = false;
-  bool crypto = false;
-  filesystem::path key_dir(Mads::exec_dir() + "/../etc");
-  string client_key_name = "client";
-  string server_key_name = "broker";
-  auth_verbose auth_verbose = auth_verbose::off;
 
   // Settings
-  Options options(argv[0]);
-  options.add_options()("t,topic", "Topic (default bridge)", value<string>())(
-      "m,message", "Message (default empty)", value<string>())(
-      "p,period", "Sampling period (default 100 ms)", value<size_t>());
-  SETUP_OPTIONS(options, Bridge)
+  AgentAppFor<Bridge> bridge(argv[0], SETTINGS_URI);
+  bridge.options()
+    ("t,topic", "Topic (default bridge)", cxxopts::value<string>())
+    ("m,message", "Message (default empty)", cxxopts::value<string>())
+    ("p,period", "Sampling period (default 100 ms)", cxxopts::value<size_t>());
+  bridge.add_queue_size_option();
+  bridge.add_common_options();
+
+  auto options_parsed = bridge.parse_options(argc, argv);
+  if (int rc = AgentApp::handle_standard_exit_options<AgentAppFor<Bridge>>(
+          options_parsed, bridge.raw_options(), argv);
+      rc >= 0) {
+    return rc;
+  }
 
   if (options_parsed.count("t") != 0) {
     topic = options_parsed["t"].as<string>();
@@ -51,32 +53,9 @@ int main(int argc, char const *argv[]) {
     single_shot = true;
   }
 
-  if (options_parsed.count("crypto") != 0) {
-    crypto = true;
-    if (options_parsed.count("keys_dir") != 0) {
-      key_dir = options_parsed["keys_dir"].as<string>();
-    }
-    if (options_parsed.count("key_broker") != 0) {
-      server_key_name = options_parsed["key_broker"].as<string>();
-    }
-    if (options_parsed.count("key_client") != 0) {
-      client_key_name = options_parsed["key_client"].as<string>();
-    }
-    if (options_parsed.count("auth_verbose") != 0) {
-      auth_verbose = auth_verbose::on;
-    }
-  }
-
   // Core stuff
-  Bridge bridge(argv[0], settings_uri);
-  if (crypto) {
-    bridge.set_key_dir(key_dir);
-    bridge.client_key_name = client_key_name;
-    bridge.server_key_name = server_key_name;
-    bridge.auth_verbose = auth_verbose;
-  }
   try {
-    bridge.init(crypto);
+    bridge.init(options_parsed);
   } catch (const std::exception &e) {
     std::cout << fg::red << "Error initializing agent: " << e.what()
               << fg::reset << endl;
@@ -84,9 +63,10 @@ int main(int argc, char const *argv[]) {
   }
   bridge.set_pub_topic(topic);
   // HWM or CONFLATE options:
-  json settings = bridge.get_settings();
-  if (settings["high_watermark"].is_number_integer()) {
-    bridge.set_high_watermark(settings["high_watermark"]);
+  json settings = bridge.settings_json();
+  bridge.apply_queue_size();
+  if (!single_shot) {
+    bridge.enable_events();
   }
   bridge.connect(CONNECT_DELAY);
   if (!single_shot)
@@ -99,15 +79,14 @@ int main(int argc, char const *argv[]) {
     cout << "Publishing message: " << j << endl;
     bridge.publish(j);
   } else {
-    bridge.register_event(event_type::startup);
     // Main loop
     cout << fg::green << "Bridge process started, send 'exit' to stop"
          << fg::reset << endl;
-    bridge.loop([&]() -> chrono::milliseconds { 
-      bridge.route(); 
-      return 0ms; }, sleep_time);
+    bridge.loop([&]() -> chrono::milliseconds {
+      bridge.route();
+      return 0ms;
+    }, sleep_time);
     cout << fg::green << "Bridge process stopped" << fg::reset << endl;
-    bridge.register_event(event_type::shutdown);
   }
 
   // Cleanup
