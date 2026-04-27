@@ -8,6 +8,7 @@
 DOXYFILE_ENCODING      = UTF-8
 PROJECT_NAME           = "Mads"
 PROJECT_BRIEF          = "Multi-Agent Distributed System"
+PROJECT_LOGO           = share/images/logo_white.png
 OUTPUT_DIRECTORY       = doc
 
 CREATE_SUBDIRS         = NO
@@ -85,6 +86,7 @@ HTML_FILE_EXTENSION    = .html
 HTML_COLORSTYLE_HUE    = 220
 HTML_COLORSTYLE_SAT    = 90
 HTML_COLORSTYLE_GAMMA  = 80
+HTML_EXTRA_STYLESHEET  = doc/mads-doxygen.css
 HTML_DYNAMIC_SECTIONS  = NO
 GENERATE_TREEVIEW      = YES
 DISABLE_INDEX          = NO
