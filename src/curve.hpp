@@ -153,15 +153,13 @@ public:
   */
   void setup_curve_client(zmqpp::socket &socket, string const &client_name, string const &server_name) {
     // We load the certificates from files generated previously
-    zmqpp::curve::keypair client_keypair;
-    string server_public_key;
     try {
       string name = (_key_dir / (client_name + ".pub")).string();
       ifstream client_pub_file(name);
       if (!client_pub_file.is_open()) {
         throw runtime_error(string("cannot open client public key file ") + name + " from " + _key_dir.string());
       }
-      getline(client_pub_file, client_keypair.public_key);
+      getline(client_pub_file, _client_keypair.public_key);
       client_pub_file.close();
 
       name = (_key_dir / (server_name + ".pub")).string();
@@ -169,7 +167,7 @@ public:
       if (!server_pub_file.is_open()) {
         throw runtime_error(string("cannot open server public key file ") + name + " from " + _key_dir.string());
       }
-      getline(server_pub_file, server_public_key);
+      getline(server_pub_file, _server_public_key);
       server_pub_file.close();
 
       name = (_key_dir / (client_name + ".key")).string();
@@ -177,15 +175,29 @@ public:
       if (!client_key_file.is_open()) {
         throw runtime_error(string("cannot open client private key file ") + name + " from " + _key_dir.string());
       }
-      getline(client_key_file, client_keypair.secret_key);
+      getline(client_key_file, _client_keypair.secret_key);
       client_key_file.close();
     } catch (const std::exception &e) {
       throw runtime_error(e.what());
     }
+    
+    setup_curve_client(socket);
+  }
 
-    socket.set(zmqpp::socket_option::curve_public_key, client_keypair.public_key);
-    socket.set(zmqpp::socket_option::curve_secret_key, client_keypair.secret_key);
-    socket.set(zmqpp::socket_option::curve_server_key, server_public_key);
+  /** 
+   * @brief Sets up CURVE security for a client socket using raw keys.
+   * 
+   * Configures the socket to use the provided public and secret keys.
+   * 
+   * @param socket The zmqpp::socket to secure.
+   */
+  void setup_curve_client(zmqpp::socket &socket) {
+    if (_client_keypair.public_key.empty() || _client_keypair.secret_key.empty() || _server_public_key.empty()) {
+      throw runtime_error("Client or server keys not set. Call setup_curve_client() or set them individually first.");
+    }
+    socket.set(zmqpp::socket_option::curve_public_key, _client_keypair.public_key);
+    socket.set(zmqpp::socket_option::curve_secret_key, _client_keypair.secret_key);
+    socket.set(zmqpp::socket_option::curve_server_key, _server_public_key);
   }
 
   void set_key_dir(fs::path const &key_dir) {
@@ -195,6 +207,18 @@ public:
     }
   }
 
+  void set_client_public_key(string const &key) {
+    _client_keypair.public_key = key;
+  }
+
+  void set_client_secret_key(string const &key) {
+    _client_keypair.secret_key = key;
+  }
+
+  void set_server_public_key(string const &key) {
+    _server_public_key = key;
+  }
+
   // zmqpp::auth &get_authenticator() { return _authenticator; }
   
   vector<string> allowed_ips{};
@@ -202,6 +226,8 @@ private:
   zmqpp::auth _authenticator;
   vector<string> _client_keys{};
   fs::path _key_dir;
+  zmqpp::curve::keypair _client_keypair = {"", ""};
+  string _server_public_key = "";
 };
 
 

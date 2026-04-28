@@ -97,7 +97,24 @@ MADS_EXPORT agent_t agent_create(const char *name, const char *settings_uri);
 
 /**
  * @brief Initializes an agent before connecting it.
- *
+ * 
+ * A note about cryptpographic setup: it is possible to enable cryptographic
+ * communication in two ways: by reading keys from files, or by setting them
+ * directly from strings:
+ * 
+ * - For file-based setup, call `agent_set_key_dir()` to set the directory
+ *   containing the authentication keys, `agent_set_client_key_name()` and 
+ *   `agent_set_server_key_name()` to set the client and server key filenames, 
+ *   and then call `agent_init()` with `crypto` set to true.
+ * - For direct string setup, call `agent_setup_crypto()` to enable     
+ *   cryptography, then call `agent_set_client_public_key()`, 
+ *   `agent_set_client_secret_key()`, and `agent_set_server_public_key()` to 
+ *   set the keys, and finally call `agent_init()` with `crypto` set to true.
+ * 
+ * In the second form, it is an error to call agent_init() with crypto set to 
+ * true before setting the keys, or to set the keys before calling 
+ * agent_setup_crypto().
+ *  
  * @param agent Agent handle.
  * @param crypto Enables cryptographic setup when true.
  * @return `0` on success, `-1` on error.
@@ -179,6 +196,57 @@ MADS_EXPORT void agent_set_server_key_name(agent_t agent, const char *server_key
  * @param verbose Set to true to enable verbose output.
  */
 MADS_EXPORT void agent_set_auth_verbose(agent_t agent, bool verbose);
+
+/**
+ * @brief Sets the client public key.
+ * 
+ * Note that this functiuon must be called after agent_setup_crypto() and 
+ * before agent_connect()
+ * 
+ * @param agent Agent handle.
+ * @param key Public key string.
+ * @return `0` on success, `-1` on error.
+ */
+MADS_EXPORT int agent_set_client_public_key(agent_t agent, const char *key);
+
+/**
+ * @brief Sets the client secret key.
+ * 
+ * Note that this functiuon must be called after agent_setup_crypto() and 
+ * before agent_connect() 
+ * 
+ * 
+ * @param agent Agent handle.
+ * @param key Secret key string.
+ * @return `0` on success, `-1` on error.
+ */
+MADS_EXPORT int agent_set_client_secret_key(agent_t agent, const char *key);
+
+/**
+ * @brief Sets the server public key.
+ * 
+ * Note that this functiuon must be called after agent_setup_crypto() and 
+ * before agent_connect()
+ * 
+ * @param agent Agent handle.
+ * @param key Public key string.
+ * @return `0` on success, `-1` on error.
+ */
+MADS_EXPORT int agent_set_server_public_key(agent_t agent, const char *key);
+
+/**
+ * @brief Enables CURVE encryption and sets up authentication.
+ * 
+ * Note that this function must be called before agent_init() and before 
+ * setting the keys
+ *
+ * @param agent Agent handle.
+ * @param verbose Set to true to enable verbose output.
+ * @return `0` on success, `-1` on error.
+ *
+ * On failure, call agent_last_error() for details.
+ */
+MADS_EXPORT int agent_setup_crypto(agent_t agent, bool verbose);
 
 // Std ops
 /**
