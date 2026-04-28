@@ -98,6 +98,18 @@ lib.agent_set_server_key_name.restype = None
 lib.agent_set_auth_verbose.argtypes = [c_void_p, c_bool]
 lib.agent_set_auth_verbose.restype = None
 
+lib.agent_setup_crypto.argtypes = [c_void_p, c_bool]
+lib.agent_setup_crypto.restype = c_int
+
+lib.agent_set_client_public_key.argtypes = [c_void_p, c_char_p]
+lib.agent_set_client_public_key.restype = c_int
+
+lib.agent_set_client_secret_key.argtypes = [c_void_p, c_char_p]
+lib.agent_set_client_secret_key.restype = c_int
+
+lib.agent_set_server_public_key.argtypes = [c_void_p, c_char_p]
+lib.agent_set_server_public_key.restype = c_int
+
 # Standard operations
 lib.agent_connect.argtypes = [c_void_p, c_int]
 lib.agent_connect.restype = c_int
@@ -218,7 +230,23 @@ class Agent:
     def set_auth_verbose(self, verbose: bool = True):
         """Set authentication verbosity."""
         lib.agent_set_auth_verbose(self._agent, verbose)
+
+    def setup_crypto(self, verbose: bool = False) -> int:
+        """Setup crypto with optional verbosity."""
+        return lib.agent_setup_crypto(self._agent, verbose)
     
+    def set_client_public_key(self, public_key: str) -> int:
+        """Set the client public key."""
+        return lib.agent_set_client_public_key(self._agent, public_key.encode('utf-8'))
+    
+    def set_client_secret_key(self, secret_key: str) -> int:
+        """Set the client secret key."""
+        return lib.agent_set_client_secret_key(self._agent, secret_key.encode('utf-8'))
+    
+    def set_server_public_key(self, public_key: str) -> int:
+        """Set the server public key."""
+        return lib.agent_set_server_public_key(self._agent, public_key.encode('utf-8'))
+
     # Standard operations
     def connect(self, delay_ms: int = 0) -> int:
         """Connect to the server."""

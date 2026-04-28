@@ -179,13 +179,16 @@ void Agent::init(string name, string settings_uri, bool crypto, filesystem::path
 }
 
 void Agent::init(bool crypto, bool install_watchdog) {
-  _crypto = crypto;
-  if (_crypto && !_curve_auth) {
-    _curve_auth = make_unique<CurveAuth>(_context);
-    _curve_auth->set_key_dir(_key_dir);
-    _curve_auth->setup_auth(auth_verbose);
-    _curve_auth->setup_curve_client(_subscriber, client_key_name, server_key_name);
-    _curve_auth->setup_curve_client(_publisher, client_key_name, server_key_name);
+  if (crypto) {
+    if (!_curve_auth) {
+      setup_crypto(auth_verbose);
+      _curve_auth->set_key_dir(_key_dir);
+      _curve_auth->setup_curve_client(_subscriber, client_key_name, server_key_name);
+      _curve_auth->setup_curve_client(_publisher, client_key_name, server_key_name);
+    } else {
+      _curve_auth->setup_curve_client(_subscriber);
+      _curve_auth->setup_curve_client(_publisher);
+    }
   }
   if (_settings_uri.empty()) {
     throw AgentError("Settings URI cannot be empty");
@@ -853,9 +856,11 @@ bool Agent::is_crypto() {
   return _crypto;
 }
 
-void Agent::set_crypto(Mads::auth_verbose verbose) {
+void Agent::setup_crypto(Mads::auth_verbose verbose) {
   _crypto = true;
-  _curve_auth = make_unique<CurveAuth>(_context);
+  if (!_curve_auth) {
+    _curve_auth = make_unique<CurveAuth>(_context);
+  }
   _curve_auth->setup_auth(verbose);
 }
 

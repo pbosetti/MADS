@@ -110,6 +110,50 @@ void agent_set_auth_verbose(agent_t agent, bool verbose) {
     ag->auth_verbose = auth_verbose::off;
 }
 
+int agent_set_client_public_key(agent_t agent, const char *key) {
+  Agent *ag = reinterpret_cast<Agent *>(agent);
+  if (!ag->curve_auth()) {
+    snprintf(_err_msg, ERR_MSG_SIZE, "Error setting client public key: CurveAuth not initialized");
+    return -1;
+  }
+  ag->curve_auth()->get()->set_client_public_key(string(key));
+  return 0;
+}
+
+int agent_set_client_secret_key(agent_t agent, const char *key) {
+  Agent *ag = reinterpret_cast<Agent *>(agent);
+  if (!ag->curve_auth()) {
+    snprintf(_err_msg, ERR_MSG_SIZE, "Error setting client secret key: CurveAuth not initialized");
+    return -1;
+  }
+  ag->curve_auth()->get()->set_client_secret_key(string(key));
+  return 0;
+}
+
+int agent_set_server_public_key(agent_t agent, const char *key) {
+  Agent *ag = reinterpret_cast<Agent *>(agent);
+  if (!ag->curve_auth()) {
+    snprintf(_err_msg, ERR_MSG_SIZE, "Error setting server public key: CurveAuth not initialized");
+    return -1;
+  }
+  ag->curve_auth()->get()->set_server_public_key(string(key));
+  return 0;
+}
+
+int agent_setup_crypto(agent_t agent, bool verbose) {
+  Agent *ag = reinterpret_cast<Agent *>(agent);
+  try {
+    ag->setup_crypto(verbose ? auth_verbose::on : auth_verbose::off);
+  } catch (const std::exception &e) {
+    snprintf(_err_msg, ERR_MSG_SIZE, "Error setting up CURVE: %s", e.what());
+    return -1;
+  } catch (...) {
+    snprintf(_err_msg, ERR_MSG_SIZE, "Error setting up CURVE: Unexpected");
+    return -1;
+  }
+  return 0;
+}
+
 // Std ops
 int agent_connect(agent_t agent, int delay_ms) {
   Agent *ag = reinterpret_cast<Agent *>(agent);

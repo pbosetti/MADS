@@ -653,7 +653,7 @@ public:
    * 
    * @param verbose 
    */
-  void set_crypto(auth_verbose verbose = auth_verbose::off);
+  void setup_crypto(Mads::auth_verbose verbose = auth_verbose::off);
 
 
   /**
