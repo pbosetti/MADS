@@ -153,6 +153,9 @@ else()
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+if (MADS_ENABLE_TOOLS)
+  add_subdirectory(tools)
+endif()
 
 #
 #  _____                 _   _
