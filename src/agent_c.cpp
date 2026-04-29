@@ -12,6 +12,7 @@ Paolo Bosetti, 2026
 #include "agent_c.h"
 #include "agent.hpp"
 #include "mads.hpp"
+#include "service_discovery.hpp"
 #include <iostream>
 #define ERR_MSG_SIZE 256
 
@@ -237,6 +238,64 @@ int agent_set_settings_timeout(agent_t agent, int to_ms) {
 int agent_settings_timeout(agent_t agent) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
   return ag->settings_timeout();
+}
+
+int discover_broker_settings(const char *room, char **url, size_t url_size) {
+  if (url == nullptr) {
+    snprintf(_err_msg, ERR_MSG_SIZE,
+             "Error discovering settings: Invalid output buffer pointer");
+    return -1;
+  }
+  if (*url != nullptr && url_size == 0) {
+    snprintf(_err_msg, ERR_MSG_SIZE,
+             "Error discovering settings: Invalid output buffer size");
+    return -1;
+  }
+  if (*url != nullptr) {
+    (*url)[0] = '\0';
+  }
+
+  const string room_name =
+      room == nullptr || room[0] == '\0' ? string(MADS_SERVICE_ROOM)
+                                         : string(room);
+  try {
+    ServiceDiscovery discovery(MADS_SERVICE_PORT);
+    const auto service =
+        discovery.discover(room_name, chrono::milliseconds(5000));
+    const auto settings = service.ports.find("settings");
+    if (settings == service.ports.end()) {
+      snprintf(_err_msg, ERR_MSG_SIZE,
+               "Error discovering settings: Advertisement has no settings port");
+      return -1;
+    }
+    const string discovered_url =
+        "tcp://" + service.ip + ":" + std::to_string(settings->second);
+    if (*url == nullptr) {
+      url_size = discovered_url.size() + 1;
+      *url = static_cast<char *>(malloc(url_size));
+      if (*url == nullptr) {
+        snprintf(_err_msg, ERR_MSG_SIZE,
+                 "Error discovering settings: Unable to allocate output buffer");
+        return -1;
+      }
+    }
+    const int written = snprintf(*url, url_size, "%s", discovered_url.c_str());
+    if (written < 0 || static_cast<size_t>(written) >= url_size) {
+      (*url)[0] = '\0';
+      snprintf(_err_msg, ERR_MSG_SIZE,
+               "Error discovering settings: Output buffer too small");
+      return -1;
+    }
+  } catch (const std::exception &e) {
+    snprintf(_err_msg, ERR_MSG_SIZE, "Error discovering settings: %s",
+             e.what());
+    return -1;
+  } catch (...) {
+    snprintf(_err_msg, ERR_MSG_SIZE,
+             "Error discovering settings: Unexpected");
+    return -1;
+  }
+  return 0;
 }
 
 bool agent_setting_bool(agent_t agent, const char *key) {

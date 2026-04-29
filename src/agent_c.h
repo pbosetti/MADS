@@ -353,6 +353,26 @@ MADS_EXPORT void agent_set_sub_topics(agent_t agent, const char **topics, int n_
 MADS_EXPORT int agent_settings_timeout(agent_t agent);
 
 /**
+ * @brief Discovers the broker settings URI advertised in a service room.
+ *
+ * If room is NULL or empty, the compiled default MADS service room is used.
+ * The discovered URI is written as `tcp://ip:port`.
+ *
+ * @param room Service discovery room name, or NULL for the default room.
+ * @param url Pointer to the output buffer receiving the null-terminated
+ * settings URI. Pass the address of a char* initialized to NULL to have the
+ * function allocate a buffer with malloc(); the caller owns it and must
+ * release it with free().
+ * @param url_size Size of the provided output buffer in bytes. Ignored when
+ * the function allocates the buffer.
+ * @return `0` on success, `-1` on error.
+ *
+ * On failure, call agent_last_error() for details.
+ */
+MADS_EXPORT int discover_broker_settings(const char *room, char **url,
+                                         size_t url_size);
+
+/**
  * @brief Reads a boolean setting.
  *
  * @param agent Agent handle.
