@@ -465,6 +465,11 @@ ServiceDiscovery::discover(const std::string &room,
       } catch (...) {
         continue;
       }
+      const auto remote_ip = inet_ntop_string(remote.sin_addr);
+      if (service.ip != remote_ip) {
+        continue;
+      }
+      service.ip = remote_ip;
       if (room.empty() || service.room == room) {
         close_socket(socket_fd);
         return service;
