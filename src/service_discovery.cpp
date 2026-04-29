@@ -445,7 +445,7 @@ ServiceDiscovery::ServiceInfo::from_json(const json &payload) {
   service.note = payload.value("note", "");
   service.encrypted = payload.value("encrypted", false);
   service.prefer_loopback_for_local_services =
-      payload.value("prefer_loopback_for_local_services", false);
+      payload.value("prefer_loopback_for_local_services", true);
   return service;
 }
 

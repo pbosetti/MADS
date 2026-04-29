@@ -330,7 +330,7 @@ int main(int argc, char **argv) {
       {"settings",
        stoi(settings_address.substr(settings_address.find_last_of(":") + 1))}};
   service_info.prefer_loopback_for_local_services =
-      config[name]["prefer_loopback_for_local_services"].value_or(false);
+      config[name]["prefer_loopback_for_local_services"].value_or(true);
 
   // Create broker sockets
   zmqpp::context context;

@@ -25,7 +25,7 @@ public:
     std::string room;
     std::string note;
     bool encrypted{false};
-    bool prefer_loopback_for_local_services{false};
+    bool prefer_loopback_for_local_services{true};
 
     json to_json() const;
     static ServiceInfo from_json(const json &payload);
