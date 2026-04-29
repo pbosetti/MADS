@@ -23,6 +23,8 @@ public:
     std::string ip;
     std::map<std::string, uint16_t> ports;
     std::string room;
+    std::string note;
+    bool prefer_loopback_for_local_services{false};
 
     json to_json() const;
     static ServiceInfo from_json(const json &payload);
@@ -44,15 +46,13 @@ public:
 
   void advertise_once(const ServiceInfo &service) const;
   void start_advertising(
-    ServiceInfo service,
-    std::chrono::milliseconds interval = DEFAULT_ADVERTISE_INTERVAL
-  );
+      ServiceInfo service,
+      std::chrono::milliseconds interval = DEFAULT_ADVERTISE_INTERVAL);
   void stop_advertising();
 
-  ServiceInfo discover(
-    const std::string &room = "",
-    std::chrono::milliseconds timeout = std::chrono::milliseconds::zero()
-  ) const;
+  ServiceInfo discover(const std::string &room = "",
+                       std::chrono::milliseconds timeout =
+                           std::chrono::milliseconds::zero()) const;
 
 private:
   struct InterfaceAddress {
@@ -61,11 +61,9 @@ private:
   };
 
   std::vector<InterfaceAddress> list_broadcast_interfaces() const;
-  std::optional<ServiceInfo> try_discover(
-    const std::string &room,
-    std::chrono::milliseconds timeout,
-    bool exact_room
-  ) const;
+  std::optional<ServiceInfo> try_discover(const std::string &room,
+                                          std::chrono::milliseconds timeout,
+                                          bool exact_room) const;
   void advertising_loop();
 
   uint16_t _discovery_port;

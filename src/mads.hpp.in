@@ -46,6 +46,9 @@ Author(s): Paolo Bosetti
 #define LIB_GIT_TAG "@GIT_TAG@"
 #define MADS_PREFIX "@PREFIX@-"
 
+#define MADS_SERVICE_ROOM "mads"
+#define MADS_SERVICE_PORT 39092
+
 #define LOGGER_STATUS_TOPIC "logger_status"
 
 #ifndef HOST_NAME_MAX
