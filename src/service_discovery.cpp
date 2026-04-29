@@ -162,6 +162,22 @@ void enable_socket_reuse(socket_t socket_fd) {
   }
 }
 
+void enable_socket_port_reuse(socket_t socket_fd) {
+#if (defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) ||      \
+     defined(__OpenBSD__)) &&                                                 \
+    defined(SO_REUSEPORT)
+  int enabled = 1;
+  if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEPORT,
+                 reinterpret_cast<const char *>(&enabled),
+                 sizeof(enabled)) < 0) {
+    throw std::runtime_error(
+        last_socket_error("Unable to enable socket port reuse"));
+  }
+#else
+  UNUSED(socket_fd);
+#endif
+}
+
 sockaddr_in make_ipv4_address(const std::string &ip, uint16_t port) {
   sockaddr_in address{};
   address.sin_family = AF_INET;
@@ -351,12 +367,16 @@ bool is_local_ipv4_address(const std::string &ip) {
 } // namespace
 
 json ServiceDiscovery::ServiceInfo::to_json() const {
-  return json{{"ip", ip},
+  auto result = json{{"ip", ip},
               {"ports", ports_to_json(ports)},
               {"room", room},
-              {"note", note},
+              {"encrypted", encrypted},
               {"prefer_loopback_for_local_services",
                prefer_loopback_for_local_services}};
+  if (!note.empty()) {
+    result["note"] = note;
+  }
+  return result;
 }
 
 ServiceDiscovery::ServiceInfo
@@ -380,7 +400,8 @@ ServiceDiscovery::ServiceInfo::from_json(const json &payload) {
   service.ip = payload["ip"].get<std::string>();
   service.ports = parse_ports(payload["ports"]);
   service.room = payload["room"].get<std::string>();
-  service.note = payload.value("note", "-");
+  service.note = payload.value("note", "");
+  service.encrypted = payload.value("encrypted", false);
   service.prefer_loopback_for_local_services =
       payload.value("prefer_loopback_for_local_services", false);
   return service;
@@ -539,6 +560,7 @@ ServiceDiscovery::try_discover(const std::string &room,
   socket_t socket_fd = create_udp_socket();
   try {
     enable_socket_reuse(socket_fd);
+    enable_socket_port_reuse(socket_fd);
 
     sockaddr_in local{};
     local.sin_family = AF_INET;

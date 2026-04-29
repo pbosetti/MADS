@@ -243,7 +243,8 @@ int main(int argc, char **argv) {
                       "BACKEND msg out   ", "BACKEND bytes out "};
   ServiceDiscovery discovery_service(MADS_SERVICE_PORT);
   ServiceDiscovery::ServiceInfo service_info{
-      .room = MADS_SERVICE_ROOM, .note = "CURVE encryption disabled"};
+      .room = MADS_SERVICE_ROOM, 
+      .encrypted = false};
 
   // clang-format off
   options.add_options()
@@ -310,7 +311,7 @@ int main(int argc, char **argv) {
          << fg::cyan << "  Broker key name: " << style::bold << key_name
          << "[.key|.pub]" << fg::reset << endl;
     crypto = true;
-    service_info.note = "CURVE encryption enabled";
+    service_info.encrypted = true;
   }
 
   unsigned int timecode_fps =
@@ -474,18 +475,24 @@ int main(int argc, char **argv) {
        << "tcp://127.0.0.1:" << port << style::reset << style::italic
        << " (loopback)" << style::reset << endl;
 
-  discovery_service.start_advertising(
-      service_info, std::chrono::milliseconds(
-                        config[name]["discovery_interval_ms"].value_or(1000)));
-  cout << "Advertising service on UDP discovery port " << MADS_SERVICE_PORT
-       << " with room name '" << style::bold << service_info.room
-       << style::reset << "'" << endl
-       << "            note: " << service_info.note << endl;
-  if (service_info.prefer_loopback_for_local_services) {
-    cout << style::italic << "            (preferring loopback for local agents)"
-         << style::reset;
+  try {
+    discovery_service.start_advertising(
+        service_info, std::chrono::milliseconds(
+                          config[name]["discovery_interval_ms"].value_or(1000)));
+    cout << "Advertising service on UDP discovery port " << MADS_SERVICE_PORT
+         << " with room name '" << style::bold << service_info.room
+         << style::reset << "'" << endl
+         << "            note: " << service_info.note << endl;
+    if (service_info.prefer_loopback_for_local_services) {
+      cout << style::italic << "            (preferring loopback for local agents)"
+           << style::reset;
+    }
+    cout << endl;
+  } catch (const runtime_error &e) {
+    cerr << fg::red << "Error starting service discovery: " << e.what()
+         << fg::reset << endl;
   }
-  cout << endl;
+
   thread([&]() {
     Mads::Watcher watcher(settings_path, 1s);
     string ini_tmp = "";
