@@ -43,6 +43,33 @@ using socket_t = int;
 constexpr socket_t invalid_socket = -1;
 #endif
 
+constexpr auto ROOM_ADVERTISEMENT_CHECK_TIMEOUT =
+  ServiceDiscovery::DEFAULT_ADVERTISE_INTERVAL + std::chrono::milliseconds{100};
+
+std::mutex &advertised_rooms_mutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+std::set<std::pair<uint16_t, std::string>> &advertised_rooms() {
+  static std::set<std::pair<uint16_t, std::string>> rooms;
+  return rooms;
+}
+
+std::string format_room_name(const std::string &room) {
+  return room.empty() ? std::string("<empty>") : "`" + room + "`";
+}
+
+bool reserve_advertised_room(uint16_t discovery_port, const std::string &room) {
+  std::scoped_lock lock(advertised_rooms_mutex());
+  return advertised_rooms().emplace(discovery_port, room).second;
+}
+
+void release_advertised_room(uint16_t discovery_port, const std::string &room) {
+  std::scoped_lock lock(advertised_rooms_mutex());
+  advertised_rooms().erase({discovery_port, room});
+}
+
 void ensure_socket_runtime() {
 #ifdef _WIN32
   static const int initialized = []() {
@@ -336,51 +363,103 @@ void ServiceDiscovery::start_advertising(ServiceInfo service,
     throw std::runtime_error("Advertising interval must be positive");
   }
 
+  const auto room = service.room;
+  {
+    std::scoped_lock lock(_mutex);
+    if (_advertising && _service.room == room) {
+      throw std::runtime_error("Room " + format_room_name(room) +
+                               " is already advertised");
+    }
+  }
+
   stop_advertising();
+  if (const auto existing_service =
+        try_discover(room, ROOM_ADVERTISEMENT_CHECK_TIMEOUT, true)) {
+    throw std::runtime_error(
+      "Room " + format_room_name(room) + " is already advertised by " +
+      existing_service->ip
+    );
+  }
+  if (!reserve_advertised_room(_discovery_port, room)) {
+    throw std::runtime_error("Room " + format_room_name(room) +
+                             " is already advertised");
+  }
+
+  ServiceInfo advertised_service;
   {
     std::scoped_lock lock(_mutex);
     _service = std::move(service);
     _interval = interval;
     _stop_requested = false;
     _advertising = true;
+    _room_reserved = true;
+    advertised_service = _service;
   }
   try {
-    advertise_once(_service);
+    advertise_once(advertised_service);
   } catch (...) {
     std::scoped_lock lock(_mutex);
     _advertising = false;
     _stop_requested = false;
+    _room_reserved = false;
+    release_advertised_room(_discovery_port, room);
     throw;
   }
-  _advertising_thread = std::thread([this]() { advertising_loop(); });
+  try {
+    _advertising_thread = std::thread([this]() { advertising_loop(); });
+  } catch (...) {
+    std::scoped_lock lock(_mutex);
+    _advertising = false;
+    _stop_requested = false;
+    _room_reserved = false;
+    release_advertised_room(_discovery_port, room);
+    throw;
+  }
 }
 
 void ServiceDiscovery::stop_advertising() {
   std::thread thread_to_join;
+  std::optional<std::string> room_to_release;
   {
     std::scoped_lock lock(_mutex);
     if (!_advertising_thread.joinable()) {
       _advertising = false;
       _stop_requested = false;
-      return;
+      if (_room_reserved) {
+        room_to_release = _service.room;
+        _room_reserved = false;
+      }
+    } else {
+      _stop_requested = true;
+      _advertising = false;
+      thread_to_join = std::move(_advertising_thread);
     }
-    _stop_requested = true;
-    _advertising = false;
-    thread_to_join = std::move(_advertising_thread);
+  }
+  if (!thread_to_join.joinable()) {
+    if (room_to_release.has_value()) {
+      release_advertised_room(_discovery_port, *room_to_release);
+    }
+    return;
   }
   _cv.notify_all();
-  if (thread_to_join.joinable()) {
-    thread_to_join.join();
-  }
+  thread_to_join.join();
   {
     std::scoped_lock lock(_mutex);
     _stop_requested = false;
+    if (_room_reserved) {
+      room_to_release = _service.room;
+      _room_reserved = false;
+    }
+  }
+  if (room_to_release.has_value()) {
+    release_advertised_room(_discovery_port, *room_to_release);
   }
 }
 
-ServiceDiscovery::ServiceInfo
-ServiceDiscovery::discover(const std::string &room,
-                           std::chrono::milliseconds timeout) const {
+std::optional<ServiceDiscovery::ServiceInfo>
+ServiceDiscovery::try_discover(const std::string &room,
+                               std::chrono::milliseconds timeout,
+                               bool exact_room) const {
   socket_t socket_fd = create_udp_socket();
   try {
     enable_socket_reuse(socket_fd);
@@ -408,7 +487,8 @@ ServiceDiscovery::discover(const std::string &room,
       if (deadline != std::chrono::steady_clock::time_point::max()) {
         const auto now = std::chrono::steady_clock::now();
         if (now >= deadline) {
-          throw std::runtime_error("Timed out waiting for service advertisement");
+          close_socket(socket_fd);
+          return std::nullopt;
         }
         const auto remaining =
           std::chrono::duration_cast<std::chrono::microseconds>(deadline - now);
@@ -430,7 +510,8 @@ ServiceDiscovery::discover(const std::string &room,
       );
 
       if (ready == 0) {
-        throw std::runtime_error("Timed out waiting for service advertisement");
+        close_socket(socket_fd);
+        return std::nullopt;
       }
       if (ready < 0) {
         throw std::runtime_error(last_socket_error("Unable to wait for discovery message"));
@@ -459,26 +540,39 @@ ServiceDiscovery::discover(const std::string &room,
       }
 
       buffer[static_cast<std::size_t>(received)] = '\0';
-      ServiceInfo service;
+      ServiceInfo discovered_service;
       try {
-        service = ServiceInfo::from_json(json::parse(buffer.data()));
+        discovered_service = ServiceInfo::from_json(json::parse(buffer.data()));
       } catch (...) {
         continue;
       }
       const auto remote_ip = inet_ntop_string(remote.sin_addr);
-      if (service.ip != remote_ip) {
+      if (discovered_service.ip != remote_ip) {
         continue;
       }
-      service.ip = remote_ip;
-      if (room.empty() || service.room == room) {
+      discovered_service.ip = remote_ip;
+      const bool room_matches =
+        exact_room ? discovered_service.room == room
+                   : room.empty() || discovered_service.room == room;
+      if (room_matches) {
         close_socket(socket_fd);
-        return service;
+        return discovered_service;
       }
     }
   } catch (...) {
     close_socket(socket_fd);
     throw;
   }
+}
+
+ServiceDiscovery::ServiceInfo
+ServiceDiscovery::discover(const std::string &room,
+                           std::chrono::milliseconds timeout) const {
+  const auto service = try_discover(room, timeout, false);
+  if (!service.has_value()) {
+    throw std::runtime_error("Timed out waiting for service advertisement");
+  }
+  return *service;
 }
 
 std::vector<ServiceDiscovery::InterfaceAddress>
