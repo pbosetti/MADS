@@ -10,7 +10,7 @@ This is a plugin-based general purpose filter for the Mads framework.
 Actual work is done by the plugins, this executable is just a wrapper.
 Author(s): Paolo Bosetti
 */
-#include "../agent.hpp"
+#include "../agent_app.hpp"
 #include "../exec_path.hpp"
 #include "../mads.hpp"
 #include <cxxopts.hpp>
@@ -119,21 +119,16 @@ json str_to_num(const string &s) {
 }
 
 int main(int argc, char *argv[]) {
-  string settings_uri = SETTINGS_URI;
   string plugin_name, plugin_file = PLUGIN_DEFAULT,
                       agent_name = AGENT_NAME_DEFAULT;
   size_t count = 0, count_err = 0;
   size_t delay = 0;
-  bool crypto = false, silent = false;
-  filesystem::path key_dir(Mads::exec_dir() + "/../etc");
-  string client_key_name = "client";
-  string server_key_name = "broker";
-  auth_verbose auth_verbose = auth_verbose::off;
+  bool silent = false;
 
   // CLI options
-  Options options(argv[0]);
+  AgentApp agent(argv[0], SETTINGS_URI);
   // clang-format off
-  options.add_options()
+  agent.options()
     ("plugin", "Plugin to load", value<string>())
     ("n,name", "Agent name (default to plugin name)", value<string>())
     ("i,agent-id", "Agent ID to be added to JSON frames", value<string>())
@@ -141,17 +136,24 @@ int main(int argc, char *argv[]) {
     ("o,option", "Additional plugin options (may be repeated)", value<vector<string>>())
     ("silent", "Silent mode (don't print status line)");
   #if defined(PLUGIN_LOADER_SOURCE) or defined(PLUGIN_LOADER_FILTER)
-  options.add_options()
+  agent.options()
     ("p,period", "Sampling period (default 100 ms)", value<size_t>());
   #endif
   #if defined(PLUGIN_LOADER_FILTER) || defined(PLUGIN_LOADER_SINK)
-  options.add_options()
+  agent.options()
     ("b,dont-block", "don't block on read");
   #endif
-  options.parse_positional({"plugin"});
-  options.positional_help("<name.plugin>");
   // clang-format on
-  SETUP_OPTIONS(options, Agent);
+  agent.add_common_options();
+
+  agent.raw_options().parse_positional({"plugin"});
+  agent.raw_options().positional_help("<name.plugin>");
+  auto options_parsed = agent.parse_options(argc, argv);
+  if (int rc = AgentApp::handle_standard_exit_options<AgentApp>(
+          options_parsed, agent.raw_options(), argv);
+      rc >= 0) {
+    return rc;
+  }
 
   if (options_parsed.count("plugin") != 0) {
     plugin_file = options_parsed["plugin"].as<string>();
@@ -167,35 +169,13 @@ int main(int argc, char *argv[]) {
     delay = options_parsed["delay"].as<size_t>();
   }
 
-  if (options_parsed.count("crypto") != 0) {
-    crypto = true;
-    if (options_parsed.count("keys_dir") != 0) {
-      key_dir = options_parsed["keys_dir"].as<string>();
-    }
-    if (options_parsed.count("key_broker") != 0) {
-      server_key_name = options_parsed["key_broker"].as<string>();
-    }
-    if (options_parsed.count("key_client") != 0) {
-      client_key_name = options_parsed["key_client"].as<string>();
-    }
-    if (options_parsed.count("auth_verbose") != 0) {
-      auth_verbose = auth_verbose::on;
-    }
-  }
-
   if (options_parsed.count("silent") != 0) {
     silent = true;
   }
   // Core stuff
-  Agent agent(agent_name, settings_uri);
-  if (crypto) {
-    agent.set_key_dir(key_dir);
-    agent.client_key_name = client_key_name;
-    agent.server_key_name = server_key_name;
-    agent.auth_verbose = auth_verbose;
-  }
+  agent.set_agent_name(agent_name);
   try {
-    agent.init(crypto);
+    agent.init(options_parsed);
   } catch (const AgentError &e) {
     cerr << fg::red << "Error initializing agent: " << e.what() << fg::reset
          << endl;
@@ -212,11 +192,10 @@ int main(int argc, char *argv[]) {
   #endif
 
   // Copy agent settings as plugin parameters
-  json settings = agent.get_settings();
+  json settings = agent.settings_json();
   settings["agent_name"] = agent_name;
   if (options_parsed.count("agent-id")) {
     settings["agent_id"] = options_parsed["agent-id"].as<string>();
-    agent.set_agent_id(options_parsed["agent-id"].as<string>());
   }
   settings["prefix"] = Mads::prefix();
   if (settings["receive_timeout"].is_number()) {
@@ -236,7 +215,7 @@ int main(int argc, char *argv[]) {
   if (!settings["high_watermark"].is_null()) {
     agent.set_high_watermark(settings.value("high_watermark", 1000));
   }
-  
+
 #if defined(PLUGIN_LOADER_SOURCE) or defined(PLUGIN_LOADER_FILTER)
   chrono::milliseconds time{0};
   cerr << "  Sampling period:  " << style::bold;
@@ -616,10 +595,6 @@ int main(int argc, char *argv[]) {
   plugin.reset();
   kernel.clear_drivers();
 
-  if (agent.restart()) {
-    auto cmd = string(MADS_PREFIX) + argv[0];
-    cout << "Restarting " << cmd << "..." << endl;
-    execvp(cmd.c_str(), argv);
-  }
+  agent.restart_if_requested(argv);
   return 0;
 }
