@@ -5,6 +5,7 @@
 #include <cstring>
 #include <limits>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -536,6 +537,14 @@ ServiceDiscovery::list_broadcast_interfaces() const {
   if (getifaddrs(&raw_interfaces) != 0) {
     throw std::runtime_error(last_socket_error("getifaddrs failed"));
   }
+  const auto free_interfaces = [](ifaddrs *interfaces) {
+    if (interfaces != nullptr) {
+      freeifaddrs(interfaces);
+    }
+  };
+  std::unique_ptr<ifaddrs, decltype(free_interfaces)> interfaces_guard(
+    raw_interfaces, free_interfaces
+  );
 
   for (ifaddrs *entry = raw_interfaces; entry != nullptr; entry = entry->ifa_next) {
     if (entry->ifa_addr == nullptr || entry->ifa_broadaddr == nullptr) {
@@ -559,7 +568,6 @@ ServiceDiscovery::list_broadcast_interfaces() const {
     }
   }
 
-  freeifaddrs(raw_interfaces);
 #endif
 
   return interfaces;
