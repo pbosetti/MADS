@@ -11,16 +11,16 @@ unset(TARGET_LIST)
 
 # TARGETS ######################################################################
 
-find_package(OpenCV)
-if(OpenCV_FOUND)
-  message(STATUS "OpenCV found")
-  include_directories( ${OpenCV_INCLUDE_DIRS} )
-  add_executable(img_browser ${CMAKE_CURRENT_LIST_DIR}/img_browser.cpp)
-  target_link_libraries(img_browser ${OpenCV_LIBS} ${MONGO_LIBS})
-  list(APPEND TARGET_LIST img_browser)
-else()
-  message(WARNING "OpenCV not found")
-endif()
+# find_package(OpenCV)
+# if(OpenCV_FOUND)
+#   message(STATUS "OpenCV found")
+#   include_directories( ${OpenCV_INCLUDE_DIRS} )
+#   add_executable(img_browser ${CMAKE_CURRENT_LIST_DIR}/img_browser.cpp)
+#   target_link_libraries(img_browser ${OpenCV_LIBS} ${MONGO_LIBS})
+#   list(APPEND TARGET_LIST img_browser)
+# else()
+#   message(WARNING "OpenCV not found")
+# endif()
 
 add_executable(service_discovery_demo ${CMAKE_CURRENT_LIST_DIR}/service_discovery_demo.cpp)
 target_include_directories(
