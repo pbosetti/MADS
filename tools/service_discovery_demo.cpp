@@ -1,4 +1,4 @@
-#include "../src/service_discovery.hpp"
+#include "service_discovery.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -48,7 +48,7 @@ int main(int argc, char **argv) {
     ("r,room", "Room name", value<string>()->default_value("default"))
     ("p,discovery-port", "UDP discovery port", value<uint16_t>()->default_value(to_string(ServiceDiscovery::DEFAULT_DISCOVERY_PORT)))
     ("i,interval-ms", "Advertising interval in milliseconds", value<uint32_t>()->default_value("1000"))
-    ("t,timeout-ms", "Discovery timeout in milliseconds (0 blocks forever)", value<uint32_t>()->default_value("0"))
+    ("t,timeout-ms", "Discovery timeout in milliseconds (0 = wait indefinitely)", value<uint32_t>()->default_value("0"))
     ("s,service", "Service mapping as name:port", value<vector<string>>())
     ("h,help", "Show help");
   // clang-format on
@@ -76,7 +76,13 @@ int main(int argc, char **argv) {
 
       if (parsed.count("service") != 0) {
         for (const auto &argument : parsed["service"].as<vector<string>>()) {
-          const auto [name, port] = parse_service_argument(argument);
+          pair<string, uint16_t> parsed_service;
+          try {
+            parsed_service = parse_service_argument(argument);
+          } catch (const exception &e) {
+            throw runtime_error("Invalid --service `" + argument + "`: " + e.what());
+          }
+          const auto &[name, port] = parsed_service;
           service.ports[name] = port;
         }
       } else {

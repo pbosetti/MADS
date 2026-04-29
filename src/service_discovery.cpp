@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <cstring>
 #include <limits>
+#include <iostream>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -214,6 +215,16 @@ std::map<std::string, uint16_t> parse_ports(const json &ports_json) {
 
 std::string serialize_service(const ServiceDiscovery::ServiceInfo &service) {
   return service.to_json().dump();
+}
+
+uint32_t prefix_to_netmask(unsigned int prefix) {
+  if (prefix == 0U) {
+    return 0U;
+  }
+  if (prefix >= 32U) {
+    return 0xFFFFFFFFu;
+  }
+  return 0xFFFFFFFFu << (32U - prefix);
 }
 
 #ifdef _WIN32
@@ -509,9 +520,7 @@ ServiceDiscovery::list_broadcast_interfaces() const {
       }
 
       const uint32_t ip_host = ntohl(sockaddr_ptr->sin_addr.S_un.S_addr);
-      const uint32_t mask_host =
-        prefix == 0U ? 0U
-                     : (prefix == 32U ? 0xFFFFFFFFu : (0xFFFFFFFFu << (32U - prefix)));
+      const uint32_t mask_host = prefix_to_netmask(prefix);
       IN_ADDR broadcast_addr{};
       broadcast_addr.S_un.S_addr = htonl(ip_host | ~mask_host);
 
@@ -572,7 +581,8 @@ void ServiceDiscovery::advertising_loop() {
 
     try {
       advertise_once(service);
-    } catch (...) {
+    } catch (const std::exception &e) {
+      std::cerr << "ServiceDiscovery advertising failed: " << e.what() << std::endl;
     }
 
     std::unique_lock lock(_mutex);
