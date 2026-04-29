@@ -8,6 +8,7 @@
 #include <map>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -60,6 +61,11 @@ private:
   };
 
   std::vector<InterfaceAddress> list_broadcast_interfaces() const;
+  std::optional<ServiceInfo> try_discover(
+    const std::string &room,
+    std::chrono::milliseconds timeout,
+    bool exact_room
+  ) const;
   void advertising_loop();
 
   uint16_t _discovery_port;
@@ -70,6 +76,7 @@ private:
   std::chrono::milliseconds _interval{DEFAULT_ADVERTISE_INTERVAL};
   bool _advertising{false};
   bool _stop_requested{false};
+  bool _room_reserved{false};
 };
 
 } // namespace Mads
