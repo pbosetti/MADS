@@ -3,8 +3,8 @@
 #include <array>
 #include <cerrno>
 #include <cstring>
-#include <limits>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <set>
@@ -44,7 +44,8 @@ constexpr socket_t invalid_socket = -1;
 #endif
 
 constexpr auto ROOM_ADVERTISEMENT_CHECK_TIMEOUT =
-  ServiceDiscovery::DEFAULT_ADVERTISE_INTERVAL + std::chrono::milliseconds{100};
+    ServiceDiscovery::DEFAULT_ADVERTISE_INTERVAL +
+    std::chrono::milliseconds{100};
 
 std::mutex &advertised_rooms_mutex() {
   static std::mutex mutex;
@@ -76,7 +77,8 @@ void ensure_socket_runtime() {
     WSADATA data{};
     const int rc = WSAStartup(MAKEWORD(2, 2), &data);
     if (rc != 0) {
-      throw std::runtime_error("WSAStartup failed with error " + std::to_string(rc));
+      throw std::runtime_error("WSAStartup failed with error " +
+                               std::to_string(rc));
     }
     return rc;
   }();
@@ -108,25 +110,21 @@ std::string last_socket_error(const std::string &message) {
 #ifdef _WIN32
   const DWORD error = WSAGetLastError();
   char *buffer = nullptr;
-  const DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+  const DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER |
+                      FORMAT_MESSAGE_FROM_SYSTEM |
                       FORMAT_MESSAGE_IGNORE_INSERTS;
   const DWORD size = FormatMessageA(
-    flags,
-    nullptr,
-    error,
-    MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-    reinterpret_cast<LPSTR>(&buffer),
-    0,
-    nullptr
-  );
+      flags, nullptr, error, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+      reinterpret_cast<LPSTR>(&buffer), 0, nullptr);
   std::string details = size > 0 && buffer != nullptr
-                          ? std::string(buffer, size)
-                          : "error " + std::to_string(error);
+                            ? std::string(buffer, size)
+                            : "error " + std::to_string(error);
   if (buffer != nullptr) {
     LocalFree(buffer);
   }
   while (!details.empty() &&
-         (details.back() == '\n' || details.back() == '\r' || details.back() == ' ')) {
+         (details.back() == '\n' || details.back() == '\r' ||
+          details.back() == ' ')) {
     details.pop_back();
   }
   return message + ": " + details;
@@ -146,27 +144,21 @@ socket_t create_udp_socket() {
 
 void enable_socket_broadcast(socket_t socket_fd) {
   int enabled = 1;
-  if (setsockopt(
-        socket_fd,
-        SOL_SOCKET,
-        SO_BROADCAST,
-        reinterpret_cast<const char *>(&enabled),
-        sizeof(enabled)
-      ) < 0) {
-    throw std::runtime_error(last_socket_error("Unable to enable socket broadcast"));
+  if (setsockopt(socket_fd, SOL_SOCKET, SO_BROADCAST,
+                 reinterpret_cast<const char *>(&enabled),
+                 sizeof(enabled)) < 0) {
+    throw std::runtime_error(
+        last_socket_error("Unable to enable socket broadcast"));
   }
 }
 
 void enable_socket_reuse(socket_t socket_fd) {
   int enabled = 1;
-  if (setsockopt(
-        socket_fd,
-        SOL_SOCKET,
-        SO_REUSEADDR,
-        reinterpret_cast<const char *>(&enabled),
-        sizeof(enabled)
-      ) < 0) {
-    throw std::runtime_error(last_socket_error("Unable to enable socket reuse"));
+  if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR,
+                 reinterpret_cast<const char *>(&enabled),
+                 sizeof(enabled)) < 0) {
+    throw std::runtime_error(
+        last_socket_error("Unable to enable socket reuse"));
   }
 }
 
@@ -185,8 +177,10 @@ socket_t create_bound_sender_socket(const std::string &ip) {
   try {
     enable_socket_broadcast(socket_fd);
     auto address = make_ipv4_address(ip, 0);
-    if (bind(socket_fd, reinterpret_cast<const sockaddr *>(&address), sizeof(address)) < 0) {
-      throw std::runtime_error(last_socket_error("Unable to bind UDP sender socket"));
+    if (bind(socket_fd, reinterpret_cast<const sockaddr *>(&address),
+             sizeof(address)) < 0) {
+      throw std::runtime_error(
+          last_socket_error("Unable to bind UDP sender socket"));
     }
     return socket_fd;
   } catch (...) {
@@ -195,18 +189,13 @@ socket_t create_bound_sender_socket(const std::string &ip) {
   }
 }
 
-void send_payload_to(socket_t socket_fd, const std::string &target, uint16_t port,
-                     const std::string &payload) {
+void send_payload_to(socket_t socket_fd, const std::string &target,
+                     uint16_t port, const std::string &payload) {
   const auto address = make_ipv4_address(target, port);
   const auto size = static_cast<int>(payload.size());
-  const int sent = sendto(
-    socket_fd,
-    payload.data(),
-    size,
-    0,
-    reinterpret_cast<const sockaddr *>(&address),
-    sizeof(address)
-  );
+  const int sent =
+      sendto(socket_fd, payload.data(), size, 0,
+             reinterpret_cast<const sockaddr *>(&address), sizeof(address));
   if (sent != size) {
     throw std::runtime_error(last_socket_error("Unable to send UDP broadcast"));
   }
@@ -222,7 +211,8 @@ json ports_to_json(const std::map<std::string, uint16_t> &ports) {
 
 std::map<std::string, uint16_t> parse_ports(const json &ports_json) {
   if (!ports_json.is_object()) {
-    throw std::runtime_error("Service advertisement `ports` must be a JSON object");
+    throw std::runtime_error(
+        "Service advertisement `ports` must be a JSON object");
   }
 
   std::map<std::string, uint16_t> ports;
@@ -245,6 +235,16 @@ std::string serialize_service(const ServiceDiscovery::ServiceInfo &service) {
   return service.to_json().dump();
 }
 
+bool is_loopback_ipv4(const std::string &ip) {
+  in_addr address{};
+  if (inet_pton(AF_INET, ip.c_str(), &address) != 1) {
+    return false;
+  }
+
+  const uint32_t host_address = ntohl(address.s_addr);
+  return (host_address & 0xFF000000u) == 0x7F000000u;
+}
+
 uint32_t prefix_to_netmask(unsigned int prefix) {
   if (prefix == 0U) {
     return 0U;
@@ -258,8 +258,10 @@ uint32_t prefix_to_netmask(unsigned int prefix) {
 #ifdef _WIN32
 std::string inet_ntop_string(const IN_ADDR &address) {
   std::array<char, INET_ADDRSTRLEN> buffer{};
-  if (inet_ntop(AF_INET, &address, buffer.data(), static_cast<DWORD>(buffer.size())) == nullptr) {
-    throw std::runtime_error(last_socket_error("Unable to format IPv4 address"));
+  if (inet_ntop(AF_INET, &address, buffer.data(),
+                static_cast<DWORD>(buffer.size())) == nullptr) {
+    throw std::runtime_error(
+        last_socket_error("Unable to format IPv4 address"));
   }
   return buffer.data();
 }
@@ -267,20 +269,94 @@ std::string inet_ntop_string(const IN_ADDR &address) {
 std::string inet_ntop_string(const in_addr &address) {
   std::array<char, INET_ADDRSTRLEN> buffer{};
   if (inet_ntop(AF_INET, &address, buffer.data(), buffer.size()) == nullptr) {
-    throw std::runtime_error(last_socket_error("Unable to format IPv4 address"));
+    throw std::runtime_error(
+        last_socket_error("Unable to format IPv4 address"));
   }
   return buffer.data();
 }
 #endif
 
+bool is_local_ipv4_address(const std::string &ip) {
+  if (is_loopback_ipv4(ip)) {
+    return true;
+  }
+
+#ifdef _WIN32
+  ensure_socket_runtime();
+  ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST |
+                GAA_FLAG_SKIP_DNS_SERVER;
+  ULONG family = AF_INET;
+  ULONG buffer_size = 16 * 1024;
+  std::vector<unsigned char> buffer(buffer_size);
+  auto *addresses = reinterpret_cast<IP_ADAPTER_ADDRESSES *>(buffer.data());
+
+  ULONG result =
+      GetAdaptersAddresses(family, flags, nullptr, addresses, &buffer_size);
+  if (result == ERROR_BUFFER_OVERFLOW) {
+    buffer.resize(buffer_size);
+    addresses = reinterpret_cast<IP_ADAPTER_ADDRESSES *>(buffer.data());
+    result =
+        GetAdaptersAddresses(family, flags, nullptr, addresses, &buffer_size);
+  }
+  if (result != NO_ERROR) {
+    return false;
+  }
+
+  for (auto *adapter = addresses; adapter != nullptr; adapter = adapter->Next) {
+    if (adapter->OperStatus != IfOperStatusUp) {
+      continue;
+    }
+    for (auto *unicast = adapter->FirstUnicastAddress; unicast != nullptr;
+         unicast = unicast->Next) {
+      if (unicast->Address.lpSockaddr == nullptr ||
+          unicast->Address.lpSockaddr->sa_family != AF_INET) {
+        continue;
+      }
+      auto *sockaddr_ptr =
+          reinterpret_cast<sockaddr_in *>(unicast->Address.lpSockaddr);
+      if (ip == inet_ntop_string(sockaddr_ptr->sin_addr)) {
+        return true;
+      }
+    }
+  }
+#else
+  ifaddrs *raw_interfaces = nullptr;
+  if (getifaddrs(&raw_interfaces) != 0) {
+    return false;
+  }
+  const auto free_interfaces = [](ifaddrs *interfaces) {
+    if (interfaces != nullptr) {
+      freeifaddrs(interfaces);
+    }
+  };
+  std::unique_ptr<ifaddrs, decltype(free_interfaces)> interfaces_guard(
+      raw_interfaces, free_interfaces);
+
+  for (ifaddrs *entry = raw_interfaces; entry != nullptr;
+       entry = entry->ifa_next) {
+    if (entry->ifa_addr == nullptr || entry->ifa_addr->sa_family != AF_INET) {
+      continue;
+    }
+
+    auto *ip_addr = reinterpret_cast<sockaddr_in *>(entry->ifa_addr);
+    if (ip == inet_ntop_string(ip_addr->sin_addr)) {
+      return true;
+    }
+  }
+#endif
+
+  return false;
+}
+
 } // namespace
 
 json ServiceDiscovery::ServiceInfo::to_json() const {
-  return json{
-    {"ip", ip},
-    {"ports", ports_to_json(ports)},
-    {"room", room}
-  };
+  return json{{"ip", ip},
+              {"ports", ports_to_json(ports)},
+              {"room", room},
+              {"note", note},
+              {"prefer_loopback_for_local_services",
+               prefer_loopback_for_local_services}};
 }
 
 ServiceDiscovery::ServiceInfo
@@ -289,19 +365,24 @@ ServiceDiscovery::ServiceInfo::from_json(const json &payload) {
     throw std::runtime_error("Service advertisement must be a JSON object");
   }
   if (!payload.contains("ip") || !payload["ip"].is_string()) {
-    throw std::runtime_error("Service advertisement is missing string field `ip`");
+    throw std::runtime_error(
+        "Service advertisement is missing string field `ip`");
   }
   if (!payload.contains("ports")) {
     throw std::runtime_error("Service advertisement is missing field `ports`");
   }
   if (!payload.contains("room") || !payload["room"].is_string()) {
-    throw std::runtime_error("Service advertisement is missing string field `room`");
+    throw std::runtime_error(
+        "Service advertisement is missing string field `room`");
   }
 
   ServiceInfo service;
   service.ip = payload["ip"].get<std::string>();
   service.ports = parse_ports(payload["ports"]);
   service.room = payload["room"].get<std::string>();
+  service.note = payload.value("note", "-");
+  service.prefer_loopback_for_local_services =
+      payload.value("prefer_loopback_for_local_services", false);
   return service;
 }
 
@@ -333,12 +414,8 @@ void ServiceDiscovery::advertise_once(const ServiceInfo &service) const {
     try {
       socket_t socket_fd = create_bound_sender_socket(iface.ip);
       try {
-        send_payload_to(
-          socket_fd,
-          iface.broadcast,
-          _discovery_port,
-          serialize_service(iface_service)
-        );
+        send_payload_to(socket_fd, iface.broadcast, _discovery_port,
+                        serialize_service(iface_service));
       } catch (...) {
         close_socket(socket_fd);
         throw;
@@ -351,9 +428,9 @@ void ServiceDiscovery::advertise_once(const ServiceInfo &service) const {
   }
 
   if (sent_count == 0) {
-    throw std::runtime_error(
-      last_error.has_value() ? *last_error : "Unable to broadcast service advertisement"
-    );
+    throw std::runtime_error(last_error.has_value()
+                                 ? *last_error
+                                 : "Unable to broadcast service advertisement");
   }
 }
 
@@ -374,11 +451,10 @@ void ServiceDiscovery::start_advertising(ServiceInfo service,
 
   stop_advertising();
   if (const auto existing_service =
-        try_discover(room, ROOM_ADVERTISEMENT_CHECK_TIMEOUT, true)) {
-    throw std::runtime_error(
-      "Room " + format_room_name(room) + " is already advertised by " +
-      existing_service->ip
-    );
+          try_discover(room, ROOM_ADVERTISEMENT_CHECK_TIMEOUT, true)) {
+    throw std::runtime_error("Room " + format_room_name(room) +
+                             " is already advertised by " +
+                             existing_service->ip);
   }
   if (!reserve_advertised_room(_discovery_port, room)) {
     throw std::runtime_error("Room " + format_room_name(room) +
@@ -468,14 +544,15 @@ ServiceDiscovery::try_discover(const std::string &room,
     local.sin_family = AF_INET;
     local.sin_port = htons(_discovery_port);
     local.sin_addr.s_addr = htonl(INADDR_ANY);
-    if (bind(socket_fd, reinterpret_cast<const sockaddr *>(&local), sizeof(local)) < 0) {
-      throw std::runtime_error(last_socket_error("Unable to bind discovery socket"));
+    if (bind(socket_fd, reinterpret_cast<const sockaddr *>(&local),
+             sizeof(local)) < 0) {
+      throw std::runtime_error(
+          last_socket_error("Unable to bind discovery socket"));
     }
 
-    const auto deadline =
-      timeout <= std::chrono::milliseconds::zero()
-        ? std::chrono::steady_clock::time_point::max()
-        : std::chrono::steady_clock::now() + timeout;
+    const auto deadline = timeout <= std::chrono::milliseconds::zero()
+                              ? std::chrono::steady_clock::time_point::max()
+                              : std::chrono::steady_clock::now() + timeout;
 
     while (true) {
       fd_set read_fds;
@@ -491,7 +568,8 @@ ServiceDiscovery::try_discover(const std::string &room,
           return std::nullopt;
         }
         const auto remaining =
-          std::chrono::duration_cast<std::chrono::microseconds>(deadline - now);
+            std::chrono::duration_cast<std::chrono::microseconds>(deadline -
+                                                                  now);
         tv.tv_sec = static_cast<long>(remaining.count() / 1000000);
         tv.tv_usec = static_cast<long>(remaining.count() % 1000000);
         tv_ptr = &tv;
@@ -499,22 +577,19 @@ ServiceDiscovery::try_discover(const std::string &room,
 
       const int ready = select(
 #ifdef _WIN32
-        0,
+          0,
 #else
-        socket_fd + 1,
+          socket_fd + 1,
 #endif
-        &read_fds,
-        nullptr,
-        nullptr,
-        tv_ptr
-      );
+          &read_fds, nullptr, nullptr, tv_ptr);
 
       if (ready == 0) {
         close_socket(socket_fd);
         return std::nullopt;
       }
       if (ready < 0) {
-        throw std::runtime_error(last_socket_error("Unable to wait for discovery message"));
+        throw std::runtime_error(
+            last_socket_error("Unable to wait for discovery message"));
       }
 
       std::array<char, 4096> buffer{};
@@ -525,18 +600,14 @@ ServiceDiscovery::try_discover(const std::string &room,
       socklen_t remote_size = sizeof(remote);
 #endif
       const int received = recvfrom(
-        socket_fd,
-        buffer.data(),
-        static_cast<int>(buffer.size() - 1),
-        0,
-        reinterpret_cast<sockaddr *>(&remote),
-        &remote_size
-      );
+          socket_fd, buffer.data(), static_cast<int>(buffer.size() - 1), 0,
+          reinterpret_cast<sockaddr *>(&remote), &remote_size);
       if (received < 0) {
         if (socket_would_block()) {
           continue;
         }
-        throw std::runtime_error(last_socket_error("Unable to receive discovery message"));
+        throw std::runtime_error(
+            last_socket_error("Unable to receive discovery message"));
       }
 
       buffer[static_cast<std::size_t>(received)] = '\0';
@@ -550,10 +621,14 @@ ServiceDiscovery::try_discover(const std::string &room,
       if (discovered_service.ip != remote_ip) {
         continue;
       }
-      discovered_service.ip = remote_ip;
+      discovered_service.ip =
+          discovered_service.prefer_loopback_for_local_services &&
+                  is_local_ipv4_address(remote_ip)
+              ? "127.0.0.1"
+              : remote_ip;
       const bool room_matches =
-        exact_room ? discovered_service.room == room
-                   : room.empty() || discovered_service.room == room;
+          exact_room ? discovered_service.room == room
+                     : room.empty() || discovered_service.room == room;
       if (room_matches) {
         close_socket(socket_fd);
         return discovered_service;
@@ -582,18 +657,20 @@ ServiceDiscovery::list_broadcast_interfaces() const {
 
 #ifdef _WIN32
   ensure_socket_runtime();
-  ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
+  ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST |
+                GAA_FLAG_SKIP_DNS_SERVER;
   ULONG family = AF_INET;
   ULONG buffer_size = 16 * 1024;
   std::vector<unsigned char> buffer(buffer_size);
-  auto *addresses =
-    reinterpret_cast<IP_ADAPTER_ADDRESSES *>(buffer.data());
+  auto *addresses = reinterpret_cast<IP_ADAPTER_ADDRESSES *>(buffer.data());
 
-  ULONG result = GetAdaptersAddresses(family, flags, nullptr, addresses, &buffer_size);
+  ULONG result =
+      GetAdaptersAddresses(family, flags, nullptr, addresses, &buffer_size);
   if (result == ERROR_BUFFER_OVERFLOW) {
     buffer.resize(buffer_size);
     addresses = reinterpret_cast<IP_ADAPTER_ADDRESSES *>(buffer.data());
-    result = GetAdaptersAddresses(family, flags, nullptr, addresses, &buffer_size);
+    result =
+        GetAdaptersAddresses(family, flags, nullptr, addresses, &buffer_size);
   }
   if (result != NO_ERROR) {
     throw std::runtime_error("GetAdaptersAddresses failed with error " +
@@ -613,8 +690,9 @@ ServiceDiscovery::list_broadcast_interfaces() const {
       }
 
       auto *sockaddr_ptr =
-        reinterpret_cast<sockaddr_in *>(unicast->Address.lpSockaddr);
-      const auto prefix = static_cast<unsigned int>(unicast->OnLinkPrefixLength);
+          reinterpret_cast<sockaddr_in *>(unicast->Address.lpSockaddr);
+      const auto prefix =
+          static_cast<unsigned int>(unicast->OnLinkPrefixLength);
       if (prefix > 32U) {
         continue;
       }
@@ -642,10 +720,10 @@ ServiceDiscovery::list_broadcast_interfaces() const {
     }
   };
   std::unique_ptr<ifaddrs, decltype(free_interfaces)> interfaces_guard(
-    raw_interfaces, free_interfaces
-  );
+      raw_interfaces, free_interfaces);
 
-  for (ifaddrs *entry = raw_interfaces; entry != nullptr; entry = entry->ifa_next) {
+  for (ifaddrs *entry = raw_interfaces; entry != nullptr;
+       entry = entry->ifa_next) {
     if (entry->ifa_addr == nullptr || entry->ifa_broadaddr == nullptr) {
       continue;
     }
@@ -653,13 +731,15 @@ ServiceDiscovery::list_broadcast_interfaces() const {
         entry->ifa_broadaddr->sa_family != AF_INET) {
       continue;
     }
-    if ((entry->ifa_flags & IFF_UP) == 0 || (entry->ifa_flags & IFF_BROADCAST) == 0 ||
+    if ((entry->ifa_flags & IFF_UP) == 0 ||
+        (entry->ifa_flags & IFF_BROADCAST) == 0 ||
         (entry->ifa_flags & IFF_LOOPBACK) != 0) {
       continue;
     }
 
     auto *ip_addr = reinterpret_cast<sockaddr_in *>(entry->ifa_addr);
-    auto *broadcast_addr = reinterpret_cast<sockaddr_in *>(entry->ifa_broadaddr);
+    auto *broadcast_addr =
+        reinterpret_cast<sockaddr_in *>(entry->ifa_broadaddr);
     const auto ip = inet_ntop_string(ip_addr->sin_addr);
     const auto broadcast = inet_ntop_string(broadcast_addr->sin_addr);
     if (unique_interfaces.emplace(ip, broadcast).second) {
@@ -689,13 +769,13 @@ void ServiceDiscovery::advertising_loop() {
     try {
       advertise_once(service);
     } catch (const std::exception &e) {
-      std::cerr << "ServiceDiscovery advertising failed: " << e.what() << std::endl;
+      std::cerr << "ServiceDiscovery advertising failed: " << e.what()
+                << std::endl;
     }
 
     std::unique_lock lock(_mutex);
-    _cv.wait_for(lock, interval, [this]() {
-      return _stop_requested || !Mads::running;
-    });
+    _cv.wait_for(lock, interval,
+                 [this]() { return _stop_requested || !Mads::running; });
     if (_stop_requested || !Mads::running) {
       _advertising = false;
       break;

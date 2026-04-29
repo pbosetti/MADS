@@ -26,6 +26,7 @@ Author(s): Paolo Bosetti
 #include "../curve.hpp"
 #include "../keypress.hpp"
 #include "../goback.hpp"
+#include "../service_discovery.hpp"
 #include <cstring>
 #include <cxxopts.hpp>
 #include <filesystem>
@@ -88,18 +89,8 @@ void relaunch() {
 
   std::wstring cmd_buffer = cmd_line;
 
-  bool ok = CreateProcessW(
-    path,
-    cmd_buffer.data(),
-    nullptr,
-    nullptr,
-    FALSE,
-    0,
-    nullptr,
-    nullptr,
-    &si,
-    &pi
-  );
+  bool ok = CreateProcessW(path, cmd_buffer.data(), nullptr, nullptr, FALSE, 0,
+                           nullptr, nullptr, &si, &pi);
   if (ok) {
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
@@ -112,7 +103,7 @@ map<string, string> list_ip() {
 #ifdef _WIN32
   ULONG out_buf_len = sizeof(IP_ADAPTER_INFO);
   PIP_ADAPTER_INFO adapter_info =
-    static_cast<PIP_ADAPTER_INFO>(malloc(out_buf_len));
+      static_cast<PIP_ADAPTER_INFO>(malloc(out_buf_len));
   if (adapter_info == nullptr) {
     cerr << "Error allocating memory needed to call GetAdaptersInfo" << endl;
     return result;
@@ -133,7 +124,7 @@ map<string, string> list_ip() {
     for (PIP_ADAPTER_INFO adapter = adapter_info; adapter != nullptr;
          adapter = adapter->Next) {
       result[std::to_string(adapter->Index)] =
-        adapter->IpAddressList.IpAddress.String;
+          adapter->IpAddressList.IpAddress.String;
     }
   } else {
     cerr << "GetAdaptersInfo failed with error: " << ret << endl;
@@ -166,7 +157,6 @@ map<string, string> list_ip() {
 #endif
   return result;
 }
-
 
 map<string, string> settings_urls(string const &base_url) {
   map<string, string> urls;
@@ -202,7 +192,7 @@ string timestamp() {
 
 #ifdef __linux__
 #include <algorithm> // std::reverse()
-#include <endian.h> // __BYTE_ORDER __LITTLE_ENDIAN
+#include <endian.h>  // __BYTE_ORDER __LITTLE_ENDIAN
 
 template <typename T> constexpr unsigned long long htonll(T value) noexcept {
 #if __BYTE_ORDER == __LITTLE_ENDIAN
@@ -226,7 +216,6 @@ std::string &read_settings_file(std::string const &settings_path) {
   ini_table_content = buffer.str();
   return ini_table_content;
 }
-
 
 /*
   __  __       _
@@ -252,6 +241,10 @@ int main(int argc, char **argv) {
                       "FRONTEND msg out  ", "FRONTEND bytes out",
                       "BACKEND msg in    ", "BACKEND bytes in  ",
                       "BACKEND msg out   ", "BACKEND bytes out "};
+  ServiceDiscovery discovery_service(MADS_SERVICE_PORT);
+  ServiceDiscovery::ServiceInfo service_info{
+      .room = MADS_SERVICE_ROOM, .note = "CURVE encryption disabled"};
+
   // clang-format off
   options.add_options()
     ("s,settings", "Settings file path", value<string>())
@@ -259,6 +252,7 @@ int main(int argc, char **argv) {
     ("crypto", "Enable CURVE encryption (requires proper setup)", value<string>()->implicit_value("broker"))
     ("keys_dir", "Directory containing CURVE keypairs",
       value<string>()->implicit_value(keys_dir.string()))
+    ("r,room", "Service discovery room name", value<string>()->implicit_value(MADS_SERVICE_ROOM))
     ("v,version", "Print version")
     ("h,help", "Print usage");
   // clang-format on
@@ -283,6 +277,10 @@ int main(int argc, char **argv) {
     if (stat(settings_path.c_str(), &buf) != 0)
       settings_path = Mads::exec_dir("../etc/" SETTINGS_PATH);
   }
+  if (options_parsed.count("room") != 0) {
+    service_info.room = options_parsed["room"].as<string>();
+  }
+
   filesystem::path executable(argv[0]);
   string name = executable.stem().string();
   name = name.substr(name.find_last_of("-") + 1);
@@ -307,19 +305,31 @@ int main(int argc, char **argv) {
       keys_dir = filesystem::path(options_parsed["keys_dir"].as<string>());
     }
     cout << fg::cyan << "Enabling CURVE encryption for broker sockets" << endl
-         << "  Searching for keys in " << style::bold
-         << keys_dir.string() << style::reset << endl
-         << fg::cyan << "  Broker key name: " << style::bold
-         << key_name << "[.key|.pub]" << fg::reset << endl;
+         << "  Searching for keys in " << style::bold << keys_dir.string()
+         << style::reset << endl
+         << fg::cyan << "  Broker key name: " << style::bold << key_name
+         << "[.key|.pub]" << fg::reset << endl;
     crypto = true;
+    service_info.note = "CURVE encryption enabled";
   }
 
-  unsigned int timecode_fps = config["agents"]["timecode_fps"].value_or(MADS_FPS);
+  unsigned int timecode_fps =
+      config["agents"]["timecode_fps"].value_or(MADS_FPS);
 
   string frontend_address, backend_address, settings_address;
   frontend_address = config[name]["frontend_address"].value_or(BROKER_FRONTEND);
   backend_address = config[name]["backend_address"].value_or(BROKER_BACKEND);
   settings_address = config[name]["settings_address"].value_or(BROKER_SETTINGS);
+
+  service_info.ports = {
+      {"frontend",
+       stoi(frontend_address.substr(frontend_address.find_last_of(":") + 1))},
+      {"backend",
+       stoi(backend_address.substr(backend_address.find_last_of(":") + 1))},
+      {"settings",
+       stoi(settings_address.substr(settings_address.find_last_of(":") + 1))}};
+  service_info.prefer_loopback_for_local_services =
+      config[name]["prefer_loopback_for_local_services"].value_or(false);
 
   // Create broker sockets
   zmqpp::context context;
@@ -330,18 +340,19 @@ int main(int argc, char **argv) {
     bool verbose = config[name]["auth_verbose"].value_or(false);
     curve_auth_ptr = make_unique<Mads::CurveAuth>(context);
     if (whitelist) {
-      whitelist->for_each([&](const toml::node& n) {
+      whitelist->for_each([&](const toml::node &n) {
         if (toml::is_string<decltype(n)>) {
           curve_auth_ptr->allowed_ips.push_back(n.as_string()->get());
         }
       });
     }
-    curve_auth_ptr->setup_auth(verbose ? Mads::auth_verbose::on : Mads::auth_verbose::off);
+    curve_auth_ptr->setup_auth(verbose ? Mads::auth_verbose::on
+                                       : Mads::auth_verbose::off);
     try {
       curve_auth_ptr->fetch_public_keys(keys_dir);
     } catch (const runtime_error &e) {
       cerr << fg::red << "Error setting up CURVE authentication: " << e.what()
-      << fg::reset << endl;
+           << fg::reset << endl;
       curve_auth_ptr = nullptr;
       frontend.close();
       backend.close();
@@ -373,7 +384,7 @@ int main(int argc, char **argv) {
          << endl;
     exit(EXIT_FAILURE);
   }
-  
+
   // Create Settings socket (Req/Rep)
   zmqpp::socket settings(context, zmqpp::socket_type::rep);
   if (crypto)
@@ -391,8 +402,8 @@ int main(int argc, char **argv) {
       content << LIB_VERSION;
       if (settings.receive(msg)) {
         if (msg.parts() < 2) {
-          cerr << goback(1, !daemon) << fg::red << timestamp() 
-               <<"Received malformed message from agent, "
+          cerr << goback(1, !daemon) << fg::red << timestamp()
+               << "Received malformed message from agent, "
                << "expected at least 2 parts" << fg::reset << endl;
           continue;
         }
@@ -401,10 +412,10 @@ int main(int argc, char **argv) {
         string agent_name = "unknown";
         if (msg.parts() == 3) {
           agent_name = msg.get(2);
-        } 
+        }
         if (cmd == "settings") {
           if (!Mads::check_version(agent_version)) {
-            cerr << goback(1, !daemon) << fg::red << timestamp() 
+            cerr << goback(1, !daemon) << fg::red << timestamp()
                  << "Received settings request from agent with wrong version: "
                  << agent_version << " (vs. " << LIB_VERSION << ")" << fg::reset
                  << endl;
@@ -416,23 +427,25 @@ int main(int argc, char **argv) {
               std::lock_guard<std::mutex> lock(ini_table_mutex);
               content << ini_table;
             }
-            string attachment_path = config[agent_name]["attachment"].value_or("");
+            string attachment_path =
+                config[agent_name]["attachment"].value_or("");
             if (!attachment_path.empty()) {
               if (filesystem::path(attachment_path).is_relative()) {
                 attachment_path = Mads::exec_dir(attachment_path);
               }
               if (!filesystem::exists(attachment_path)) {
-                cerr << goback(1, !daemon) << fg::red << timestamp() 
-                     << "Attachment path does not exist: "
-                     << attachment_path << fg::reset << endl;
+                cerr << goback(1, !daemon) << fg::red << timestamp()
+                     << "Attachment path does not exist: " << attachment_path
+                     << fg::reset << endl;
               } else {
-                ifstream attachment_file(attachment_path, ios::in | ios::binary);
+                ifstream attachment_file(attachment_path,
+                                         ios::in | ios::binary);
                 stringstream attachment_content;
                 cout << goback(1, !daemon) << fg::yellow << timestamp()
-                     << "  Attaching binary object: "
-                     << style::bold << attachment_path
-                     << " (" << filesystem::file_size(attachment_path) 
-                     << " bytes)" << fg::reset << endl;
+                     << "  Attaching binary object: " << style::bold
+                     << attachment_path << " ("
+                     << filesystem::file_size(attachment_path) << " bytes)"
+                     << fg::reset << endl;
                 attachment_content << attachment_file.rdbuf();
                 content << attachment_content.str();
               }
@@ -444,8 +457,7 @@ int main(int argc, char **argv) {
           settings.send(to_string(Mads::timecode(now, timecode_fps)));
         } else {
           cerr << goback(1, !daemon) << fg::yellow << timestamp()
-               << "Got unexpected command " 
-               << cmd << fg::reset << endl;
+               << "Got unexpected command " << cmd << fg::reset << endl;
           settings.send(content);
         }
       }
@@ -458,15 +470,27 @@ int main(int argc, char **argv) {
 
   // print settings URI for clients
   string port = settings_address.substr(settings_address.find_last_of(":") + 1);
-  cout << "Settings are provided on " << style::bold << "tcp://127.0.0.1:"
-       << port << style::reset
-       << style::italic << " (loopback)" << style::reset << endl;
+  cout << "Settings are provided on " << style::bold
+       << "tcp://127.0.0.1:" << port << style::reset << style::italic
+       << " (loopback)" << style::reset << endl;
 
+  discovery_service.start_advertising(
+      service_info, std::chrono::milliseconds(
+                        config[name]["discovery_interval_ms"].value_or(1000)));
+  cout << "Advertising service on UDP discovery port " << MADS_SERVICE_PORT
+       << " with room name '" << style::bold << service_info.room
+       << style::reset << "'" << endl
+       << "            note: " << service_info.note << endl;
+  if (service_info.prefer_loopback_for_local_services) {
+    cout << style::italic << "            (preferring loopback for local agents)"
+         << style::reset;
+  }
+  cout << endl;
   thread([&]() {
     Mads::Watcher watcher(settings_path, 1s);
     string ini_tmp = "";
     watcher.watch([&](const std::string &file_name) {
-      cout << goback(1, !daemon) << fg::yellow << timestamp() 
+      cout << goback(1, !daemon) << fg::yellow << timestamp()
            << "Reloading settings " << file_name << "... ";
       ini_tmp = read_settings_file(settings_path);
       try {
@@ -477,8 +501,9 @@ int main(int argc, char **argv) {
         }
         cout << " done." << fg::reset << endl;
       } catch (const exception &e) {
-        cerr << endl << fg::red << timestamp() << " INI file read error: " 
-             << e.what() << " - skipping changes" << fg::reset << endl;
+        cerr << endl
+             << fg::red << timestamp() << " INI file read error: " << e.what()
+             << " - skipping changes" << fg::reset << endl;
       }
     });
   }).detach();
@@ -490,10 +515,14 @@ int main(int argc, char **argv) {
 #else
          << "Running as daemon with PID " << getpid
 #endif
-         << ", will watch for changes to " << settings_path << endl 
+         << ", will watch for changes to " << settings_path << endl
          << fg::reset << endl;
     zmqpp::proxy(frontend, backend);
     cerr << "Proxy exited" << endl;
+    discovery_service.stop_advertising();
+    frontend.close();
+    backend.close();
+    context.terminate();
     exit(EXIT_SUCCESS);
   }
 
@@ -513,7 +542,8 @@ int main(int argc, char **argv) {
     while (running) {
       zmqpp::message msg;
       char c = getch();
-      if (c == '\0') continue;
+      if (c == '\0')
+        continue;
       switch (c) {
 #ifndef _WIN32
       // On Windows, the execv() function detaches from terminal and the
@@ -568,10 +598,9 @@ int main(int argc, char **argv) {
       }
       case 'n':
       case 'N': {
-        cout << goback(5) << "Settings are provided on "
-             << style::bold << current_url->second << style::reset 
-             << style::italic << " (" << current_url->first << ")" 
-             << style::reset << endl;
+        cout << goback(5) << "Settings are provided on " << style::bold
+             << current_url->second << style::reset << style::italic << " ("
+             << current_url->first << ")" << style::reset << endl;
         if (++current_url == settings_url_list.end()) {
           current_url = settings_url_list.begin();
         }
@@ -583,22 +612,24 @@ int main(int argc, char **argv) {
       }
     }
 
+    discovery_service.stop_advertising();
     cout << fg::green << "Closing sockets..." << fg::reset << endl;
     running = false;
     settings_thread.join();
     controller.close();
     controlled.close();
-    if (crypto) curve_auth_ptr = nullptr;
+    if (crypto)
+      curve_auth_ptr = nullptr;
     frontend.close();
     backend.close();
     context.terminate();
     if (reload) {
       cout << fg::yellow << "Restarting..." << fg::reset << endl;
-      #ifdef _WIN32
+#ifdef _WIN32
       relaunch();
-      #else
+#else
       execv(Mads::exec_path().string().c_str(), argv);
-      #endif
+#endif
     }
   }
   return 0;
