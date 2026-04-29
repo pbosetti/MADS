@@ -5,7 +5,7 @@
 
 # SYNOPSIS
 
-**mads-broker** [**\-s, \-\-settings** *arg*] [**\-d, \-\-daemon**] [**\-\-crypto[=arg]**] [**\-\-keys_dir[=arg]**] [**\-v, \-\-version**] [**\-h, \-\-help**]
+**mads-broker** [**\-s, \-\-settings** *arg*] [**\-r, \-\-room** [*room*]] [**\-d, \-\-daemon**] [**\-\-crypto[=arg]**] [**\-\-keys_dir[=arg]**] [**\-v, \-\-version**] [**\-h, \-\-help**]
 
 # DESCRIPTION
 
@@ -19,6 +19,9 @@ Note that if you change broker's settings in the INI file, then you want to also
 
 **\-s**, **\-\-settings** *arg*
 :  specify the settings file to be used. If not specified, the default settings file is used (usually /usr/local/etc/mads.ini).
+
+**\-r**, **\-\-room** [*room*]
+:  Broadcast the broker settings port in the named service-discovery room. If *room* is omitted, the default room is **mads**. Agents use the same option to explore a room and discover the broker settings port. This discovery path is opt-in for agents: if they are not launched with **\-\-room**, the usual settings lookup via **\-\-settings** or the compiled default settings URI is used.
 
 **\-d**, **\-\-daemon**
 :  run the broker as a daemon. This suppress the output to the console upon launch and the interactive behavior.

@@ -7,7 +7,7 @@ from the agent_c.h header file.
 
 import os, sys
 import ctypes
-from ctypes import c_void_p, c_char_p, c_int, c_bool, c_double
+from ctypes import c_void_p, c_char_p, c_int, c_bool, c_double, c_size_t
 from enum import IntEnum
 import platform
 import subprocess
@@ -45,6 +45,15 @@ try:
     lib = ctypes.CDLL(MADS_LIB_PATH)
 except OSError as e:
     raise OSError(f"Failed to load MADS library from {MADS_LIB_PATH}: {e}\n")
+
+if system == "Windows":
+    libc = ctypes.CDLL("msvcrt.dll")
+elif system == "Darwin":
+    libc = ctypes.CDLL("libc.dylib")
+else:
+    libc = ctypes.CDLL(None)
+libc.free.argtypes = [c_void_p]
+libc.free.restype = None
 
 # Define enums
 class MessageType(IntEnum):
@@ -150,6 +159,11 @@ lib.agent_print_settings.restype = None
 
 lib.agent_settings_uri.argtypes = [c_void_p]
 lib.agent_settings_uri.restype = c_char_p
+
+lib.discover_broker_settings.argtypes = [
+    c_char_p, ctypes.POINTER(c_char_p), c_size_t
+]
+lib.discover_broker_settings.restype = c_int
 
 lib.agent_set_high_watermark.argtypes = [c_void_p, c_int]
 lib.agent_set_high_watermark.restype = c_int
@@ -259,6 +273,8 @@ class Agent:
     
     def disconnect(self) -> int:
         """Disconnect from the server."""
+        if not self._agent:
+            return 0
         return lib.agent_disconnect(self._agent)
     
     def set_receive_timeout(self, timeout: int):
@@ -271,7 +287,7 @@ class Agent:
     
     def last_error(self) -> str:
         """Get the last error message."""
-        result = lib.agent_last_error(self._agent)
+        result = lib.agent_last_error()
         return result.decode('utf-8') if result else None
     
     def set_pub_topic(self, topic: str):
@@ -305,6 +321,50 @@ class Agent:
     def settings_uri(self) -> str:
         """Get the settings URI."""
         result = lib.agent_settings_uri(self._agent)
+        return result.decode('utf-8') if result else None
+
+    @classmethod
+    def discover_settings(cls, room: str = None, buffer_size: int = 0) -> str:
+        """
+        Discover the broker settings URI advertised in a service room.
+
+        Args:
+            room: Optional discovery room. If None or empty, the C wrapper uses
+                the compiled MADS default room.
+            buffer_size: Optional explicit C buffer size. If 0, the C wrapper
+                allocates the buffer internally and this method frees it.
+
+        Returns:
+            The discovered settings URI, e.g. tcp://host:port.
+
+        Raises:
+            RuntimeError: If discovery fails.
+        """
+        room_arg = room.encode('utf-8') if room else None
+        if buffer_size > 0:
+            buffer = ctypes.create_string_buffer(buffer_size)
+            url = c_char_p(ctypes.addressof(buffer))
+            result = lib.discover_broker_settings(
+                room_arg, ctypes.byref(url), buffer_size
+            )
+            if result != 0:
+                raise RuntimeError(cls._last_error())
+            return buffer.value.decode('utf-8')
+
+        url = c_char_p()
+        result = lib.discover_broker_settings(room_arg, ctypes.byref(url), 0)
+        if result != 0:
+            raise RuntimeError(cls._last_error())
+        try:
+            return ctypes.string_at(url).decode('utf-8') if url else None
+        finally:
+            url_ptr = ctypes.cast(url, c_void_p)
+            if url_ptr.value:
+                libc.free(url_ptr)
+
+    @staticmethod
+    def _last_error() -> str:
+        result = lib.agent_last_error()
         return result.decode('utf-8') if result else None
     
     def set_queue_size(self, size: 1000):
@@ -343,7 +403,6 @@ class Agent:
     
     def __del__(self):
         """Destructor to ensure proper cleanup."""
-        self.disconnect()
         self.destroy()
 
 
@@ -358,4 +417,3 @@ def mads_default_settings_uri() -> str:
     """Get the default settings URI."""
     result = lib.mads_default_settings_uri()
     return result.decode('utf-8') if result else None
-

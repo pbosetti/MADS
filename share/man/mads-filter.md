@@ -12,6 +12,7 @@
   [**\-p, \-\-period** *period in ms*]
   [**\-b, \-\-dont-block**]
   [**\-s, \-\-settings** *URI*]
+  [**\-r, \-\-room** [*room*]]
   [**\-S, \-\-save-settings** *filename*]
   [**\-o, \-\-option** *key=value*]
   [**\-\-silent**]
@@ -75,6 +76,9 @@ In case of multiple devices using the same plugin but **on different architectur
 
 **\-s**, **\-\-settings** *URI*
 :  Path to the settings file (ini format). It can be a valid ZeroMQ url in the form tcp://host:port.
+
+**\-r**, **\-\-room** [*room*]
+:  Discover the broker settings port by listening for a broker advertisement in the named service-discovery room. If *room* is omitted, the default room is **mads**. This behavior is opt-in: when **\-\-room** is not given, the filter keeps the usual settings lookup behavior and uses **\-\-settings** or the compiled default settings URI.
 
 **\-S**, **\-\-save-settings** *filename*
 :  Save the settings (loaded by the broker or via **\-s** option) to the given file (ini format).
