@@ -206,6 +206,27 @@ public:
   }
 
   /**
+   * @brief Override the wrapped agent name before initialization.
+   *
+   * Keeps Agent constructor semantics by dropping a command prefix before the
+   * last '-' when present.
+   */
+  void set_agent_name(std::string name) {
+#ifdef _WIN32
+    name = name.substr(name.find_last_of("\\") + 1);
+    name = name.substr(0, name.find("."));
+#else
+    name = name.substr(name.find_last_of("/") + 1);
+#endif
+    const size_t pos = name.rfind('-');
+    if (pos != std::string::npos) {
+      this->_name = name.substr(pos + 1);
+    } else {
+      this->_name = std::move(name);
+    }
+  }
+
+  /**
    * @brief Add the non-blocking receive option.
    */
   void add_dont_block_option() {
