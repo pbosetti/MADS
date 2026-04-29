@@ -25,7 +25,7 @@ public:
     std::string room;
     std::string note;
     bool encrypted{false};
-    bool prefer_loopback_for_local_services{false};
+    bool prefer_loopback_for_local_services{true};
 
     json to_json() const;
     static ServiceInfo from_json(const json &payload);
@@ -57,6 +57,8 @@ public:
 
 private:
   struct InterfaceAddress {
+    std::string name;
+    unsigned int index{0};
     std::string ip;
     std::string broadcast;
   };
