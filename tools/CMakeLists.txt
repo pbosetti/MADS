@@ -22,6 +22,21 @@ else()
   message(WARNING "OpenCV not found")
 endif()
 
+add_executable(service_discovery_demo ${CMAKE_CURRENT_LIST_DIR}/service_discovery_demo.cpp)
+target_include_directories(
+  service_discovery_demo
+  PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+)
+target_link_libraries(
+  service_discovery_demo
+  PRIVATE
+    MadsCore
+    cxxopts
+    nlohmann_json::nlohmann_json
+)
+list(APPEND TARGET_LIST service_discovery_demo)
+
 
 # INSTALL ######################################################################
 set(CMAKE_INSTALL_PREFIX ${USR_DIR})
