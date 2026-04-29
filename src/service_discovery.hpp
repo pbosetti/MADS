@@ -24,6 +24,7 @@ public:
     std::map<std::string, uint16_t> ports;
     std::string room;
     std::string note;
+    bool encrypted{false};
     bool prefer_loopback_for_local_services{false};
 
     json to_json() const;

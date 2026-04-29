@@ -16,6 +16,7 @@ Author(s): Paolo Bosetti, 2026
 #include "agent.hpp"
 #include "exec_path.hpp"
 #include "mads.hpp"
+#include "service_discovery.hpp"
 #include <cxxopts.hpp>
 #include <cstdlib>
 #include <filesystem>
@@ -177,7 +178,9 @@ public:
        cxxopts::value<std::string>())
       ("settings-timeout", "Timeout in milliseconds for reading settings from broker ('0' = no timeout)",
        cxxopts::value<int>()->default_value("0"))
+      ("r,room", "Service discovery room name", cxxopts::value<std::string>()->implicit_value(MADS_SERVICE_ROOM))
       ("crypto", "Enable CURVE encryption for broker communication")
+       // clang-format on
       ("keys_dir", "Directory where CURVE keys are stored",
        cxxopts::value<std::string>()->implicit_value(Mads::exec_dir("../etc")))
       ("key_broker", "Name of the broker key file (without .key extension)",
@@ -500,6 +503,24 @@ private:
       }
       if (parsed.count("auth_verbose") != 0) {
         options.crypto.auth_verbose = Mads::auth_verbose::on;
+      }
+    }
+
+    if (parsed.count("room") && !parsed["room"].as<std::string>().empty()) {
+      auto room = parsed["room"].as<std::string>();
+      auto discovery_service = ServiceDiscovery(MADS_SERVICE_PORT);
+      cout << fg::gray << style::italic << "Using "
+           << (options.crypto.enabled ? "encrypted" : "unencrypted") 
+           << " service discovery in room '" 
+           << parsed["room"].as<std::string>() << "'..." << std::endl;
+      const auto service = discovery_service.discover(room, 5000ms);
+      options.settings_uri = "tcp://" + service.ip + ":" +
+      std::to_string(service.ports.at("settings"));
+      cout << "Found broker providing settings at: " << options.settings_uri 
+           << style::reset << fg::reset << std::endl;
+      if (options.crypto.enabled != service.encrypted) {
+        throw std::runtime_error(
+            "CLI encryption setting does not match discovered service encryption");
       }
     }
 
