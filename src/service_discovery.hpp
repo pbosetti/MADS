@@ -57,6 +57,8 @@ public:
 
 private:
   struct InterfaceAddress {
+    std::string name;
+    unsigned int index{0};
     std::string ip;
     std::string broadcast;
   };

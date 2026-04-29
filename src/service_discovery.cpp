@@ -178,6 +178,46 @@ void enable_socket_port_reuse(socket_t socket_fd) {
 #endif
 }
 
+template<typename InterfaceAddressT>
+void bind_socket_to_interface(socket_t socket_fd,
+                              const InterfaceAddressT &iface) {
+#ifdef _WIN32
+  if (iface.index == 0U) {
+    return;
+  }
+  DWORD index = htonl(static_cast<DWORD>(iface.index));
+  if (setsockopt(socket_fd, IPPROTO_IP, IP_UNICAST_IF,
+                 reinterpret_cast<const char *>(&index), sizeof(index)) < 0) {
+    throw std::runtime_error(
+        last_socket_error("Unable to bind UDP sender socket to interface"));
+  }
+#elif defined(__APPLE__) && defined(IP_BOUND_IF)
+  if (iface.index == 0U) {
+    return;
+  }
+  const unsigned int index = iface.index;
+  if (setsockopt(socket_fd, IPPROTO_IP, IP_BOUND_IF,
+                 reinterpret_cast<const char *>(&index), sizeof(index)) < 0) {
+    throw std::runtime_error(
+        last_socket_error("Unable to bind UDP sender socket to interface"));
+  }
+#elif defined(SO_BINDTODEVICE)
+  if (iface.name.empty()) {
+    return;
+  }
+  if (setsockopt(socket_fd, SOL_SOCKET, SO_BINDTODEVICE, iface.name.c_str(),
+                 static_cast<socklen_t>(iface.name.size() + 1)) < 0) {
+    if (errno != EPERM && errno != EACCES) {
+      throw std::runtime_error(
+          last_socket_error("Unable to bind UDP sender socket to interface"));
+    }
+  }
+#else
+  UNUSED(socket_fd);
+  UNUSED(iface);
+#endif
+}
+
 sockaddr_in make_ipv4_address(const std::string &ip, uint16_t port) {
   sockaddr_in address{};
   address.sin_family = AF_INET;
@@ -188,11 +228,13 @@ sockaddr_in make_ipv4_address(const std::string &ip, uint16_t port) {
   return address;
 }
 
-socket_t create_bound_sender_socket(const std::string &ip) {
+template<typename InterfaceAddressT>
+socket_t create_bound_sender_socket(const InterfaceAddressT &iface) {
   socket_t socket_fd = create_udp_socket();
   try {
     enable_socket_broadcast(socket_fd);
-    auto address = make_ipv4_address(ip, 0);
+    bind_socket_to_interface(socket_fd, iface);
+    auto address = make_ipv4_address(iface.ip, 0);
     if (bind(socket_fd, reinterpret_cast<const sockaddr *>(&address),
              sizeof(address)) < 0) {
       throw std::runtime_error(
@@ -433,7 +475,7 @@ void ServiceDiscovery::advertise_once(const ServiceInfo &service) const {
     ServiceInfo iface_service = service;
     iface_service.ip = iface.ip;
     try {
-      socket_t socket_fd = create_bound_sender_socket(iface.ip);
+      socket_t socket_fd = create_bound_sender_socket(iface);
       try {
         send_payload_to(socket_fd, iface.broadcast, _discovery_port,
                         serialize_service(iface_service));
@@ -727,7 +769,11 @@ ServiceDiscovery::list_broadcast_interfaces() const {
       const auto ip = inet_ntop_string(sockaddr_ptr->sin_addr);
       const auto broadcast = inet_ntop_string(broadcast_addr);
       if (unique_interfaces.emplace(ip, broadcast).second) {
-        interfaces.push_back({ip, broadcast});
+        interfaces.push_back({adapter->AdapterName != nullptr
+                                  ? std::string(adapter->AdapterName)
+                                  : std::string(),
+                              static_cast<unsigned int>(adapter->IfIndex), ip,
+                              broadcast});
       }
     }
   }
@@ -762,10 +808,11 @@ ServiceDiscovery::list_broadcast_interfaces() const {
     auto *ip_addr = reinterpret_cast<sockaddr_in *>(entry->ifa_addr);
     auto *broadcast_addr =
         reinterpret_cast<sockaddr_in *>(entry->ifa_broadaddr);
+    const std::string name = entry->ifa_name != nullptr ? entry->ifa_name : "";
     const auto ip = inet_ntop_string(ip_addr->sin_addr);
     const auto broadcast = inet_ntop_string(broadcast_addr->sin_addr);
     if (unique_interfaces.emplace(ip, broadcast).second) {
-      interfaces.push_back({ip, broadcast});
+      interfaces.push_back({name, if_nametoindex(name.c_str()), ip, broadcast});
     }
   }
 
