@@ -30,11 +30,22 @@ pair<string, uint16_t> parse_service_argument(const string &value) {
 
   const auto name = value.substr(0, separator);
   const auto port_string = value.substr(separator + 1);
-  const auto port_value = stoul(port_string);
-  if (port_value > numeric_limits<uint16_t>::max()) {
+
+  try {
+    size_t parsed_characters = 0;
+    const auto port_value = stoul(port_string, &parsed_characters);
+    if (parsed_characters != port_string.size()) {
+      throw runtime_error("Invalid service port in `" + value + "`");
+    }
+    if (port_value == 0 || port_value > numeric_limits<uint16_t>::max()) {
+      throw runtime_error("Service port out of range in `" + value + "`");
+    }
+    return {name, static_cast<uint16_t>(port_value)};
+  } catch (const invalid_argument &) {
+    throw runtime_error("Invalid service port in `" + value + "`");
+  } catch (const out_of_range &) {
     throw runtime_error("Service port out of range in `" + value + "`");
   }
-  return {name, static_cast<uint16_t>(port_value)};
 }
 
 } // namespace
