@@ -436,7 +436,8 @@ json ServiceDiscovery::ServiceInfo::to_json() const {
               {"room", room},
               {"encrypted", encrypted},
               {"prefer_loopback_for_local_services",
-               prefer_loopback_for_local_services}};
+               prefer_loopback_for_local_services},
+              {"version", version}};
   if (!hostname.empty()) {
     result["hostname"] = hostname;
   }
@@ -468,6 +469,7 @@ ServiceDiscovery::ServiceInfo::from_json(const json &payload) {
   service.encrypted = payload.value("encrypted", false);
   service.prefer_loopback_for_local_services =
       payload.value("prefer_loopback_for_local_services", true);
+  service.version = payload.value("version", "");
   return service;
 }
 
@@ -497,6 +499,7 @@ void ServiceDiscovery::advertise_once(const ServiceInfo &service) const {
   for (const auto &iface : interfaces) {
     ServiceInfo iface_service = advertised_service;
     iface_service.ip = iface.ip;
+    iface_service.version = LIB_GIT_TAG;
     try {
       socket_t socket_fd = create_bound_sender_socket(iface);
       try {

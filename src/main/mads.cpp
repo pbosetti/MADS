@@ -690,7 +690,8 @@ int main(int argc, char **argv) {
     }
     map<string, size_t> field_widths{{"name", string("Room name:").size()},
                                      {"host", string("Host:").size()},
-                                     {"url", string("Settings URL:").size()}};
+                                     {"url", string("Settings URL:").size()},
+                                     {"version", string("Version:").size()}};
     for (auto const &room : rooms) {
       field_widths["name"] = max(field_widths["name"], room.first.size()) + 2;
       field_widths["host"] =
@@ -698,12 +699,15 @@ int main(int argc, char **argv) {
       string url = "tcp://" + room.second.ip + ":" +
                    std::to_string(room.second.ports.at("settings"));
       field_widths["url"] = max(field_widths["url"], url.size()) + 2;
+      field_widths["version"] =
+          max(field_widths["version"], room.second.version.size());
     }
     cout << "Rooms advertised on the network:" << endl << style::bold;
     cout << setw(field_widths["name"]) << left
          << "Room name:" << setw(field_widths["host"]) << left
          << "Host:" << setw(field_widths["url"]) << left
-         << "Settings URL:" << endl
+         << "Settings URL:" << setw(field_widths["version"]) << left
+         << "Version:" << endl
          << style::reset;
     for (auto const &room : rooms) {
       cout << setw(field_widths["name"]) << left << room.first
@@ -711,6 +715,7 @@ int main(int argc, char **argv) {
            << setw(field_widths["url"]) << left
            << "tcp://" + room.second.ip + ":" +
                   std::to_string(room.second.ports.at("settings"))
+           << setw(field_widths["version"]) << left << room.second.version
            << endl;
     }
     return 0;

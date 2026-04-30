@@ -24,6 +24,7 @@ public:
     std::map<std::string, uint16_t> ports;
     std::string room;
     std::string hostname;
+    std::string version;
     bool encrypted{false};
     bool prefer_loopback_for_local_services{true};
 
