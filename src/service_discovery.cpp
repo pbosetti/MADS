@@ -289,6 +289,28 @@ std::map<std::string, uint16_t> parse_ports(const json &ports_json) {
   return ports;
 }
 
+std::string local_hostname() {
+  ensure_socket_runtime();
+  std::array<char, 256> hostname{};
+  if (gethostname(hostname.data(), static_cast<int>(hostname.size())) != 0) {
+    return "unknown";
+  }
+  hostname.back() = '\0';
+  return hostname.data()[0] != '\0' ? hostname.data() : "unknown";
+}
+
+void populate_service_hostname(ServiceDiscovery::ServiceInfo &service) {
+  if (service.hostname.empty()) {
+    service.hostname = local_hostname();
+  }
+}
+
+ServiceDiscovery::ServiceInfo
+service_with_hostname(ServiceDiscovery::ServiceInfo service) {
+  populate_service_hostname(service);
+  return service;
+}
+
 std::string serialize_service(const ServiceDiscovery::ServiceInfo &service) {
   return service.to_json().dump();
 }
@@ -415,8 +437,8 @@ json ServiceDiscovery::ServiceInfo::to_json() const {
               {"encrypted", encrypted},
               {"prefer_loopback_for_local_services",
                prefer_loopback_for_local_services}};
-  if (!note.empty()) {
-    result["note"] = note;
+  if (!hostname.empty()) {
+    result["hostname"] = hostname;
   }
   return result;
 }
@@ -442,7 +464,7 @@ ServiceDiscovery::ServiceInfo::from_json(const json &payload) {
   service.ip = payload["ip"].get<std::string>();
   service.ports = parse_ports(payload["ports"]);
   service.room = payload["room"].get<std::string>();
-  service.note = payload.value("note", "");
+  service.hostname = payload.value("hostname", "");
   service.encrypted = payload.value("encrypted", false);
   service.prefer_loopback_for_local_services =
       payload.value("prefer_loopback_for_local_services", true);
@@ -469,10 +491,11 @@ void ServiceDiscovery::advertise_once(const ServiceInfo &service) const {
     throw std::runtime_error("No broadcast-capable IPv4 interfaces found");
   }
 
+  const auto advertised_service = service_with_hostname(service);
   std::optional<std::string> last_error;
   std::size_t sent_count = 0;
   for (const auto &iface : interfaces) {
-    ServiceInfo iface_service = service;
+    ServiceInfo iface_service = advertised_service;
     iface_service.ip = iface.ip;
     try {
       socket_t socket_fd = create_bound_sender_socket(iface);
@@ -497,12 +520,13 @@ void ServiceDiscovery::advertise_once(const ServiceInfo &service) const {
   }
 }
 
-void ServiceDiscovery::start_advertising(ServiceInfo service,
+void ServiceDiscovery::start_advertising(ServiceInfo &service,
                                          std::chrono::milliseconds interval) {
   if (interval <= std::chrono::milliseconds::zero()) {
     throw std::runtime_error("Advertising interval must be positive");
   }
 
+  populate_service_hostname(service);
   const auto room = service.room;
   {
     std::scoped_lock lock(_mutex);
@@ -527,7 +551,7 @@ void ServiceDiscovery::start_advertising(ServiceInfo service,
   ServiceInfo advertised_service;
   {
     std::scoped_lock lock(_mutex);
-    _service = std::move(service);
+    _service = service;
     _interval = interval;
     _stop_requested = false;
     _advertising = true;
@@ -712,6 +736,110 @@ ServiceDiscovery::discover(const std::string &room,
     throw std::runtime_error("Timed out waiting for service advertisement");
   }
   return *service;
+}
+
+std::map<std::string, std::string>
+ServiceDiscovery::list_rooms(std::chrono::milliseconds timeout) const {
+  std::map<std::string, std::string> rooms;
+  if (timeout <= std::chrono::milliseconds::zero()) {
+    return rooms;
+  }
+
+  socket_t socket_fd = create_udp_socket();
+  try {
+    enable_socket_reuse(socket_fd);
+    enable_socket_port_reuse(socket_fd);
+
+    sockaddr_in local{};
+    local.sin_family = AF_INET;
+    local.sin_port = htons(_discovery_port);
+    local.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (bind(socket_fd, reinterpret_cast<const sockaddr *>(&local),
+             sizeof(local)) < 0) {
+      throw std::runtime_error(
+          last_socket_error("Unable to bind discovery socket"));
+    }
+
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (true) {
+      const auto now = std::chrono::steady_clock::now();
+      if (now >= deadline) {
+        close_socket(socket_fd);
+        return rooms;
+      }
+
+      fd_set read_fds;
+      FD_ZERO(&read_fds);
+      FD_SET(socket_fd, &read_fds);
+
+      const auto remaining =
+          std::chrono::duration_cast<std::chrono::microseconds>(deadline - now);
+      timeval tv{};
+      tv.tv_sec = static_cast<long>(remaining.count() / 1000000);
+      tv.tv_usec = static_cast<long>(remaining.count() % 1000000);
+
+      const int ready = select(
+#ifdef _WIN32
+          0,
+#else
+          socket_fd + 1,
+#endif
+          &read_fds, nullptr, nullptr, &tv);
+
+      if (ready == 0) {
+        close_socket(socket_fd);
+        return rooms;
+      }
+      if (ready < 0) {
+        throw std::runtime_error(
+            last_socket_error("Unable to wait for discovery message"));
+      }
+
+      std::array<char, 4096> buffer{};
+      sockaddr_in remote{};
+#ifdef _WIN32
+      int remote_size = sizeof(remote);
+#else
+      socklen_t remote_size = sizeof(remote);
+#endif
+      const int received = recvfrom(
+          socket_fd, buffer.data(), static_cast<int>(buffer.size() - 1), 0,
+          reinterpret_cast<sockaddr *>(&remote), &remote_size);
+      if (received < 0) {
+        if (socket_would_block()) {
+          continue;
+        }
+        throw std::runtime_error(
+            last_socket_error("Unable to receive discovery message"));
+      }
+
+      buffer[static_cast<std::size_t>(received)] = '\0';
+      ServiceInfo discovered_service;
+      try {
+        discovered_service = ServiceInfo::from_json(json::parse(buffer.data()));
+      } catch (...) {
+        continue;
+      }
+
+      const auto remote_ip = inet_ntop_string(remote.sin_addr);
+      if (discovered_service.ip != remote_ip) {
+        continue;
+      }
+      discovered_service.ip =
+          discovered_service.prefer_loopback_for_local_services &&
+                  is_local_ipv4_address(remote_ip)
+              ? "127.0.0.1"
+              : remote_ip;
+
+      rooms[discovered_service.room] =
+          discovered_service.hostname.empty() ? discovered_service.ip
+                                              : discovered_service.hostname;
+    }
+  } catch (...) {
+    close_socket(socket_fd);
+    throw;
+  }
+  return rooms;
 }
 
 std::vector<ServiceDiscovery::InterfaceAddress>

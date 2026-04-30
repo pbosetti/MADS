@@ -16,6 +16,7 @@ Author: Paolo Bosetti, July 2024
 #include "../exec_path.hpp"
 #include "../https_client.hpp"
 #include "../TerminalLogoRenderer.hpp"
+#include "../service_discovery.hpp"
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -571,6 +572,7 @@ int main(int argc, char **argv) {
     ("plugins", "List plugins in default plugins directory")
     ("keypair", "Generate ZMQ CURVE keypair", value<string>()->implicit_value("mads"))
     ("f,force", "Force operation (if applicable)")
+    ("rooms", "List rooms advertised on the network", value<size_t>()->implicit_value("5000"))
     ("v,version", "Print version")
     ("h,help", "Print help");
   
@@ -677,6 +679,23 @@ int main(int argc, char **argv) {
     }
     return 0;
   }
+  if (options_parsed.count("rooms")) {
+    Mads::ServiceDiscovery discovery;
+    cout << "Discovering rooms on the network (timeout: " 
+         << options_parsed["rooms"].as<size_t>() << " ms)..." << endl;
+    auto rooms = discovery.list_rooms(std::chrono::milliseconds(options_parsed["rooms"].as<size_t>()));
+    if (rooms.empty()) {
+      cout << "No rooms found" << endl;
+      return 0;
+    }
+    cout << "Rooms advertised on the network:" << endl;
+    for (auto const &room : rooms) {
+      cout << "  " << style::bold << room.first << style::reset 
+           << " (host: " << room.second << ")" << endl;
+    }
+    return 0;
+  }
+
 #define FIELD_WIDTH 11
 #ifndef _WIN32
   auto logo = filesystem::path(image_dir) / "logo_white.png";

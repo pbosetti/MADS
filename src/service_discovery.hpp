@@ -23,7 +23,7 @@ public:
     std::string ip;
     std::map<std::string, uint16_t> ports;
     std::string room;
-    std::string note;
+    std::string hostname;
     bool encrypted{false};
     bool prefer_loopback_for_local_services{true};
 
@@ -47,13 +47,16 @@ public:
 
   void advertise_once(const ServiceInfo &service) const;
   void start_advertising(
-      ServiceInfo service,
+      ServiceInfo &service,
       std::chrono::milliseconds interval = DEFAULT_ADVERTISE_INTERVAL);
   void stop_advertising();
 
   ServiceInfo discover(const std::string &room = "",
                        std::chrono::milliseconds timeout =
                            std::chrono::milliseconds::zero()) const;
+  std::map<std::string, std::string> list_rooms(
+      std::chrono::milliseconds timeout = std::chrono::milliseconds{1000})
+      const;
 
 private:
   struct InterfaceAddress {

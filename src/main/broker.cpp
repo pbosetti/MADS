@@ -481,8 +481,7 @@ int main(int argc, char **argv) {
                           config[name]["discovery_interval_ms"].value_or(1000)));
     cout << "Advertising service on UDP discovery port " << MADS_SERVICE_PORT
          << " with room name '" << style::bold << service_info.room
-         << style::reset << "'" << endl
-         << "            note: " << service_info.note << endl;
+         << style::reset << "'" << endl;
     if (service_info.prefer_loopback_for_local_services) {
       cout << style::italic << "            (preferring loopback for local agents)"
            << style::reset;
@@ -491,6 +490,7 @@ int main(int argc, char **argv) {
   } catch (const runtime_error &e) {
     cerr << fg::red << "Error starting service discovery: " << e.what()
          << fg::reset << endl;
+    exit(EXIT_FAILURE);
   }
 
   thread([&]() {

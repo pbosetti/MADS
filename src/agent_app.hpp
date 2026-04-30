@@ -537,7 +537,8 @@ private:
       const auto service = discovery_service.discover(room, 5000ms);
       options.settings_uri = "tcp://" + service.ip + ":" +
       std::to_string(service.ports.at("settings"));
-      cout << "Found broker providing settings at: " << options.settings_uri 
+      cout << "Found broker on " << service.hostname 
+           << " providing settings at: " << options.settings_uri 
            << style::reset << fg::reset << std::endl;
       if (options.crypto.enabled != service.encrypted) {
         throw std::runtime_error(
