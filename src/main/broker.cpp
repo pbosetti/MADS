@@ -490,7 +490,6 @@ int main(int argc, char **argv) {
   } catch (const runtime_error &e) {
     cerr << fg::red << "Error starting service discovery: " << e.what()
          << fg::reset << endl;
-    exit(EXIT_FAILURE);
   }
 
   thread([&]() {

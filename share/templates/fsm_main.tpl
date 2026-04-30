@@ -20,6 +20,7 @@ target_link_libraries(fsm PRIVATE Mads::Mads)
 */
 #include <mads.hpp>
 #include <agent.hpp>
+#include <agent_app.hpp>
 #include <thread>
 #include <chrono>
 #include <filesystem>
@@ -30,7 +31,7 @@ using namespace chrono_literals;
 using json = nlohmann::json;
 
 struct FsmData {
-  std::unique_ptr<Mads::Agent> agent;
+  std::unique_ptr<Mads::AgentApp> agent;
 };
 
 int main(int argc, char *argv[]) {
@@ -44,11 +45,25 @@ int main(int argc, char *argv[]) {
   if (argc > 1) {
     settings_path = argv[1];
   }
-  FsmData data = {std::make_unique<Mads::Agent>(agent_name, settings_path)};
+  FsmData data = {std::make_unique<Mads::AgentApp>(agent_name, settings_path)};
   // If crypto is needed, properly load keys and enable it
-  data.agent->init(false, false);
+  data.agent->add_common_options();
+  data.agent->options()
+    ("my-option", "An additional option flag");
+ 
+  auto parsed = data.agent->parse_options(argc, argv);
+  if (int rc = Mads::AgentApp::handle_standard_exit_options<Mads::AgentApp>(
+          parsed, data.agent->raw_options(), argv);
+      rc >= 0) {
+    return rc;
+  }
+ 
+  data.agent->init(parsed);
+  data.agent->enable_events();
   data.agent->connect();
   data.agent->enable_remote_control();
+  data.agent->info();
+
   auto settings = data.agent->get_settings();
   if (settings.contains("period")) {
     loop_period = std::chrono::milliseconds(settings["period"].get<int>());
@@ -63,7 +78,7 @@ int main(int argc, char *argv[]) {
   // Deal with further settings as needed
 
   // Initialize FSM
-  auto fsm = FSM::FiniteStateMachine(&data);
+  auto fsm = {{ namespace }}::FiniteStateMachine(&data);
   fsm.set_timing_function([&]() {
     std::this_thread::sleep_for(loop_period);
   });
@@ -74,12 +89,6 @@ int main(int argc, char *argv[]) {
   });
 
   // Shutdown procedure
-  data.agent->register_event(Mads::event_type::shutdown);
   data.agent->disconnect();
-
-  if (data.agent->restart()) {
-    cout << "Restarting " << agent_name << "..." << endl;
-    execvp(cmd.c_str(), argv);
-  }
-  return 0;
+  data.agent->restart_if_requested(argv);
 }
