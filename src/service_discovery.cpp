@@ -738,9 +738,9 @@ ServiceDiscovery::discover(const std::string &room,
   return *service;
 }
 
-std::map<std::string, std::string>
+std::map<std::string, ServiceDiscovery::ServiceInfo>
 ServiceDiscovery::list_rooms(std::chrono::milliseconds timeout) const {
-  std::map<std::string, std::string> rooms;
+  std::map<std::string, ServiceDiscovery::ServiceInfo> rooms;
   if (timeout <= std::chrono::milliseconds::zero()) {
     return rooms;
   }
@@ -831,9 +831,7 @@ ServiceDiscovery::list_rooms(std::chrono::milliseconds timeout) const {
               ? "127.0.0.1"
               : remote_ip;
 
-      rooms[discovered_service.room] =
-          discovered_service.hostname.empty() ? discovered_service.ip
-                                              : discovered_service.hostname;
+      rooms[discovered_service.room] = discovered_service;
     }
   } catch (...) {
     close_socket(socket_fd);

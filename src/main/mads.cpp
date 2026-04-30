@@ -688,10 +688,30 @@ int main(int argc, char **argv) {
       cout << "No rooms found" << endl;
       return 0;
     }
-    cout << "Rooms advertised on the network:" << endl;
+    map<string, size_t> field_widths{{"name", string("Room name:").size()},
+                                     {"host", string("Host:").size()},
+                                     {"url", string("Settings URL:").size()}};
     for (auto const &room : rooms) {
-      cout << "  " << style::bold << room.first << style::reset 
-           << " (host: " << room.second << ")" << endl;
+      field_widths["name"] = max(field_widths["name"], room.first.size()) + 2;
+      field_widths["host"] =
+          max(field_widths["host"], room.second.hostname.size()) + 2;
+      string url = "tcp://" + room.second.ip + ":" +
+                   std::to_string(room.second.ports.at("settings"));
+      field_widths["url"] = max(field_widths["url"], url.size()) + 2;
+    }
+    cout << "Rooms advertised on the network:" << endl << style::bold;
+    cout << setw(field_widths["name"]) << left
+         << "Room name:" << setw(field_widths["host"]) << left
+         << "Host:" << setw(field_widths["url"]) << left
+         << "Settings URL:" << endl
+         << style::reset;
+    for (auto const &room : rooms) {
+      cout << setw(field_widths["name"]) << left << room.first
+           << setw(field_widths["host"]) << left << room.second.hostname
+           << setw(field_widths["url"]) << left
+           << "tcp://" + room.second.ip + ":" +
+                  std::to_string(room.second.ports.at("settings"))
+           << endl;
     }
     return 0;
   }

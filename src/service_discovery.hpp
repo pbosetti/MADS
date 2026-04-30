@@ -54,7 +54,7 @@ public:
   ServiceInfo discover(const std::string &room = "",
                        std::chrono::milliseconds timeout =
                            std::chrono::milliseconds::zero()) const;
-  std::map<std::string, std::string> list_rooms(
+  std::map<std::string, ServiceDiscovery::ServiceInfo> list_rooms(
       std::chrono::milliseconds timeout = std::chrono::milliseconds{1000})
       const;
 
