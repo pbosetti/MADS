@@ -573,9 +573,11 @@ int main(int argc, char **argv) {
     ("keypair", "Generate ZMQ CURVE keypair", value<string>()->implicit_value("mads"))
     ("f,force", "Force operation (if applicable)")
     ("rooms", "List rooms advertised on the network", value<size_t>()->implicit_value("5000"))
+    ("j,json", "Output in JSON format (where applicable)")
     ("v,version", "Print version")
     ("h,help", "Print help");
-  
+  // clang-format on
+
   string plugins_dir = 
   #ifdef _WIN32
     Mads::exec_dir("../bin/");
@@ -584,7 +586,6 @@ int main(int argc, char **argv) {
   #endif
 
   ParseResult options_parsed;
-  // clang-format on
   try {
     options_parsed = options.parse(argc, argv);
   } catch (const std::exception &e) {
@@ -621,18 +622,28 @@ int main(int argc, char **argv) {
     return 0;
   }
   if (options_parsed.count("info")) {
-    cout << "Mads version: " << style::bold << Mads::version() << style::reset
-         << endl;
-    cout << "Mads binary directory: " << style::bold << exec_dir << style::reset
-         << endl;
-    cout << "Mads plugins directory: " << style::bold
-         << plugins_dir<< style::reset << endl;
-    cout << "Mads template directory: " << style::bold << template_dir
-         << style::reset << endl;
-    cout << "Mads INI file: " << style::bold
-         << Mads::exec_dir("../etc/mads.ini") << style::reset << endl;
-    cout << style::italic << "Run mads update or mads beta to check for updates"
-         << style::reset << endl;
+    if (options_parsed.count("json")) {
+      json j_info;
+      j_info["version"] = Mads::version();
+      j_info["exec_dir"] = exec_dir;
+      j_info["plugins_dir"] = plugins_dir;
+      j_info["template_dir"] = template_dir;
+      j_info["ini_file"] = Mads::exec_dir("../etc/mads.ini");
+      cout << j_info.dump(2) << endl;
+    } else {
+      cout << "Mads version: " << style::bold << Mads::version() << style::reset
+          << endl;
+      cout << "Mads binary directory: " << style::bold << exec_dir << style::reset
+          << endl;
+      cout << "Mads plugins directory: " << style::bold
+          << plugins_dir<< style::reset << endl;
+      cout << "Mads template directory: " << style::bold << template_dir
+          << style::reset << endl;
+      cout << "Mads INI file: " << style::bold
+          << Mads::exec_dir("../etc/mads.ini") << style::reset << endl;
+      cout << style::italic << "Run mads update or mads beta to check for updates"
+          << style::reset << endl;
+    }
     return 0;
   }
   if (options_parsed.count("keypair")) {
@@ -681,8 +692,10 @@ int main(int argc, char **argv) {
   }
   if (options_parsed.count("rooms")) {
     Mads::ServiceDiscovery discovery;
-    cout << "Discovering rooms on the network (timeout: " 
-         << options_parsed["rooms"].as<size_t>() << " ms)..." << endl;
+    if (!options_parsed.count("json")) {
+      cout << "Discovering rooms on the network (timeout: " 
+           << options_parsed["rooms"].as<size_t>() << " ms)..." << endl;
+    }
     auto rooms = discovery.list_rooms(std::chrono::milliseconds(options_parsed["rooms"].as<size_t>()));
     if (rooms.empty()) {
       cout << "No rooms found" << endl;
@@ -701,6 +714,20 @@ int main(int argc, char **argv) {
       field_widths["url"] = max(field_widths["url"], url.size()) + 2;
       field_widths["version"] =
           max(field_widths["version"], room.second.version.size());
+    }
+    if (options_parsed.count("json")) {
+      json j_rooms = json::array();
+      for (auto const &room : rooms) {
+        json j_room;
+        j_room["name"] = room.first;
+        j_room["host"] = room.second.hostname;
+        j_room["ip"] = room.second.ip;
+        j_room["ports"] = room.second.ports;
+        j_room["version"] = room.second.version;
+        j_rooms.push_back(j_room);
+      }
+      cout << j_rooms.dump(2) << endl;
+      return 0;
     }
     cout << "Rooms advertised on the network:" << endl << style::bold;
     cout << setw(field_widths["name"]) << left

@@ -257,19 +257,22 @@ public:
     try {
       _parsed_options = _options.parse(argc, argv);
     } catch (const cxxopts::exceptions::exception &e) {
-#ifndef MADS_AGENT_NO_INFO
-      std::cerr << fg::red;
-#endif
-      std::cerr << "Error parsing command line: " << e.what();
-#ifndef MADS_AGENT_NO_INFO
-      std::cerr << fg::reset;
-#endif
-      std::cerr << std::endl << std::endl;
-      std::cerr << _options.help() << std::endl;
-      if (argc > 0 && argv != nullptr && argv[0] != nullptr) {
-        std::cerr << "Run '" << argv[0] << " --help' for usage." << std::endl;
+      print_parse_error_and_exit(argc, argv, e.what());
+    }
+    const auto unmatched = _parsed_options.unmatched();
+    if (!unmatched.empty()) {
+      std::string message =
+          unmatched.size() == 1 ? "Unexpected CLI argument: "
+                                : "Unexpected CLI arguments: ";
+      bool first = true;
+      for (const auto &argument : unmatched) {
+        if (!first) {
+          message += " ";
+        }
+        message += argument;
+        first = false;
       }
-      std::exit(EXIT_FAILURE);
+      print_parse_error_and_exit(argc, argv, message);
     }
     return _parsed_options;
   }
@@ -489,6 +492,23 @@ private:
     out << fg::reset;
 #endif
     out << std::endl;
+  }
+
+  [[noreturn]] void print_parse_error_and_exit(
+      int argc, char *argv[], const std::string &message) const {
+#ifndef MADS_AGENT_NO_INFO
+    std::cerr << fg::red;
+#endif
+    std::cerr << "Error parsing command line: " << message;
+#ifndef MADS_AGENT_NO_INFO
+    std::cerr << fg::reset;
+#endif
+    std::cerr << std::endl << std::endl;
+    std::cerr << _options.help() << std::endl;
+    if (argc > 0 && argv != nullptr && argv[0] != nullptr) {
+      std::cerr << "Run '" << argv[0] << " --help' for usage." << std::endl;
+    }
+    std::exit(EXIT_FAILURE);
   }
 
   static CliOptions cli_options_from_parse_result(

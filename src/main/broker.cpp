@@ -488,7 +488,8 @@ int main(int argc, char **argv) {
     }
     cout << endl;
   } catch (const runtime_error &e) {
-    cerr << fg::red << "Error starting service discovery: " << e.what()
+    cerr << fg::red << "Error starting service discovery: " << e.what() << endl
+         << style::bold << "Service discovery will be disabled"  << style::reset
          << fg::reset << endl;
   }
 
