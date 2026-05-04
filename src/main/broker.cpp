@@ -257,7 +257,24 @@ int main(int argc, char **argv) {
     ("v,version", "Print version")
     ("h,help", "Print usage");
   // clang-format on
-  auto options_parsed = options.parse(argc, argv);
+
+  ParseResult options_parsed;
+  try {
+    options_parsed = options.parse(argc, argv);
+  } catch (const cxxopts::exceptions::exception &e) {
+    cerr << fg::red << "Error parsing command line: " << e.what() 
+         << style::reset << endl;
+    std::exit(EXIT_FAILURE);
+  }
+
+  if (options_parsed.unmatched().size() > 0) {
+    cerr << fg::red << "Unrecognized command line options: ";
+    for (const auto &opt : options_parsed.unmatched()) {
+      cerr << opt << " ";
+    }
+    cerr << fg::reset << endl;
+    std::exit(EXIT_FAILURE);
+  }
 
   if (options_parsed.count("help")) {
     cout << argv[0] << " ver. " << LIB_VERSION << endl;
@@ -297,7 +314,7 @@ int main(int argc, char **argv) {
   } catch (const toml::parse_error &err) {
     cout << fg::red << "Cannot open settings file " << settings_path << ", "
          << err << style::reset << endl;
-    exit(EXIT_FAILURE);
+    std::exit(EXIT_FAILURE);
   }
 
   if (options_parsed.count("crypto") != 0) {
@@ -358,7 +375,7 @@ int main(int argc, char **argv) {
       frontend.close();
       backend.close();
       context.terminate();
-      exit(EXIT_FAILURE);
+      std::exit(EXIT_FAILURE);
     }
     try {
       curve_auth_ptr->setup_curve_server(frontend, key_name);
@@ -369,7 +386,7 @@ int main(int argc, char **argv) {
       frontend.close();
       backend.close();
       context.terminate();
-      exit(EXIT_FAILURE);
+      std::exit(EXIT_FAILURE);
     }
   }
 
@@ -383,7 +400,7 @@ int main(int argc, char **argv) {
   } catch (const zmqpp::zmq_internal_exception &e) {
     cerr << fg::red << "ZMQ error, could not connect: " << e.what() << fg::reset
          << endl;
-    exit(EXIT_FAILURE);
+    std::exit(EXIT_FAILURE);
   }
 
   // Create Settings socket (Req/Rep)
