@@ -58,7 +58,11 @@ unique_ptr<Agent> start_agent(string name, string settings_uri,
 tuple<string, filesystem::path> Agent::read_settings(string uri, string name, int timeout) {
   zmqpp::socket socket(_context, zmqpp::socket_type::req);
   if (_curve_auth) {
-    _curve_auth->setup_curve_client(socket, client_key_name, server_key_name);
+    if (_curve_auth->client_public_key().empty() || _curve_auth->client_secret_key().empty() || _curve_auth->server_public_key().empty()) {
+      _curve_auth->setup_curve_client(socket, client_key_name, server_key_name);
+    } else {
+      _curve_auth->setup_curve_client(socket);
+    }
   }
 
   message msg_out, msg_in;
@@ -116,7 +120,11 @@ tuple<string, filesystem::path> Agent::read_settings(string uri, string name, in
 double Agent::get_broker_timecode(string uri, int timeout) {
   zmqpp::socket socket(_context, zmqpp::socket_type::req);
   if (_curve_auth) {
-    _curve_auth->setup_curve_client(socket, client_key_name, server_key_name);
+    if (_curve_auth->client_public_key().empty() || _curve_auth->client_secret_key().empty() || _curve_auth->server_public_key().empty()) {
+      _curve_auth->setup_curve_client(socket, client_key_name, server_key_name);
+    } else {
+      _curve_auth->setup_curve_client(socket);
+    }
   }
   message msg;
   if (timeout > 0) {

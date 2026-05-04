@@ -211,12 +211,24 @@ public:
     _client_keypair.public_key = key;
   }
 
+  string client_public_key() const {
+    return _client_keypair.public_key;
+  }
+
   void set_client_secret_key(string const &key) {
     _client_keypair.secret_key = key;
   }
 
+  string client_secret_key() const {
+    return _client_keypair.secret_key;
+  }
+
   void set_server_public_key(string const &key) {
     _server_public_key = key;
+  }
+
+  string server_public_key() const {
+    return _server_public_key;
   }
 
   // zmqpp::auth &get_authenticator() { return _authenticator; }
