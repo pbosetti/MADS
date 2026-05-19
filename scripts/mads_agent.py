@@ -55,6 +55,8 @@ else:
 libc.free.argtypes = [c_void_p]
 libc.free.restype = None
 
+_TOPIC_BUFFER_SIZE = 256
+
 # Define enums
 class MessageType(IntEnum):
     NONE = 0
@@ -143,6 +145,17 @@ lib.agent_set_pub_topic.restype = None
 
 lib.agent_set_sub_topics.argtypes = [c_void_p, ctypes.POINTER(c_char_p), c_int]
 lib.agent_set_sub_topics.restype = None
+
+lib.agent_pub_topic.argtypes = [c_void_p]
+lib.agent_pub_topic.restype = c_char_p
+
+lib.agent_sub_topics.argtypes = [
+    c_void_p, ctypes.POINTER(c_char_p), ctypes.POINTER(c_int)
+]
+lib.agent_sub_topics.restype = c_size_t
+
+lib.agent_topics.argtypes = [c_void_p, c_int]
+lib.agent_topics.restype = c_char_p
 
 # Settings functions
 lib.agent_get_settings.argtypes = [c_void_p, c_int]
@@ -300,6 +313,42 @@ class Agent:
         for i, topic in enumerate(topics):
             topic_ptrs[i] = topic.encode('utf-8')
         lib.agent_set_sub_topics(self._agent, topic_ptrs, len(topics))
+
+    def pub_topic(self) -> str:
+        """Get the publish topic."""
+        result = lib.agent_pub_topic(self._agent)
+        return result.decode('utf-8') if result else None
+
+    def sub_topics(self) -> list:
+        """Get the subscribe topics."""
+        topics = c_char_p()
+        n_topics = c_int(0)
+        result = lib.agent_sub_topics(
+            self._agent, ctypes.byref(topics), ctypes.byref(n_topics)
+        )
+        try:
+            if result == ctypes.c_size_t(-1).value:
+                raise RuntimeError(self.last_error())
+
+            base_ptr = ctypes.cast(topics, c_void_p)
+            if not base_ptr.value:
+                return []
+
+            return [
+                ctypes.string_at(
+                    base_ptr.value + i * _TOPIC_BUFFER_SIZE
+                ).decode('utf-8')
+                for i in range(n_topics.value)
+            ]
+        finally:
+            topics_ptr = ctypes.cast(topics, c_void_p)
+            if topics_ptr.value:
+                libc.free(topics_ptr)
+
+    def topics(self) -> str:
+        """Get all topics as a JSON string."""
+        result = lib.agent_topics(self._agent, 0)
+        return json.loads(result.decode('utf-8')) if result else None
     
     # Settings methods
     def settings(self) -> str:

@@ -71,7 +71,8 @@ void agent_set_id(agent_t agent, const char *id) {
 
 const char *agent_id(agent_t agent) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
-  static string id = ag->get_agent_id();
+  static thread_local string id;
+  id = ag->get_agent_id();
   return id.c_str();
 }
 
@@ -217,7 +218,8 @@ int agent_disconnect(agent_t agent) {
 // Settings
 const char *agent_get_settings(agent_t agent, int n) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
-  static string s = ag->get_settings().dump(n);
+  static thread_local string s;
+  s = ag->get_settings().dump(n);
   return s.c_str();
 }
 
@@ -315,7 +317,7 @@ double agent_setting_dbl(agent_t agent, const char *key) {
 
 const char *agent_setting_str(agent_t agent, const char *key) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
-  static string value;
+  static thread_local string value;
   value = ag->get_settings().value(string(key), "");
   return value.c_str();
 }
@@ -327,7 +329,8 @@ void agent_print_settings(agent_t agent, int tab) {
 
 const char *agent_settings_uri(agent_t agent) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
-  static string s = ag->settings_uri();
+  static thread_local string s;
+  s = ag->settings_uri();
   return s.c_str();
 }
 
@@ -362,6 +365,65 @@ void agent_set_sub_topics(agent_t agent, const char **topics, int n_topics) {
     t.push_back(string(topics[i]));
   }
   ag->set_sub_topic(t);
+}
+
+const char *agent_pub_topic(agent_t agent) {
+  Agent *ag = reinterpret_cast<Agent *>(agent);
+  static thread_local string topic;
+  topic = ag->pub_topic();
+  return topic.c_str();
+}
+
+size_t agent_sub_topics(agent_t agent, char **topics, int *n_topics) {
+  Agent *ag = reinterpret_cast<Agent *>(agent);
+  vector<string> sub_topics = ag->sub_topic();
+  if (topics == nullptr || n_topics == nullptr) {
+    snprintf(_err_msg, ERR_MSG_SIZE,
+             "Error getting subscribe topics: Invalid output buffer pointer");
+    return -1;
+  }
+  if (*topics != nullptr && *n_topics == 0) {
+    snprintf(_err_msg, ERR_MSG_SIZE,
+             "Error getting subscribe topics: Invalid output buffer size");
+    return -1;
+  }
+  if (*topics != nullptr) {
+    for (int i = 0; i < *n_topics; i++) {
+      (*topics)[i] = '\0';
+    }
+  }
+  *n_topics = sub_topics.size();
+  if (*topics == nullptr) {
+    *topics = static_cast<char *>(malloc(*n_topics * ERR_MSG_SIZE));
+    if (*topics == nullptr) {
+      snprintf(_err_msg, ERR_MSG_SIZE,
+               "Error getting subscribe topics: Unable to allocate output buffer");
+      return -1;
+    }
+  }
+  for (size_t i = 0; i < sub_topics.size(); i++) {
+    const int written =
+        snprintf(&((*topics)[i * ERR_MSG_SIZE]), ERR_MSG_SIZE, "%s",
+                 sub_topics[i].c_str());
+    if (written < 0 || static_cast<size_t>(written) >= ERR_MSG_SIZE) {
+      (*topics)[i * ERR_MSG_SIZE] = '\0';
+      snprintf(_err_msg, ERR_MSG_SIZE,
+               "Error getting subscribe topics: Output buffer too small");
+      return -1;
+    }
+  }
+  return sub_topics.size();
+}
+
+char *agent_topics(agent_t agent, int tab) {
+  Agent *ag = reinterpret_cast<Agent *>(agent);
+  json j = {
+      {"subscribe", ag->sub_topic()},
+      {"publish", ag->pub_topic()}
+  };
+  static thread_local string s;
+  s = j.dump(tab);
+  return const_cast<char *>(s.c_str());
 }
 
 int agent_publish(agent_t agent, const char *message, const char *topic) {
@@ -411,7 +473,7 @@ message_type_t agent_receive(agent_t agent, bool dont_block) {
 void agent_last_message(agent_t agent, char **topic, char **message) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
   tuple<string, string> last_msg = ag->last_message();
-  static string t, m;
+  static thread_local string t, m;
   t = get<0>(last_msg);
   m = get<1>(last_msg);
   *topic = const_cast<char *>(t.c_str());

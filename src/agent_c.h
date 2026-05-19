@@ -345,6 +345,29 @@ MADS_EXPORT void agent_set_pub_topic(agent_t agent, const char *topic);
 MADS_EXPORT void agent_set_sub_topics(agent_t agent, const char **topics, int n_topics);
 
 /**
+ * @brief Return publishing topic for the agent.
+ * 
+ * @param agent 
+ * @return MADS_EXPORT const* 
+ */
+MADS_EXPORT const char *agent_pub_topic(agent_t agent);
+
+/**
+ * @brief Return subscription topics for the agent.
+ * 
+ * The `topics` output parameter receives an array of null-terminated strings containing the subscription topics. Pass the address of a char* initialized to NULL to have the function allocate the array with malloc(); the caller owns it and must release it with free(). The `n_topics` output parameter receives the number of topics in the array.
+ * 
+ * @param agent 
+ * @param topics 
+ * @param n_topics 
+ * @return MADS_EXPORT 
+ */
+MADS_EXPORT size_t agent_sub_topics(agent_t agent, char **topics, int *n_topics);
+
+
+MADS_EXPORT char *agent_topics(agent_t agent, int tab);
+
+/**
  * @brief Returns the current settings timeout.
  *
  * @param agent Agent handle.
