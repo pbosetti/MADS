@@ -46,15 +46,6 @@ try:
 except OSError as e:
     raise OSError(f"Failed to load MADS library from {MADS_LIB_PATH}: {e}\n")
 
-if system == "Windows":
-    libc = ctypes.CDLL("msvcrt.dll")
-elif system == "Darwin":
-    libc = ctypes.CDLL("libc.dylib")
-else:
-    libc = ctypes.CDLL(None)
-libc.free.argtypes = [c_void_p]
-libc.free.restype = None
-
 _TOPIC_BUFFER_SIZE = 256
 
 # Define enums
@@ -79,6 +70,9 @@ lib.mads_version.restype = c_char_p
 
 lib.mads_default_settings_uri.argtypes = []
 lib.mads_default_settings_uri.restype = c_char_p
+
+lib.mads_free.argtypes = [c_void_p]
+lib.mads_free.restype = None
 
 # Agent lifecycle functions
 lib.agent_create.argtypes = [c_char_p, c_char_p]
@@ -343,7 +337,7 @@ class Agent:
         finally:
             topics_ptr = ctypes.cast(topics, c_void_p)
             if topics_ptr.value:
-                libc.free(topics_ptr)
+                lib.mads_free(topics_ptr)
 
     def topics(self) -> str:
         """Get all topics as a JSON string."""
@@ -409,7 +403,7 @@ class Agent:
         finally:
             url_ptr = ctypes.cast(url, c_void_p)
             if url_ptr.value:
-                libc.free(url_ptr)
+                lib.mads_free(url_ptr)
 
     @staticmethod
     def _last_error() -> str:

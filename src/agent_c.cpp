@@ -28,6 +28,8 @@ const char *mads_default_settings_uri() {
   return s.c_str();
 }
 
+void mads_free(void *ptr) { free(ptr); }
+
 static char _err_msg[ERR_MSG_SIZE];
 
 agent_t agent_create(const char *name, const char *settings_uri) {

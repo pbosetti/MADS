@@ -51,6 +51,16 @@ MADS_EXPORT const char *mads_version();
  */
 MADS_EXPORT const char *mads_default_settings_uri();
 
+/**
+ * @brief Releases memory allocated by the MADS C API.
+ *
+ * Use this for buffers returned by functions that allocate output memory.
+ * This keeps allocation and deallocation inside the same runtime on Windows.
+ *
+ * @param ptr Pointer returned by a MADS C API allocation, or NULL.
+ */
+MADS_EXPORT void mads_free(void *ptr);
+
 /*
    ____ _
   / ___| | __ _ ___ ___
@@ -355,7 +365,7 @@ MADS_EXPORT const char *agent_pub_topic(agent_t agent);
 /**
  * @brief Return subscription topics for the agent.
  * 
- * The `topics` output parameter receives an array of null-terminated strings containing the subscription topics. Pass the address of a char* initialized to NULL to have the function allocate the array with malloc(); the caller owns it and must release it with free(). The `n_topics` output parameter receives the number of topics in the array.
+ * The `topics` output parameter receives an array of null-terminated strings containing the subscription topics. Pass the address of a char* initialized to NULL to have the function allocate the array with malloc(); the caller owns it and must release it with mads_free(). The `n_topics` output parameter receives the number of topics in the array.
  * 
  * @param agent 
  * @param topics 
@@ -385,7 +395,7 @@ MADS_EXPORT int agent_settings_timeout(agent_t agent);
  * @param url Pointer to the output buffer receiving the null-terminated
  * settings URI. Pass the address of a char* initialized to NULL to have the
  * function allocate a buffer with malloc(); the caller owns it and must
- * release it with free().
+ * release it with mads_free().
  * @param url_size Size of the provided output buffer in bytes. Ignored when
  * the function allocates the buffer.
  * @return `0` on success, `-1` on error.

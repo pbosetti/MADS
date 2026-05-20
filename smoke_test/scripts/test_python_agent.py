@@ -51,6 +51,16 @@ def main():
         return 1
     print(f"OK: Agent ID: {agent_id}")
 
+    # Subscription topic round-trip. On Windows this exercises the ctypes
+    # deallocator path for buffers allocated by MadsCore.dll.
+    expected_topics = ["smoke_python", "feedback"]
+    agent.set_sub_topics(expected_topics)
+    topics = agent.sub_topics()
+    if topics != expected_topics:
+        print(f"FAIL: Subscription topic mismatch: expected {expected_topics}, got {topics}")
+        return 1
+    print(f"OK: Subscription topics: {topics}")
+
     # Settings timeout
     agent.set_settings_timeout(5000)
     timeout = agent.settings_timeout()
