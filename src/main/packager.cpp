@@ -388,41 +388,80 @@ static fs::path make_temp_directory(const string &package_name) {
   throw runtime_error("Could not create temporary install directory");
 }
 
-static void download_file(const string &url, const fs::path &output_path,
-                          const fs::path &status_path) {
-#ifdef _WIN32
-  string curl = "curl.exe";
-#else
-  string curl = "curl";
-#endif
-  string command = curl + " -L -sS -o " + shell_quote(output_path.string()) +
-                   " -w " + shell_quote("%{http_code}") + " " +
-                   shell_quote(url) + " > " + shell_quote(status_path.string());
-
-  bool command_ok = run_command(command);
-
-  ifstream status_file(status_path);
-  string status_code;
-  if (status_file)
-    getline(status_file, status_code);
-  status_code = trim_copy(status_code);
-
+static void check_download_status(const string &status_code, bool command_ok) {
   if (status_code == "403") {
     GitHubTrafficLimited = true;
     throw runtime_error("HTTP 403 forbidden while downloading package asset");
   }
-
   if (status_code.size() >= 3 && status_code[0] == '2')
     return;
-
   if (!status_code.empty())
-    throw runtime_error("HTTP " + status_code +
-                        " while downloading package asset");
-
+    throw runtime_error("HTTP " + status_code + " while downloading package asset");
   if (!command_ok)
     throw runtime_error("curl failed while downloading package asset");
-
   throw runtime_error("Could not determine package asset download status");
+}
+
+static bool curl_available() {
+#ifdef _WIN32
+  return run_command("where curl.exe >nul 2>&1");
+#else
+  return run_command("which curl >/dev/null 2>&1");
+#endif
+}
+
+static void download_file_native(const string &url, const fs::path &output_path,
+                                 const fs::path &status_path) {
+  string hostname, path;
+  if (!parse_https_url(url, hostname, path))
+    throw runtime_error("Unsupported URL for native download: " + url);
+
+  HttpsClient client;
+  client.set_hostname(hostname);
+  client.set_path(path);
+  client.set_user_agent("MADS-Packager/" LIB_VERSION);
+  HttpsClient::Response resp = client.get();
+
+  {
+    ofstream sf(status_path);
+    if (sf) sf << resp.status_code;
+  }
+
+  if (resp.status_code >= 200 && resp.status_code < 300) {
+    ofstream of(output_path, ios::binary);
+    if (!of)
+      throw runtime_error("Cannot write to " + output_path.string());
+    of.write(resp.body.data(), static_cast<streamsize>(resp.body.size()));
+  }
+}
+
+static void download_file(const string &url, const fs::path &output_path,
+                          const fs::path &status_path) {
+  if (curl_available()) {
+#ifdef _WIN32
+    string curl = "curl.exe";
+#else
+    string curl = "curl";
+#endif
+    string command = curl + " -L -sS -o " + shell_quote(output_path.string()) +
+                     " -w " + shell_quote("%{http_code}") + " " +
+                     shell_quote(url) + " > " + shell_quote(status_path.string());
+    bool command_ok = run_command(command);
+    ifstream status_file(status_path);
+    string status_code;
+    if (status_file)
+      getline(status_file, status_code);
+    check_download_status(trim_copy(status_code), command_ok);
+    return;
+  }
+
+  // curl not available: use native HttpsClient
+  download_file_native(url, output_path, status_path);
+  ifstream status_file(status_path);
+  string status_code;
+  if (status_file)
+    getline(status_file, status_code);
+  check_download_status(trim_copy(status_code), true);
 }
 
 static void extract_zip_file(const fs::path &zip_path, const fs::path &prefix,
@@ -1070,13 +1109,13 @@ int main(int argc, char **argv) {
   Options options(argv[0]);
   // clang-format off
   options.add_options()
-    ("list", "List available packages")
-    ("info", "Print information on a package installation", value<string>())
-    ("install", "Install a package by name", value<string>())
-    ("force", "Force overwrite of existing files")
+    ("l,list", "List available packages")
+    ("n,info", "Print information on a package installation", value<string>())
+    ("i,install", "Install a package by name", value<string>())
+    ("f,force", "Force overwrite of existing files")
     ("no-cache", "Fetch package data without reading cached results")
-    ("help", "Print help")
-    ("version", "Print version");
+    ("h,help", "Print help")
+    ("v,version", "Print version");
   // clang-format on
 
   ParseResult options_parsed;
@@ -1086,6 +1125,19 @@ int main(int argc, char **argv) {
     cerr << fg::red << "Error parsing command line: " << e.what()
          << style::reset << endl;
     std::exit(EXIT_FAILURE);
+  }
+
+  if (options_parsed.count("list") + options_parsed.count("info") +
+      options_parsed.count("install") > 1) {
+    cerr << fg::red << "Error: only one of --list, --info, or --install can be used"
+         << style::reset << endl;
+    return -1;
+  }
+
+  if (options_parsed.arguments().empty()) {
+    cerr << fg::red << "Error: no options provided" << style::reset << endl;
+    cout << options.help() << endl;
+    return -1;
   }
 
   if (options_parsed.count("help")) {
