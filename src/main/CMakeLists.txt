@@ -78,7 +78,7 @@ set_target_properties(${MADS_EXECUTABLE_PREFIX}-make_plugin PROPERTIES OUTPUT_NA
 
 target_link_libraries(mads-fsm PRIVATE Gv2Fsm::Gv2Fsm)
 target_link_libraries(mads-broker PRIVATE panelist::panelist)
-target_link_libraries(mads-packager PRIVATE panelist::panelist)
+target_link_libraries(mads-package PRIVATE panelist::panelist)
 
 if(MADS_MAIN_TARGETS)
   list(REMOVE_DUPLICATES MADS_MAIN_TARGETS)
