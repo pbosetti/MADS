@@ -7,7 +7,7 @@
 #
 include(FetchContent)
 
-set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
+set(FETCHCONTENT_UPDATES_DISCONNECTED OFF)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS 1)
 set(CMAKE_WARN_DEPRECATED OFF)
@@ -166,6 +166,13 @@ FetchContent_Declare(
   gv2fsm
   GIT_REPOSITORY https://github.com/pbosetti/gv2fsm.git
   GIT_TAG v1.2.1
+  GIT_SHALLOW TRUE
+)
+
+FetchContent_Declare(
+  panelist
+  GIT_REPOSITORY https://github.com/pbosetti/panelist.git
+  GIT_TAG v1.0.1
   GIT_SHALLOW TRUE
 )
 
@@ -338,6 +345,7 @@ add_vendor(nlohmann_json)
 add_vendor(cxxopts)
 add_vendor(rang)
 add_vendor(tomlplusplus)
+add_vendor(panelist)
 # gv2fsm also FetchContent's inja; configure it here first so gv2fsm reuses the
 # existing target instead of reconfiguring inja with a conflicting json setup.
 add_vendor_exclude_from_all(inja)

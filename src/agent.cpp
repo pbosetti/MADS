@@ -843,6 +843,10 @@ void Agent::set_settings_timeout(int to) {
   _settings_timeout = to;
 }
 
+void Agent::set_settings_timeout(std::chrono::milliseconds to) {
+  set_settings_timeout(to.count());
+}
+
 int Agent::receive_timeout() { return _receive_timeout; }
 
 void Agent::set_receive_timeout(int to) {

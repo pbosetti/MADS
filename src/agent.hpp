@@ -593,6 +593,15 @@ public:
    */
   void set_settings_timeout(int to);
 
+  /**
+   * @brief Sets the value of timeout in loading settings from URI. Set to
+   * for no timeout.
+   *
+   * @param to the timeout in milliseconds.
+   * @throws AgentError if already initialized
+   */
+  void set_settings_timeout(std::chrono::milliseconds to);
+
 
   /**
    * @brief Returns the value of timeout in receiving messages.
