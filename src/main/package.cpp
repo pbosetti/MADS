@@ -41,13 +41,14 @@ namespace Mads {
 static const string PACKAGE_LIST_URL =
     "https://raw.githubusercontent.com/MADS-NET/.github/main/profile/packages.json";
 static const string GITHUB_API_HOST = "api.github.com";
-static constexpr int CACHE_SCHEMA_VERSION = 2;
+static constexpr int CACHE_SCHEMA_VERSION = 3;
 static constexpr chrono::hours CACHE_MAX_AGE(6);
 static bool GitHubTrafficLimited = false;
 
 struct PackageEntry {
   string name;
   string uri;
+  string type;
 };
 
 struct Platform {
@@ -649,7 +650,8 @@ static vector<PackageEntry> read_package_entries(const json &package_list) {
     if (package_uri.empty())
       throw runtime_error("Package entry " + it.key() + " has no URI");
 
-    entries.push_back({it.key(), package_uri});
+    entries.push_back(
+        {it.key(), package_uri, json_string_value(it.value(), "type")});
   }
 
   return entries;
@@ -710,6 +712,7 @@ static json fetch_package_result(const PackageEntry &entry) {
   json package;
   package["name"] = entry.name;
   package["uri"] = entry.uri;
+  package["type"] = entry.type;
 
   string owner;
   string repo;
@@ -826,6 +829,9 @@ static void print_package_result(const json &package, const Platform &platform,
   cout << fg::cyan << style::bold << left << setw(name_width)
        << json_string_value(package, "name") << style::reset << fg::reset
        << "  " << json_string_value(package, "uri") << endl;
+  string package_type = json_string_value(package, "type");
+  if (!package_type.empty())
+    cout << "  type: " << package_type << endl;
 
   string error = json_string_value(package, "error");
   if (!error.empty()) {
@@ -1010,8 +1016,11 @@ static void print_package_info_data(const json &data) {
 
   cout << fg::cyan << style::bold << json_string_value(package, "name")
        << style::reset << fg::reset << "  "
-       << json_string_value(package, "uri") << endl
-       << endl;
+       << json_string_value(package, "uri") << endl;
+  string package_type = json_string_value(package, "type");
+  if (!package_type.empty())
+    cout << "Type: " << package_type << endl;
+  cout << endl;
 
   print_about_section(data);
 
@@ -1032,7 +1041,7 @@ static void print_package_info_data(const json &data) {
       requirement_values(mads_package, platform, {"commands", "command"});
 
   print_bulleted_section("Notes", notes, "No notes available");
-  print_bulleted_section("Commands", commands, "No commands available");
+  print_bulleted_section("Suggested setup commands", commands, "No setup commands needed");
   cout << right;
 }
 
