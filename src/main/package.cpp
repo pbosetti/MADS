@@ -388,6 +388,50 @@ static fs::path make_temp_directory(const string &package_name) {
   throw runtime_error("Could not create temporary install directory");
 }
 
+static void ensure_install_prefix_writable(const fs::path &prefix) {
+  error_code ec;
+  if (!fs::exists(prefix, ec) || ec) {
+    throw runtime_error("Cannot install package: MADS prefix does not exist: " +
+                        prefix.string());
+  }
+
+  if (!fs::is_directory(prefix, ec) || ec) {
+    throw runtime_error("Cannot install package: MADS prefix is not a "
+                        "directory: " +
+                        prefix.string());
+  }
+
+  string probe_name =
+      ".mads-package-write-test-" +
+      to_string(chrono::steady_clock::now().time_since_epoch().count());
+  fs::path probe_path = prefix / probe_name;
+  {
+    ofstream probe(probe_path, ios::binary);
+    if (!probe) {
+      throw runtime_error("Cannot install package: MADS prefix is not writable "
+                          "by the current user: " +
+                          prefix.string() +
+                          ". Re-run with appropriate permissions or install "
+                          "MADS in a user-writable prefix.");
+    }
+
+    probe << "test";
+    if (!probe) {
+      fs::remove(probe_path, ec);
+      throw runtime_error("Cannot install package: failed to write inside "
+                          "MADS prefix: " +
+                          prefix.string());
+    }
+  }
+
+  fs::remove(probe_path, ec);
+  if (ec) {
+    throw runtime_error("Cannot install package: MADS prefix is writable, but "
+                        "temporary permission probe could not be removed: " +
+                        probe_path.string() + " (" + ec.message() + ")");
+  }
+}
+
 static void check_download_status(const string &status_code, bool command_ok) {
   if (status_code == "403") {
     GitHubTrafficLimited = true;
@@ -1070,6 +1114,9 @@ bool install_package(const string &package_name, bool force, bool no_cache) {
     if (download_url.empty())
       throw runtime_error("Selected ZIP asset has no download URL");
 
+    fs::path prefix = fs::path(Mads::prefix());
+    ensure_install_prefix_writable(prefix);
+
     temp_dir = make_temp_directory(package_name);
     fs::path asset_filename = fs::path(asset_name).filename();
     if (asset_filename.empty())
@@ -1082,7 +1129,6 @@ bool install_package(const string &package_name, bool force, bool no_cache) {
     cout << "  Downloading " << fg::green << asset_name << fg::reset << endl;
     download_file(download_url, zip_path, status_path);
 
-    fs::path prefix = fs::path(Mads::prefix());
     cout << "  Extracting to " << style::bold << prefix.string()
          << style::reset << endl;
     extract_zip_file(zip_path, prefix, force);
