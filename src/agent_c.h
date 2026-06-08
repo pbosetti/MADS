@@ -372,7 +372,7 @@ MADS_EXPORT const char *agent_pub_topic(agent_t agent);
  * @param n_topics 
  * @return MADS_EXPORT 
  */
-MADS_EXPORT size_t agent_sub_topics(agent_t agent, char **topics, int *n_topics);
+MADS_EXPORT int agent_sub_topics(agent_t agent, char **topics, size_t *n_topics);
 
 
 MADS_EXPORT char *agent_topics(agent_t agent, int tab);

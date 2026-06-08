@@ -144,9 +144,9 @@ lib.agent_pub_topic.argtypes = [c_void_p]
 lib.agent_pub_topic.restype = c_char_p
 
 lib.agent_sub_topics.argtypes = [
-    c_void_p, ctypes.POINTER(c_char_p), ctypes.POINTER(c_int)
+    c_void_p, ctypes.POINTER(c_char_p), ctypes.POINTER(c_size_t)
 ]
-lib.agent_sub_topics.restype = c_size_t
+lib.agent_sub_topics.restype = c_int
 
 lib.agent_topics.argtypes = [c_void_p, c_int]
 lib.agent_topics.restype = c_char_p

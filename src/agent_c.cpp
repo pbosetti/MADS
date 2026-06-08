@@ -376,7 +376,7 @@ const char *agent_pub_topic(agent_t agent) {
   return topic.c_str();
 }
 
-size_t agent_sub_topics(agent_t agent, char **topics, int *n_topics) {
+int agent_sub_topics(agent_t agent, char **topics, size_t *n_topics) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
   vector<string> sub_topics = ag->sub_topic();
   if (topics == nullptr || n_topics == nullptr) {
@@ -390,7 +390,7 @@ size_t agent_sub_topics(agent_t agent, char **topics, int *n_topics) {
     return -1;
   }
   if (*topics != nullptr) {
-    for (int i = 0; i < *n_topics; i++) {
+    for (size_t i = 0; i < *n_topics; i++) {
       (*topics)[i] = '\0';
     }
   }
@@ -414,7 +414,8 @@ size_t agent_sub_topics(agent_t agent, char **topics, int *n_topics) {
       return -1;
     }
   }
-  return sub_topics.size();
+  return static_cast<int>(sub_topics.size());
+
 }
 
 char *agent_topics(agent_t agent, int tab) {
