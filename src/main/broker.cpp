@@ -43,7 +43,6 @@ Author(s): Paolo Bosetti
 #include <zmqpp/proxy.hpp>
 #include <zmqpp/proxy_steerable.hpp>
 #include <zmqpp/zmqpp.hpp>
-#include <panelist/panelist.hpp>
 #ifdef _WIN32
 #include <iphlpapi.h>
 #include <signal.h>
@@ -169,19 +168,17 @@ map<string, string> settings_urls(string const &base_url) {
   return urls;
 }
 
-void print_instructions(Panelist::Panelist &panel) {
-  
-  cout << panel[0] << fg::green
-       << "Type P to pause, R to resume, I for information, "
-       << style::bold << "Q to clean quit\n" << style::reset << fg::green
+void print_instructions() {
+  cout << style::italic << "CTRL-C to immediate exit" << style::reset << endl;
+
+  cout << fg::green
+       << "Type P to pause, R to resume, I for information, Q to clean quit\n"
        << "N to show next IP address"
-  #ifndef _WIN32
+#ifndef _WIN32
        << ", X to restart and reload settings"
-  #endif
-       << fg::reset << endl;
-  cout << fg::yellow << style::italic 
-       << "CTRL-C to immediate exit (might leave terminal dirty!)"
-       << style::reset << fg::reset << endl;
+#endif
+       << fg::reset << endl
+       << endl;
 }
 
 string timestamp() {
@@ -240,10 +237,6 @@ int main(int argc, char **argv) {
   string key_name;
   bool crypto = false;
   bool daemon = false;
-  bool no_panels = false;
-  Panelist::Panelist panel(cout);
-  panel.set_separator("_");
-
   vector<string> desc{"FRONTEND msg in   ", "FRONTEND bytes in ",
                       "FRONTEND msg out  ", "FRONTEND bytes out",
                       "BACKEND msg in    ", "BACKEND bytes in  ",
@@ -309,6 +302,9 @@ int main(int argc, char **argv) {
   filesystem::path executable(argv[0]);
   string name = executable.stem().string();
   name = name.substr(name.find_last_of("-") + 1);
+  cout << style::italic << "Reading settings from " << style::bold
+       << settings_path << " [" << name << "]" << style::reset << endl;
+
   // Configurations
   toml::table config;
 
@@ -316,35 +312,21 @@ int main(int argc, char **argv) {
     config = toml::parse_file(settings_path);
     static_cast<void>(config);
   } catch (const toml::parse_error &err) {
-    cerr << fg::red << "Cannot open settings file " << settings_path << ", "
+    cout << fg::red << "Cannot open settings file " << settings_path << ", "
          << err << style::reset << endl;
     std::exit(EXIT_FAILURE);
   }
-
-  if (options_parsed.count("crypto") != 0) {
-    panel.add_panel(16);
-  } else {
-    panel.add_panel(12);
-  }
-  panel.add_panel();
-  panel.layout();
-  no_panels = config[name]["no_panels"].value_or(false);
-  if (daemon || no_panels) panel.disable();
-  cout << panel[0] << fg::green << style::bold << "This is MADS broker " 
-       << LIB_VERSION << fg::reset << style::reset << endl
-       << style::italic << "Reading settings from " << style::bold
-       << settings_path << " [" << name << "]" << style::reset << endl;
 
   if (options_parsed.count("crypto") != 0) {
     key_name = options_parsed["crypto"].as<string>();
     if (options_parsed.count("keys_dir") != 0) {
       keys_dir = filesystem::path(options_parsed["keys_dir"].as<string>());
     }
-    cout << panel[0] << fg::cyan << "Enabling CURVE encryption for broker sockets" << endl
+    cout << fg::cyan << "Enabling CURVE encryption for broker sockets" << endl
          << "  Searching for keys in " << style::bold << keys_dir.string()
          << style::reset << endl
          << fg::cyan << "  Broker key name: " << style::bold << key_name
-         << "[.key|.pub]" << fg::reset << style::reset << endl;
+         << "[.key|.pub]" << fg::reset << endl;
     crypto = true;
     service_info.encrypted = true;
   }
@@ -374,7 +356,6 @@ int main(int argc, char **argv) {
   if (crypto) {
     auto whitelist = config[name]["ip_whitelist"].as_array();
     bool verbose = config[name]["auth_verbose"].value_or(false);
-    if (verbose) cout << "  ";
     curve_auth_ptr = make_unique<Mads::CurveAuth>(context);
     if (whitelist) {
       whitelist->for_each([&](const toml::node &n) {
@@ -388,7 +369,7 @@ int main(int argc, char **argv) {
     try {
       curve_auth_ptr->fetch_public_keys(keys_dir);
     } catch (const runtime_error &e) {
-      cout << fg::red << "Error setting up CURVE authentication: " << e.what()
+      cerr << fg::red << "Error setting up CURVE authentication: " << e.what()
            << fg::reset << endl;
       curve_auth_ptr = nullptr;
       frontend.close();
@@ -400,7 +381,7 @@ int main(int argc, char **argv) {
       curve_auth_ptr->setup_curve_server(frontend, key_name);
       curve_auth_ptr->setup_curve_server(backend, key_name);
     } catch (const runtime_error &e) {
-      cout << fg::red << e.what() << fg::reset << endl;
+      cerr << fg::red << e.what() << fg::reset << endl;
       curve_auth_ptr = nullptr;
       frontend.close();
       backend.close();
@@ -410,11 +391,11 @@ int main(int argc, char **argv) {
   }
 
   try {
-    cout << panel[0] << "Binding broker frontend (XSUB) at " << style::bold
-         << frontend_address << style::reset << endl;
+    std::cout << "Binding broker frontend (XSUB) at " << style::bold
+              << frontend_address << style::reset << endl;
     frontend.bind(frontend_address);
-    cout << "Binding broker backend (XPUB) at " << style::bold
-         << backend_address << style::reset << endl;
+    std::cout << "Binding broker backend (XPUB) at " << style::bold
+              << backend_address << style::reset << endl;
     backend.bind(backend_address);
   } catch (const zmqpp::zmq_internal_exception &e) {
     cerr << fg::red << "ZMQ error, could not connect: " << e.what() << fg::reset
@@ -439,7 +420,7 @@ int main(int argc, char **argv) {
       content << LIB_VERSION;
       if (settings.receive(msg)) {
         if (msg.parts() < 2) {
-          cout << panel[1] << fg::red << timestamp()
+          cerr << goback(1, !daemon) << fg::red << timestamp()
                << "Received malformed message from agent, "
                << "expected at least 2 parts" << fg::reset << endl;
           continue;
@@ -452,12 +433,12 @@ int main(int argc, char **argv) {
         }
         if (cmd == "settings") {
           if (!Mads::check_version(agent_version)) {
-            cout << panel[1] << fg::red << timestamp()
+            cerr << goback(1, !daemon) << fg::red << timestamp()
                  << "Received settings request from agent with wrong version: "
                  << agent_version << " (vs. " << LIB_VERSION << ")" << fg::reset
                  << endl;
           } else {
-            cout << panel[1] << timestamp()
+            cout << goback(1, !daemon) << timestamp()
                  << "Sending settings to agent " << agent_name << " ("
                  << agent_version << ")" << endl;
             {
@@ -471,14 +452,14 @@ int main(int argc, char **argv) {
                 attachment_path = Mads::exec_dir(attachment_path);
               }
               if (!filesystem::exists(attachment_path)) {
-                cout << panel[1] << fg::red << timestamp()
+                cerr << goback(1, !daemon) << fg::red << timestamp()
                      << "Attachment path does not exist: " << attachment_path
                      << fg::reset << endl;
               } else {
                 ifstream attachment_file(attachment_path,
                                          ios::in | ios::binary);
                 stringstream attachment_content;
-                cout << panel[1] << fg::yellow << timestamp()
+                cout << goback(1, !daemon) << fg::yellow << timestamp()
                      << "  Attaching binary object: " << style::bold
                      << attachment_path << " ("
                      << filesystem::file_size(attachment_path) << " bytes)"
@@ -493,7 +474,7 @@ int main(int argc, char **argv) {
           chrono::system_clock::time_point now = chrono::system_clock::now();
           settings.send(to_string(Mads::timecode(now, timecode_fps)));
         } else {
-          cout << panel[1] << fg::yellow << timestamp()
+          cerr << goback(1, !daemon) << fg::yellow << timestamp()
                << "Got unexpected command " << cmd << fg::reset << endl;
           settings.send(content);
         }
@@ -505,36 +486,35 @@ int main(int argc, char **argv) {
   cout << "Timecode FPS: " << style::bold << timecode_fps << style::reset
        << endl;
 
-  // print settings URI for clients
-  string port = settings_address.substr(settings_address.find_last_of(":") + 1);
-  cout << panel[0] << "Settings are provided on " << style::bold
-       << "tcp://127.0.0.1:" << port << style::reset << style::italic
-       << " (loopback)" << style::reset << endl;
-
   try {
     discovery_service.start_advertising(
         service_info, std::chrono::milliseconds(
                           config[name]["discovery_interval_ms"].value_or(1000)));
-    cout << panel[0] << "Advertising service on UDP discovery port " << MADS_SERVICE_PORT
+    cout << "Advertising service on UDP discovery port " << MADS_SERVICE_PORT
          << " with room name '" << style::bold << service_info.room
          << style::reset << "'" << endl;
-    if (service_info.prefer_loopback_for_local_services) {
-      cout << panel[0] << style::italic << "            (preferring loopback for local agents)"
-           << style::reset;
-    }
-    cout << endl;
+    // if (service_info.prefer_loopback_for_local_services) {
+    //   cout << style::italic << "            (preferring loopback for local agents)"
+    //        << style::reset;
+    // }
+    // cout << endl;
   } catch (const runtime_error &e) {
-    cout << panel[0] << fg::red << "Error starting service discovery: " 
-         << e.what() << endl
+    cerr << fg::red << "Error starting service discovery: " << e.what() << endl
          << style::bold << "Service discovery will be disabled"  << style::reset
          << fg::reset << endl;
   }
+
+  // print settings URI for clients
+  string port = settings_address.substr(settings_address.find_last_of(":") + 1);
+  cout << "Settings are provided on " << style::bold
+       << "tcp://127.0.0.1:" << port << style::reset << style::italic
+       << " (loopback)" << style::reset << endl;
 
   thread([&]() {
     Mads::Watcher watcher(settings_path, 1s);
     string ini_tmp = "";
     watcher.watch([&](const std::string &file_name) {
-      cout << panel[1] << fg::yellow << timestamp()
+      cout << goback(1, !daemon) << fg::yellow << timestamp()
            << "Reloading settings " << file_name << "... ";
       ini_tmp = read_settings_file(settings_path);
       try {
@@ -545,7 +525,7 @@ int main(int argc, char **argv) {
         }
         cout << " done." << fg::reset << endl;
       } catch (const exception &e) {
-        cout << endl
+        cerr << endl
              << fg::red << timestamp() << " INI file read error: " << e.what()
              << " - skipping changes" << fg::reset << endl;
       }
@@ -581,7 +561,7 @@ int main(int argc, char **argv) {
     auto current_url = settings_url_list.begin();
 
     thread(proxy, ref(frontend), ref(backend), ref(controlled)).detach();
-    print_instructions(panel);
+    print_instructions();
 
     while (running) {
       zmqpp::message msg;
@@ -608,13 +588,13 @@ int main(int argc, char **argv) {
         // have inverted meanings
         controller.send("RESUME");
         controller.receive(msg);
-        cout << panel[1] << "Resuming operation" << endl;
+        cout << "Resuming operation" << endl;
         break;
       case 'p':
       case 'P':
         controller.send("PAUSE");
         controller.receive(msg);
-        cout << panel[1] << "Pausing operation" << endl;
+        cout << "Pausing operation" << endl;
         break;
       case 'i':
       case 'I': {
@@ -624,7 +604,7 @@ int main(int argc, char **argv) {
         for (size_t i = 0; i < msg.parts(); i++) {
           stats.push_back(msg.get<uint64_t>(i));
         }
-        cout << panel[1] << setw(13) << " " << style::bold << setw(13) << "FRONTEND"
+        cout << setw(13) << " " << style::bold << setw(13) << "FRONTEND"
              << setw(13) << "BACKEND" << style::reset << endl;
         cout << fg::green << setw(13) << "Messages in:" << setw(13)
              << htonll(stats[0]) << setw(13) << htonll(stats[4]) << fg::reset
@@ -642,14 +622,13 @@ int main(int argc, char **argv) {
       }
       case 'n':
       case 'N': {
-        cout << panel[0][5] << "Settings are provided on " << style::bold
+        cout << goback(5) << "Settings are provided on " << style::bold
              << current_url->second << style::reset << style::italic << " ("
-             << current_url->first << ")" << style::reset;
-        if (no_panels) cout << endl;
+             << current_url->first << ")" << style::reset << endl;
         if (++current_url == settings_url_list.end()) {
           current_url = settings_url_list.begin();
         }
-        // print_instructions(panel);
+        print_instructions();
         break;
       }
       default:
@@ -658,7 +637,6 @@ int main(int argc, char **argv) {
     }
 
     discovery_service.stop_advertising();
-    panel.reset();
     cout << fg::green << "Closing sockets..." << fg::reset << endl;
     running = false;
     settings_thread.join();

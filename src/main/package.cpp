@@ -25,7 +25,6 @@
 #include <iostream>
 #include <map>
 #include <nlohmann/json.hpp>
-#include <panelist/panelist.hpp>
 #include <rang.hpp>
 #include <string>
 #include <vector>

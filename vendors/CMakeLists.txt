@@ -169,13 +169,6 @@ FetchContent_Declare(
   GIT_SHALLOW TRUE
 )
 
-FetchContent_Declare(
-  panelist
-  GIT_REPOSITORY https://github.com/pbosetti/panelist.git
-  GIT_TAG v1.0.1
-  GIT_SHALLOW TRUE
-)
-
 if(MADS_ENABLE_MONGOCXX)
   set(_mads_local_mongo_c_driver_src
       "${CMAKE_BINARY_DIR}/_deps/mongo-c-driver-src")
@@ -345,7 +338,6 @@ add_vendor(nlohmann_json)
 add_vendor(cxxopts)
 add_vendor(rang)
 add_vendor(tomlplusplus)
-add_vendor(panelist)
 # gv2fsm also FetchContent's inja; configure it here first so gv2fsm reuses the
 # existing target instead of reconfiguring inja with a conflicting json setup.
 add_vendor_exclude_from_all(inja)
