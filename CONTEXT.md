@@ -59,7 +59,7 @@
 - Typical local build:
   - `cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -GNinja`
   - `cmake --build build -j6`
-- Current top-level CMake enforces **C++20** (`CMAKE_CXX_STANDARD 20`), even though some docs mention C++17.
+- Current top-level CMake sets **C++20** (`CMAKE_CXX_STANDARD 20`); some docs/instructions still mention C++17, so align new code with the active build configuration.
 - Formatting convention is LLVM style (`clang-format` guidance in docs/instructions).
 
 ## Key dependencies and integration points
@@ -87,9 +87,9 @@
 - On Windows, skipping install step can leave required DLLs unavailable at runtime.
 
 ## Useful reference files in this repo
-- `/home/runner/work/MADS/MADS/pbosetti/MADS/README.md`
-- `/home/runner/work/MADS/MADS/pbosetti/MADS/mads.ini`
-- `/home/runner/work/MADS/MADS/pbosetti/MADS/src/agent.hpp`
-- `/home/runner/work/MADS/MADS/pbosetti/MADS/src/main/plugin_loader.cpp`
-- `/home/runner/work/MADS/MADS/pbosetti/MADS/COMPILE.md`
-- `/home/runner/work/MADS/MADS/pbosetti/MADS/.github/copilot-instructions.md`
+- `README.md`
+- `mads.ini`
+- `src/agent.hpp`
+- `src/main/plugin_loader.cpp`
+- `COMPILE.md`
+- `.github/copilot-instructions.md`
