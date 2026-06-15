@@ -63,6 +63,15 @@ class EventType(IntEnum):
     SHUTDOWN = 4
     MESSAGE = 5
 
+class WireFormat(IntEnum):
+    JSON = 0
+    MSGPACK = 1
+
+class Compression(IntEnum):
+    NONE = 0
+    SNAPPY = 1
+    AUTO = 2
+
 # Set function argument and return types
 # Library functions
 lib.mads_version.argtypes = []
@@ -177,6 +186,18 @@ lib.agent_set_high_watermark.restype = c_int
 
 lib.agent_high_watermark.argtypes = [c_void_p]
 lib.agent_high_watermark.restype = c_int
+
+lib.agent_set_wire_format.argtypes = [c_void_p, c_int]
+lib.agent_set_wire_format.restype = c_int
+
+lib.agent_wire_format.argtypes = [c_void_p]
+lib.agent_wire_format.restype = c_int
+
+lib.agent_set_compression.argtypes = [c_void_p, c_int]
+lib.agent_set_compression.restype = c_int
+
+lib.agent_compression.argtypes = [c_void_p]
+lib.agent_compression.restype = c_int
 
 # Messaging functions
 lib.agent_publish.argtypes = [c_void_p, c_char_p, c_char_p]
@@ -417,6 +438,22 @@ class Agent:
     def queue_size(self) -> int:
         """Get the receive queue size"""
         return lib.agent_high_watermark(self._agent)
+
+    def set_wire_format(self, fmt: WireFormat) -> int:
+        """Set the outgoing wire format (WireFormat.JSON or WireFormat.MSGPACK)."""
+        return lib.agent_set_wire_format(self._agent, int(fmt))
+
+    def wire_format(self) -> WireFormat:
+        """Get the outgoing wire format."""
+        return WireFormat(lib.agent_wire_format(self._agent))
+
+    def set_compression(self, comp: Compression) -> int:
+        """Set the outgoing compression policy (Compression.NONE/SNAPPY/AUTO)."""
+        return lib.agent_set_compression(self._agent, int(comp))
+
+    def compression(self) -> Compression:
+        """Get the outgoing compression policy."""
+        return Compression(lib.agent_compression(self._agent))
     
     # Messaging methods
     def publish(self, message: dict, topic: str = "") -> int:

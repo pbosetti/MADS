@@ -18,6 +18,9 @@ These changes summarize what was added or updated since `v2.1.1`.
 ## New features
 
 - **Opt-in MessagePack wire format.** Agents can now publish payloads encoded as MessagePack instead of JSON via `set_wire_format(WireFormat::MsgPack)`. Messages carry a small self-describing frame header (`format`, `compression`, `schema_version`); receivers transparently decode both the new headered frames and the legacy header-less JSON frames, so the choice only affects what an agent publishes. The broker remains payload-opaque and needs no changes.
+- **Configurable from `mads.ini`.** The wire format and compression policy can be selected per agent via the `wire_format` (`"json"` | `"msgpack"`) and `compression` (`"auto"` | `"snappy"` | `"none"`) keys in the agent's settings section, with no code changes.
+- **C and Python bindings** for the new controls: `agent_set_wire_format`/`agent_wire_format` and `agent_set_compression`/`agent_compression` in the C API, and the corresponding `set_wire_format`/`wire_format`/`set_compression`/`compression` methods (plus `WireFormat` and `Compression` enums) in the Python wrapper.
+- **Compression policy.** Added `set_compression(Compression::None|Snappy|Auto)`/`compression()`. `Auto` (the new default) compresses only payloads at or above a size threshold, so small control/status frames are no longer needlessly snappy-framed while large frames keep their previous compression. The chosen codec is recorded in the frame header.
 - **Explicit delivery semantics.** Added `set_delivery(Delivery::Queued|LastKnownValue)` / `delivery()` to control subscriber buffering directly, decoupled from the queue size.
 - **Zero-copy blob access.** Added `last_blob_view()`, returning non-owning views (`string_view`/`span`) into the last received blob to avoid the full copy performed by `last_blob()`.
 - **Dropped-message counter.** Added `dropped_messages()`, exposing how many malformed or undecodable frames have been skipped.

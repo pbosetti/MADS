@@ -47,6 +47,7 @@ Author(s): Paolo Bosetti
 #include <optional>
 #include <span>
 #include <atomic>
+#include <memory>
 #include "curve.hpp"
 #include "exec_path.hpp"
 
@@ -65,6 +66,53 @@ template<typename T> struct SharedLatest {
   std::mutex mtx;
   std::condition_variable cv;
   std::optional<T> value;
+};
+
+/**
+ * @brief A received message payload that lazily holds either its JSON text or
+ * its parsed nlohmann::json form, caching whichever is produced on first use.
+ *
+ * receive() stores whichever representation it already has cheaply — the decoded
+ * object for MsgPack frames, the raw text for JSON frames — and the other form
+ * is produced only if a consumer asks for it. This avoids the
+ * decode -> dump -> re-parse round-trip on the hot receive path.
+ *
+ * Conversions mutate cached state, so callers must serialise access (the Agent
+ * does so under its message-state mutex).
+ */
+class LazyPayload {
+public:
+  LazyPayload() = default;
+  static LazyPayload from_text(std::string text) {
+    LazyPayload p;
+    p._text = std::move(text);
+    return p;
+  }
+  static LazyPayload from_doc(nlohmann::json doc) {
+    LazyPayload p;
+    p._doc = std::move(doc);
+    return p;
+  }
+  /// JSON text form (dumps the cached object once if only the object exists).
+  const std::string &text() const {
+    if (!_text)
+      _text = _doc ? _doc->dump() : std::string();
+    return *_text;
+  }
+  /// Parsed object form (parses the cached text once if only text exists).
+  const nlohmann::json &doc() const {
+    if (!_doc) {
+      if (_text && !_text->empty())
+        _doc = nlohmann::json::parse(*_text);
+      else
+        _doc = nlohmann::json();
+    }
+    return *_doc;
+  }
+
+private:
+  mutable std::optional<std::string> _text;
+  mutable std::optional<nlohmann::json> _doc;
 };
 
 class Agent; // forward declaration
@@ -556,6 +604,19 @@ public:
 
 
   /**
+   * @brief Returns the last received message as a parsed JSON object.
+   *
+   * Fast path for consumers that want a `nlohmann::json` rather than its text:
+   * for MsgPack frames this returns the already-decoded object (no re-dump and
+   * no re-parse); for JSON frames it parses once and caches. Avoids the
+   * round-trip that last_message() + json::parse() would otherwise incur.
+   *
+   * @return A tuple of {topic, parsed payload}. The payload is a copy.
+   */
+  std::tuple<std::string, nlohmann::json> last_json();
+
+
+  /**
    * @brief Returns the topic of the last received message by the agent.
    *
    * @return The topic of the last received message.
@@ -775,6 +836,22 @@ public:
   WireFormat wire_format() const;
 
   /**
+   * @brief Select the payload compression policy for outgoing messages.
+   *
+   * Default is Compression::Auto (compress only frames >=
+   * COMPRESSION_AUTO_THRESHOLD bytes). Compression::Snappy reproduces the
+   * historical always-compress behaviour; Compression::None disables it.
+   *
+   * @param c The compression policy to use.
+   */
+  void set_compression(Compression c);
+
+  /**
+   * @brief The compression policy used for outgoing messages.
+   */
+  Compression compression() const;
+
+  /**
    * @brief Install SIGINT/SIGTERM handlers that request a clean shutdown.
    *
    * Idempotent and process-global: only the first call installs handlers, so
@@ -839,8 +916,10 @@ protected:
   zmqpp::context _context;
   zmqpp::socket _publisher;
   zmqpp::socket _subscriber;
-  std::map<std::string, std::string> _status;
-  std::tuple<std::string, std::string> _last_message;
+  // A single LazyPayload per message is shared between _last_message and
+  // _status so the lazy text/object caches are shared and never duplicated.
+  std::map<std::string, std::shared_ptr<LazyPayload>> _status;
+  std::tuple<std::string, std::shared_ptr<LazyPayload>> _last_message;
   std::tuple<std::string, std::string, std::vector<unsigned char>> _last_blob;
   mutable std::mutex _message_state_mutex;
   bool _cross = false;
@@ -866,6 +945,7 @@ protected:
   std::atomic<bool> _watchdog_stop{false};
   bool _rc_owns_socket = false;
   WireFormat _wire_format = WireFormat::Json;
+  Compression _compression = Compression::Auto;
   std::atomic<size_t> _dropped_messages{0};
   nlohmann::json _settings_json; // cached JSON projection of settings
 public:

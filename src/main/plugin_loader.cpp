@@ -396,7 +396,6 @@ int main(int argc, char *argv[]) {
   json in, out = {}, err;
   return_type rt;
   message_type type;
-  tuple<string, string> msg;
   tuple<string, string, vector<unsigned char>> msg_blob;
   vector<unsigned char> blob{};
   agent.loop([&]() -> chrono::milliseconds {
@@ -421,13 +420,14 @@ int main(int argc, char *argv[]) {
       if (agent.last_topic() == "control") {
         return 0ms; // Control message, already handled
       }
-      msg = agent.last_message();
+      // Object fast path: avoids the agent re-dumping (MsgPack) and a second
+      // parse here. Parsing happens at most once, inside last_json().
       try {
-        in = json::parse(get<1>(msg));
+        in = get<1>(agent.last_json());
       } catch (json::parse_error &e) {
         cerr << fg::red << e.what() << endl
-             <<"Error parsing message content:" << fg::reset 
-             << endl << get<1>(msg) << endl;
+             <<"Error parsing message content:" << fg::reset
+             << endl << get<1>(agent.last_message()) << endl;
         return 0ms;
       }
       rt = plugin->load_data(in, agent.last_topic());
@@ -517,7 +517,6 @@ int main(int argc, char *argv[]) {
   message_type type;
   json in, err;
   return_type rt;
-  tuple<string, string> msg;
   tuple<string, string, vector<unsigned char>> msg_blob;
   agent.loop([&]() -> chrono::milliseconds {
     type = message_type::none;
@@ -536,17 +535,17 @@ int main(int argc, char *argv[]) {
       in = json::parse(get<1>(msg_blob));
       rt = plugin->load_data(in, agent.last_topic(), &get<2>(msg_blob));
     } else {
-      msg = agent.last_message();
       // agent.remote_control();
       if (agent.last_topic() == "control") {
         return 0ms; // Control message, already handled
       }
+      // Object fast path (see filter loop): no re-dump / no double parse.
       try {
-        in = json::parse(get<1>(msg));
+        in = get<1>(agent.last_json());
       } catch (json::parse_error &e) {
         cerr << fg::red << e.what() << endl
-             <<"Error parsing message content:" << fg::reset 
-             << endl << get<1>(msg) << endl;
+             <<"Error parsing message content:" << fg::reset
+             << endl << get<1>(agent.last_message()) << endl;
         return 0ms;
       }
       rt = plugin->load_data(in, agent.last_topic());

@@ -475,6 +475,40 @@ MADS_EXPORT int agent_set_high_watermark(agent_t agent, int n);
  */
 MADS_EXPORT int agent_high_watermark(agent_t agent);
 
+/**
+ * @brief Sets the outgoing wire format.
+ *
+ * @param agent Agent handle.
+ * @param format `0` = JSON (default), `1` = MessagePack.
+ * @return `0` on success, `-1` on error.
+ */
+MADS_EXPORT int agent_set_wire_format(agent_t agent, int format);
+
+/**
+ * @brief Returns the outgoing wire format.
+ *
+ * @param agent Agent handle.
+ * @return `0` = JSON, `1` = MessagePack.
+ */
+MADS_EXPORT int agent_wire_format(agent_t agent);
+
+/**
+ * @brief Sets the outgoing compression policy.
+ *
+ * @param agent Agent handle.
+ * @param compression `0` = None, `1` = Snappy, `2` = Auto (default).
+ * @return `0` on success, `-1` on error.
+ */
+MADS_EXPORT int agent_set_compression(agent_t agent, int compression);
+
+/**
+ * @brief Returns the outgoing compression policy.
+ *
+ * @param agent Agent handle.
+ * @return `0` = None, `1` = Snappy, `2` = Auto.
+ */
+MADS_EXPORT int agent_compression(agent_t agent);
+
 // Messaging
 /**
  * @brief Publishes a JSON message on a topic.

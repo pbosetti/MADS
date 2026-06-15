@@ -355,6 +355,36 @@ int agent_high_watermark(agent_t agent) {
   return ag->high_watermark();
 }
 
+int agent_set_wire_format(agent_t agent, int format) {
+  Agent *ag = reinterpret_cast<Agent *>(agent);
+  if (format != 0 && format != 1) {
+    snprintf(_err_msg, ERR_MSG_SIZE, "Invalid wire format: %d", format);
+    return -1;
+  }
+  ag->set_wire_format(static_cast<WireFormat>(format));
+  return 0;
+}
+
+int agent_wire_format(agent_t agent) {
+  Agent *ag = reinterpret_cast<Agent *>(agent);
+  return static_cast<int>(ag->wire_format());
+}
+
+int agent_set_compression(agent_t agent, int compression) {
+  Agent *ag = reinterpret_cast<Agent *>(agent);
+  if (compression < 0 || compression > 2) {
+    snprintf(_err_msg, ERR_MSG_SIZE, "Invalid compression: %d", compression);
+    return -1;
+  }
+  ag->set_compression(static_cast<Compression>(compression));
+  return 0;
+}
+
+int agent_compression(agent_t agent) {
+  Agent *ag = reinterpret_cast<Agent *>(agent);
+  return static_cast<int>(ag->compression());
+}
+
 void agent_set_pub_topic(agent_t agent, const char *topic) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
   ag->set_pub_topic(string(topic));

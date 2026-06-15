@@ -20,7 +20,13 @@ Author(s): Paolo Bosetti
 #include "agent.hpp"
 #include <bsoncxx/exception/exception.hpp>
 #include <bsoncxx/json.hpp>
+#include <bsoncxx/builder/basic/document.hpp>
+#include <bsoncxx/builder/basic/array.hpp>
+#include <bsoncxx/types.hpp>
 #include <iostream>
+#include <chrono>
+#include <cctype>
+#include <cstdint>
 #include <mongocxx/client.hpp>
 #include <mongocxx/exception/bulk_write_exception.hpp>
 #include <mongocxx/instance.hpp>
@@ -32,6 +38,140 @@ using bsoncxx::builder::basic::make_document;
 using bsoncxx::types::b_date;
 
 namespace Mads {
+
+// ---------------------------------------------------------------------------
+// nlohmann::json -> bsoncxx conversion (extended-JSON aware for "$date").
+//
+// Builds BSON directly from a parsed nlohmann::json DOM, avoiding the
+// DOM -> text (dump) -> bsoncxx::from_json (re-parse) round-trip that the
+// MsgPack logging path would otherwise incur. Output is byte-identical to
+// bsoncxx::from_json() for the JSON shapes MADS produces (verified by a parity
+// test against from_json, including $date in Z / +hh:mm / +hhmm forms).
+// ---------------------------------------------------------------------------
+namespace detail {
+using bsoncxx::builder::basic::sub_array;
+using bsoncxx::builder::basic::sub_document;
+
+// Parse "YYYY-MM-DDThh:mm:ss[.fff][Z|±hh[:]mm]" to ms since the Unix epoch (UTC).
+inline bool parse_iso8601_ms(const std::string &s, int64_t &out) {
+  int Y, Mo, D, h, mi, se;
+  if (std::sscanf(s.c_str(), "%d-%d-%dT%d:%d:%d", &Y, &Mo, &D, &h, &mi, &se) != 6)
+    return false;
+  int ms = 0;
+  if (auto dot = s.find('.'); dot != std::string::npos) {
+    std::string f;
+    for (size_t i = dot + 1;
+         i < s.size() && std::isdigit((unsigned char)s[i]) && f.size() < 3; ++i)
+      f += s[i];
+    while (f.size() < 3) f += '0';
+    ms = std::stoi(f);
+  }
+  int tz = 0; // minutes east of UTC
+  auto tpos = s.find('T');
+  std::string tail = (tpos == std::string::npos) ? s : s.substr(tpos + 1);
+  if (tail.find('Z') == std::string::npos) {
+    auto p = tail.find_last_of("+-");
+    if (p != std::string::npos) {
+      int sign = tail[p] == '-' ? -1 : 1;
+      std::string off = tail.substr(p + 1);
+      int oh = 0, om = 0;
+      if (off.find(':') != std::string::npos)
+        std::sscanf(off.c_str(), "%d:%d", &oh, &om);
+      else if (off.size() >= 4) { oh = std::stoi(off.substr(0, 2)); om = std::stoi(off.substr(2, 2)); }
+      else if (!off.empty()) oh = std::stoi(off);
+      tz = sign * (oh * 60 + om);
+    }
+  }
+  using namespace std::chrono;
+  sys_days days = year{Y} / Mo / D;
+  auto tp = days + hours{h} + minutes{mi} + seconds{se} + milliseconds{ms} -
+            minutes{tz};
+  out = duration_cast<milliseconds>(tp.time_since_epoch()).count();
+  return true;
+}
+
+inline bool date_millis(const nlohmann::json &v, int64_t &out) {
+  if (v.is_string()) return parse_iso8601_ms(v.get<std::string>(), out);
+  if (v.is_number_integer() || v.is_number_unsigned()) { out = v.get<int64_t>(); return true; }
+  if (v.is_object()) {
+    auto it = v.find("$numberLong");
+    if (it != v.end() && it->is_string()) { out = std::stoll(it->get<std::string>()); return true; }
+  }
+  return false;
+}
+
+inline bool is_date_obj(const nlohmann::json &v, int64_t &ms) {
+  if (!v.is_object() || v.size() != 1) return false;
+  auto it = v.find("$date");
+  return it != v.end() && date_millis(*it, ms);
+}
+
+inline void append_array(sub_array arr, const nlohmann::json &v);
+
+inline void append_value(sub_document doc, const std::string &key,
+                         const nlohmann::json &v) {
+  using namespace bsoncxx::types;
+  int64_t ms;
+  switch (v.type()) {
+  case nlohmann::json::value_t::object:
+    if (is_date_obj(v, ms)) { doc.append(kvp(key, b_date{std::chrono::milliseconds{ms}})); break; }
+    doc.append(kvp(key, [&](sub_document sub) {
+      for (auto &el : v.items()) append_value(sub, el.key(), el.value());
+    }));
+    break;
+  case nlohmann::json::value_t::array:
+    doc.append(kvp(key, [&](sub_array sub) {
+      for (auto &el : v) append_array(sub, el);
+    }));
+    break;
+  case nlohmann::json::value_t::string: doc.append(kvp(key, v.get<std::string>())); break;
+  case nlohmann::json::value_t::boolean: doc.append(kvp(key, v.get<bool>())); break;
+  case nlohmann::json::value_t::number_integer:
+  case nlohmann::json::value_t::number_unsigned: {
+    int64_t n = v.get<int64_t>();
+    if (n >= INT32_MIN && n <= INT32_MAX) doc.append(kvp(key, b_int32{(int32_t)n}));
+    else doc.append(kvp(key, b_int64{n}));
+    break;
+  }
+  case nlohmann::json::value_t::number_float: doc.append(kvp(key, v.get<double>())); break;
+  default: doc.append(kvp(key, b_null{})); break; // null / discarded / binary
+  }
+}
+
+inline void append_array(sub_array arr, const nlohmann::json &v) {
+  using namespace bsoncxx::types;
+  int64_t ms;
+  switch (v.type()) {
+  case nlohmann::json::value_t::object:
+    if (is_date_obj(v, ms)) { arr.append(b_date{std::chrono::milliseconds{ms}}); break; }
+    arr.append([&](sub_document sub) {
+      for (auto &el : v.items()) append_value(sub, el.key(), el.value());
+    });
+    break;
+  case nlohmann::json::value_t::array:
+    arr.append([&](sub_array sub) { for (auto &el : v) append_array(sub, el); });
+    break;
+  case nlohmann::json::value_t::string: arr.append(v.get<std::string>()); break;
+  case nlohmann::json::value_t::boolean: arr.append(v.get<bool>()); break;
+  case nlohmann::json::value_t::number_integer:
+  case nlohmann::json::value_t::number_unsigned: {
+    int64_t n = v.get<int64_t>();
+    if (n >= INT32_MIN && n <= INT32_MAX) arr.append(b_int32{(int32_t)n});
+    else arr.append(b_int64{n});
+    break;
+  }
+  case nlohmann::json::value_t::number_float: arr.append(v.get<double>()); break;
+  default: arr.append(b_null{}); break;
+  }
+}
+
+inline bsoncxx::document::value json_to_bson(const nlohmann::json &j) {
+  bsoncxx::builder::basic::document doc;
+  if (j.is_object())
+    for (auto &el : j.items()) append_value(doc, el.key(), el.value());
+  return doc.extract();
+}
+} // namespace detail
 
 /**
  * @brief The Logger class is responsible for logging messages to a MongoDB
@@ -172,8 +312,8 @@ public:
     payload["event"] = event_map.at(event);
     ss << toml::json_formatter{_config};
     payload["settings"] = nlohmann::json::parse(ss.str());
-    tuple<string, string> msg = make_tuple("agent_event", payload.dump());
-    log_to_mongo(&msg);
+    // DOM path: build BSON straight from the payload, no dump + re-parse.
+    log_doc_to_mongo("agent_event", payload);
   }
 
   /**
@@ -183,10 +323,22 @@ public:
    */
   void log(tuple<string, string> *message = nullptr) {
     if (_log_to_mongo) {
-      log_to_mongo(message);
+      if (message) {
+        log_to_mongo(message); // explicit text payload: faithful from_json path
+      } else {
+        // Hot path: take the object straight from the agent (no MsgPack
+        // re-dump, no re-parse) and build BSON directly from the DOM.
+        auto [topic, doc] = last_json();
+        log_doc_to_mongo(topic, doc);
+      }
     }
     if (_log_to_file) {
-      log_to_file(message);
+      if (message) {
+        log_to_file(message);
+      } else {
+        auto msg = last_message();
+        log_to_file(&msg);
+      }
     }
   }
 
@@ -267,7 +419,7 @@ private:
     }
     auto now = chrono::system_clock::now();
     auto doc = make_document();
-    auto msg = message ? *message : _last_message;
+    auto msg = message ? *message : last_message();
     auto topic = get<0>(msg);
     if (topic.empty() || topic == LOGGER_STATUS_TOPIC) {
       return;
@@ -277,6 +429,36 @@ private:
       doc = make_document(kvp("timestamp", b_date(now)), kvp("message", j));
     } catch (const bsoncxx::exception &e) {
       cerr << "Error while parsing JSON: " << e.what() << endl;
+      doc =
+          make_document(kvp("timestamp", b_date(now)), kvp("error", e.what()));
+    }
+    auto coll = _db[topic];
+    try {
+      coll.insert_one(doc.view());
+    } catch (const mongocxx::bulk_write_exception &e) {
+      cerr << fg::red << "Error while inserting document: " << e.what()
+           << fg::reset << endl;
+    }
+  }
+
+  // DOM variant of log_to_mongo: builds the BSON message directly from a
+  // nlohmann::json object via detail::json_to_bson() instead of going through
+  // text + bsoncxx::from_json(). Output is byte-identical to the text path.
+  void log_doc_to_mongo(const std::string &topic,
+                        const nlohmann::json &message) {
+    if (paused) {
+      return;
+    }
+    if (topic.empty() || topic == LOGGER_STATUS_TOPIC) {
+      return;
+    }
+    auto now = chrono::system_clock::now();
+    auto doc = make_document();
+    try {
+      doc = make_document(kvp("timestamp", b_date(now)),
+                          kvp("message", detail::json_to_bson(message)));
+    } catch (const std::exception &e) {
+      cerr << "Error while converting JSON: " << e.what() << endl;
       doc =
           make_document(kvp("timestamp", b_date(now)), kvp("error", e.what()));
     }
@@ -313,7 +495,7 @@ private:
     if (paused) {
       return;
     }
-    auto msg = message ? *message : _last_message;
+    auto msg = message ? *message : last_message();
     _log_file << "{\"" << get<0>(msg) << "\":" << get<1>(msg) << "}"
               << (_log_array ? "," : "") << endl;
   }

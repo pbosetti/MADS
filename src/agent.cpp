@@ -111,6 +111,20 @@ bool parse_wire_header(const string &part, WireHeader &out) {
   return true;
 }
 
+// Resolve a compression policy to the concrete codec for a payload of the
+// given size. Compression::Auto compresses only at/above the threshold.
+Comp resolve_compression(Compression policy, size_t size) {
+  switch (policy) {
+  case Compression::None:
+    return Comp::None;
+  case Compression::Snappy:
+    return Comp::Snappy;
+  case Compression::Auto:
+  default:
+    return size >= COMPRESSION_AUTO_THRESHOLD ? Comp::Snappy : Comp::None;
+  }
+}
+
 // Encode a JSON object into the bytes for the given wire format.
 string encode_payload(const nlohmann::json &j, WireFormat fmt) {
   if (fmt == WireFormat::MsgPack) {
@@ -143,6 +157,32 @@ bool decode_to_json_text(const string &raw, uint8_t format, uint8_t comp,
     json_text_out = *bytes;
   }
   return true;
+}
+
+// Decode an encoded payload into a LazyPayload WITHOUT forcing a conversion:
+// MsgPack frames keep their decoded object, JSON frames keep their text. The
+// other representation is materialised later only if a consumer needs it.
+// Returns nullopt on any decompression/decoding failure.
+std::optional<LazyPayload> decode_to_payload(const string &raw, uint8_t format,
+                                             uint8_t comp) {
+  const string *bytes = &raw;
+  string uncompressed;
+  if (comp == static_cast<uint8_t>(Comp::Snappy)) {
+    if (!snappy::Uncompress(raw.data(), raw.size(), &uncompressed))
+      return std::nullopt;
+    bytes = &uncompressed;
+  }
+  if (format == static_cast<uint8_t>(WireFormat::MsgPack)) {
+    try {
+      return LazyPayload::from_doc(nlohmann::json::from_msgpack(*bytes));
+    } catch (...) {
+      return std::nullopt;
+    }
+  }
+  // JSON: keep the text; move out of the decompression buffer when possible.
+  if (bytes == &uncompressed)
+    return LazyPayload::from_text(std::move(uncompressed));
+  return LazyPayload::from_text(raw);
 }
 
 // Process-global signal-handler guard (REFACTOR.md §1.6).
@@ -373,6 +413,25 @@ void Agent::init(bool crypto, bool install_watchdog) {
   }
   _time_step = chrono::milliseconds(cfg["time_step"].value_or(0));
 
+  // Wire format / compression policy for outgoing messages (opt-in).
+  // Both can be set fleet-wide under [agents] and overridden per agent section.
+  {
+    string default_wf = all_cfg["wire_format"].value_or(string("json"));
+    string wf = cfg["wire_format"].value_or(default_wf);
+    if (wf == "msgpack" || wf == "MsgPack")
+      _wire_format = WireFormat::MsgPack;
+    else
+      _wire_format = WireFormat::Json;
+    string default_comp = all_cfg["compression"].value_or(string("auto"));
+    string comp = cfg["compression"].value_or(default_comp);
+    if (comp == "none")
+      _compression = Compression::None;
+    else if (comp == "snappy")
+      _compression = Compression::Snappy;
+    else
+      _compression = Compression::Auto;
+  }
+
   set_high_watermark((int64_t)cfg["queue_size"].value_or<int>(1000));
 
   // rename attachment if not a plugin
@@ -532,8 +591,16 @@ void Agent::info(ostream &out) {
   }
   out << style::reset << endl;
   // TODO: See down below for conflate not working
-  out << "  Queue size:       " << style::bold 
+  out << "  Queue size:       " << style::bold
       << high_watermark() << " messages" << style::reset << endl;
+  out << "  Wire format:      " << style::bold
+      << (_wire_format == WireFormat::MsgPack ? "msgpack" : "json")
+      << style::reset << " / "
+      << (_compression == Compression::None
+              ? "no compression"
+              : _compression == Compression::Snappy ? "snappy"
+                                                    : "snappy (auto)")
+      << endl;
   if (!_agent_id.empty()) {
     out << "  Agent ID:         " << style::bold << _agent_id << style::reset
         << endl;
@@ -687,15 +754,20 @@ void Agent::publish(nlohmann::json payload, string topic) {
     topic = _pub_topic;
   }
   string body = encode_payload(payload, _wire_format);
-  string compressed;
-  snappy::Compress(body.data(), body.size(), &compressed);
-  if (_wire_format == WireFormat::MsgPack) {
-    message << topic
-            << make_wire_header(WireFormat::MsgPack, Comp::Snappy, false)
-            << compressed;
+  Comp comp = resolve_compression(_compression, body.size());
+  string out;
+  if (comp == Comp::Snappy) {
+    snappy::Compress(body.data(), body.size(), &out);
   } else {
-    // Legacy header-less frame: [topic][snappy(json)].
-    message << topic << compressed;
+    out = std::move(body);
+  }
+  // A legacy header-less frame is only safe when it is snappy-compressed JSON
+  // (the receiver assumes that for 2-part frames). Any other combination must
+  // carry the self-describing header.
+  if (_wire_format == WireFormat::MsgPack || comp != Comp::Snappy) {
+    message << topic << make_wire_header(_wire_format, comp, false) << out;
+  } else {
+    message << topic << out; // [topic][snappy(json)]
   }
   _publisher.send(message);
 }
@@ -818,18 +890,19 @@ message_type Agent::receive(bool dont_block) {
       _dropped_messages++;
       return message_type::none;
     }
-    string j;
-    if (!decode_to_json_text(message.get(2), hdr.format, hdr.compression, j)) {
+    auto pl = decode_to_payload(message.get(2), hdr.format, hdr.compression);
+    if (!pl) {
       _dropped_messages++;
       return message_type::none;
     }
     if (_remote_controlled && topic == "control") {
-      remote_control(j);
+      remote_control(pl->text());
       return message_type::json;
     }
+    auto lp = std::make_shared<LazyPayload>(std::move(*pl));
     std::lock_guard<std::mutex> lock(_message_state_mutex);
-    _status[topic] = j;
-    _last_message = make_tuple(std::move(topic), std::move(j));
+    _status[topic] = lp;
+    _last_message = make_tuple(std::move(topic), std::move(lp));
     return message_type::json;
   }
 
@@ -840,20 +913,22 @@ message_type Agent::receive(bool dont_block) {
     if (payload.empty()) {
       return message_type::none;
     }
-    string j;
-    if (!snappy::Uncompress(payload.data(), payload.size(), &j)) {
-      // Not a snappy frame (foreign/corrupt): drop instead of storing garbage
-      // and crashing the downstream json::parse (§1.1).
+    // Not a snappy frame (foreign/corrupt) => decode fails => drop instead of
+    // storing garbage and crashing the downstream json::parse (§1.1).
+    auto pl = decode_to_payload(payload, static_cast<uint8_t>(WireFormat::Json),
+                                static_cast<uint8_t>(Comp::Snappy));
+    if (!pl) {
       _dropped_messages++;
       return message_type::none;
     }
     if (_remote_controlled && topic == "control") {
-      remote_control(j);
+      remote_control(pl->text());
       return message_type::json;
     }
+    auto lp = std::make_shared<LazyPayload>(std::move(*pl));
     std::lock_guard<std::mutex> lock(_message_state_mutex);
-    _status[topic] = j;
-    _last_message = make_tuple(std::move(topic), std::move(j));
+    _status[topic] = lp;
+    _last_message = make_tuple(std::move(topic), std::move(lp));
     return message_type::json;
   }
   case 3: { // [topic][json meta][raw bytes]
@@ -1081,14 +1156,26 @@ string Agent::get_agent_id() { return _agent_id; }
 
 map<string, string> Agent::status() {
   std::lock_guard<std::mutex> lock(_message_state_mutex);
-  return _status;
+  map<string, string> out;
+  for (auto const &[topic, lp] : _status) {
+    out[topic] = lp ? lp->text() : string();
+  }
+  return out;
 }
 
 string Agent::name() { return _name; }
 
 tuple<string, string> Agent::last_message() {
   std::lock_guard<std::mutex> lock(_message_state_mutex);
-  return _last_message;
+  auto const &lp = get<1>(_last_message);
+  return make_tuple(get<0>(_last_message), lp ? lp->text() : string());
+}
+
+tuple<string, nlohmann::json> Agent::last_json() {
+  std::lock_guard<std::mutex> lock(_message_state_mutex);
+  auto const &lp = get<1>(_last_message);
+  return make_tuple(get<0>(_last_message),
+                    lp ? lp->doc() : nlohmann::json());
 }
 
 string Agent::last_topic() {
@@ -1210,6 +1297,10 @@ Delivery Agent::delivery() const {
 void Agent::set_wire_format(WireFormat fmt) { _wire_format = fmt; }
 
 WireFormat Agent::wire_format() const { return _wire_format; }
+
+void Agent::set_compression(Compression c) { _compression = c; }
+
+Compression Agent::compression() const { return _compression; }
 
 
 
