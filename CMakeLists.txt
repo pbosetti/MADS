@@ -73,7 +73,7 @@ endif()
 include(GNUInstallDirs)
 option(MADS_ENABLE_MONGOCXX "Enable MongoDB C++ driver dependency" ON)
 option(MADS_BUILD_APPS "Build executables" ${PROJECT_IS_TOP_LEVEL})
-option(MADS_DIRECTOR "Also build the director app (requires graphical interface)" OFF)
+option(MADS_DIRECTOR "Also build the director app (requires graphical interface)" ON)
 
 set(APP_NAME ${LIB_NAME})
 set(PREFIX "mads")

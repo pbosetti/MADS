@@ -212,6 +212,56 @@ enum class event_type {
 enum class message_type { none = 0, json = 1, blob, error };
 
 /**
+ * @brief On-the-wire payload encoding.
+ *
+ * `Json` reproduces the historical format (snappy-compressed JSON text, no
+ * frame header) and stays byte-compatible with pre-existing agents. `MsgPack`
+ * emits a self-describing frame header (see agent.cpp) and encodes the payload
+ * as MessagePack. Readers transparently accept both, so the choice only affects
+ * what an agent *publishes*.
+ */
+enum class WireFormat { Json = 0, MsgPack = 1 };
+
+/**
+ * @brief Payload compression policy applied before sending.
+ *
+ * `None` never compresses, `Snappy` always compresses, `Auto` compresses only
+ * payloads at or above COMPRESSION_AUTO_THRESHOLD bytes (so tiny control/status
+ * frames are sent uncompressed while large frames keep today's behaviour).
+ *
+ * A non-Snappy choice is recorded in the frame header so the receiver can
+ * decode it; legacy header-less frames are therefore always Snappy.
+ */
+enum class Compression { None = 0, Snappy = 1, Auto = 2 };
+
+/**
+ * @brief Subscriber delivery semantics.
+ *
+ * `Queued` keeps the ZMQ receive queue (bounded by the high-water mark).
+ * `LastKnownValue` keeps only the most recent message (LKV), draining older
+ * ones on a background thread.
+ */
+enum class Delivery { Queued = 0, LastKnownValue = 1 };
+
+/**
+ * @brief Default timeouts and delays (milliseconds).
+ *
+ * Named replacements for the historical magic numbers scattered through the
+ * agent implementation.
+ */
+inline constexpr int DEFAULT_RECEIVE_TIMEOUT_MS = 500;
+inline constexpr int DEFAULT_SETTINGS_TIMEOUT_MS = 2000;
+inline constexpr int STARTUP_SHUTDOWN_DELAY_MS = 500;
+
+/**
+ * @brief Size (bytes) at or above which `Compression::Auto` compresses.
+ *
+ * Below this, snappy framing overhead is not worth the CPU (and can enlarge the
+ * payload), so small frames are sent uncompressed.
+ */
+inline constexpr size_t COMPRESSION_AUTO_THRESHOLD = 256;
+
+/**
  * @brief Map of event types to strings.
  *
  */
