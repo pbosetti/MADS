@@ -915,6 +915,62 @@ static void print_package_result(const json &package, const Platform &platform,
   cout << endl;
 }
 
+static void print_list_packages_data_json(const json &data) {
+  if (!data.contains("package_list") || !data["package_list"].is_object())
+    throw runtime_error("Cached list result has no package_list object");
+  if (!data.contains("packages") || !data["packages"].is_array())
+    throw runtime_error("Cached list result has no packages array");
+
+  Platform platform = current_platform();
+  json out = json::object();
+  out["description"] = json_string_value(data["package_list"], "description");
+  out["platform"] = {{"os", platform.os}, {"arch", platform.arch}};
+
+  json packages_out = json::array();
+  for (const json &package : data["packages"]) {
+    json pkg = json::object();
+    pkg["name"] = json_string_value(package, "name");
+    pkg["uri"] = json_string_value(package, "uri");
+    string package_type = json_string_value(package, "type");
+    if (!package_type.empty())
+      pkg["type"] = package_type;
+    string error = json_string_value(package, "error");
+    if (!error.empty()) {
+      pkg["error"] = error;
+      packages_out.push_back(pkg);
+      continue;
+    }
+    if (package.contains("release") && package["release"].is_object()) {
+      const json &release = package["release"];
+      json rel = json::object();
+      rel["tag"] = json_string_value(release, "tag_name");
+      rel["prerelease"] = release.value("prerelease", false);
+      string rel_url = json_string_value(release, "html_url");
+      if (!rel_url.empty())
+        rel["url"] = rel_url;
+      pkg["release"] = rel;
+
+      if (release.contains("assets") && release["assets"].is_array()) {
+        json zips = json::array();
+        for (const json &asset : release["assets"]) {
+          if (!asset.is_object() || !is_compatible_zip_asset(asset, platform))
+            continue;
+          json z = json::object();
+          z["name"] = json_string_value(asset, "name");
+          if (asset.contains("size") && asset["size"].is_number_unsigned())
+            z["size"] = asset["size"].get<size_t>();
+          z["url"] = json_string_value(asset, "browser_download_url");
+          zips.push_back(z);
+        }
+        pkg["compatible_zips"] = zips;
+      }
+    }
+    packages_out.push_back(pkg);
+  }
+  out["packages"] = packages_out;
+  cout << out.dump(2) << endl;
+}
+
 static void print_list_packages_data(const json &data, bool verbose) {
   if (!data.contains("package_list") || !data["package_list"].is_object())
     throw runtime_error("Cached list result has no package_list object");
@@ -999,6 +1055,54 @@ static vector<string> requirement_values(const json &mads_package,
   append_requirement_values(mads_package, platform_requirement_name(platform),
                             field_names, values);
   return values;
+}
+
+static void print_package_info_data_json(const json &data) {
+  if (!data.contains("package") || !data["package"].is_object())
+    throw runtime_error("Cached package info has no package object");
+
+  Platform platform = current_platform();
+  const json &package = data["package"];
+
+  json out = json::object();
+  out["name"] = json_string_value(package, "name");
+  out["uri"] = json_string_value(package, "uri");
+  string package_type = json_string_value(package, "type");
+  if (!package_type.empty())
+    out["type"] = package_type;
+
+  if (data.contains("repository") && data["repository"].is_object()) {
+    const json &repository = data["repository"];
+    json repo = json::object();
+    string description = json_string_value(repository, "description");
+    if (!description.empty())
+      repo["description"] = description;
+    string html_url = json_string_value(repository, "html_url");
+    if (!html_url.empty())
+      repo["url"] = html_url;
+    string homepage = json_string_value(repository, "homepage");
+    if (!homepage.empty())
+      repo["homepage"] = homepage;
+    out["repository"] = repo;
+  } else {
+    string repository_error = json_string_value(data, "repository_error");
+    if (!repository_error.empty())
+      out["repository_error"] = repository_error;
+  }
+
+  json mads_package = json::object();
+  bool has_mads_package =
+      data.value("mads_package_found", false) &&
+      data.contains("mads_package") && data["mads_package"].is_object();
+  if (has_mads_package)
+    mads_package = data["mads_package"];
+
+  out["notes"] =
+      requirement_values(mads_package, platform, {"note", "notes"});
+  out["commands"] =
+      requirement_values(mads_package, platform, {"commands", "command"});
+
+  cout << out.dump(2) << endl;
 }
 
 static void print_bulleted_section(const string &title,
@@ -1111,13 +1215,16 @@ static json find_install_asset(const json &release, const Platform &platform) {
   throw runtime_error("No compatible ZIP installer found in latest release");
 }
 
-bool list_packages(bool no_cache, bool verbose,
+bool list_packages(bool no_cache, bool verbose, bool json_output,
                    const string &package_list_source) {
   GitHubTrafficLimited = false;
 
   try {
     json data = load_or_fetch_list_packages_data(no_cache, package_list_source);
-    print_list_packages_data(data, verbose);
+    if (json_output)
+      print_list_packages_data_json(data);
+    else
+      print_list_packages_data(data, verbose);
     return true;
   } catch (const json::parse_error &e) {
     cerr << fg::red << "Error parsing package data: " << e.what() << fg::reset
@@ -1130,6 +1237,7 @@ bool list_packages(bool no_cache, bool verbose,
 }
 
 bool print_package_info(const string &package_name, bool no_cache,
+                        bool json_output,
                         const string &package_list_source) {
   GitHubTrafficLimited = false;
 
@@ -1137,7 +1245,10 @@ bool print_package_info(const string &package_name, bool no_cache,
     json data =
         load_or_fetch_package_info_data(package_name, no_cache,
                                         package_list_source);
-    print_package_info_data(data);
+    if (json_output)
+      print_package_info_data_json(data);
+    else
+      print_package_info_data(data);
     return true;
   } catch (const exception &e) {
     cerr << fg::red << "Error: " << e.what() << fg::reset << endl;
@@ -1218,6 +1329,7 @@ int main(int argc, char **argv) {
     ("n,info", "Print information on a package installation", value<string>())
     ("i,install", "Install a package by name", value<string>())
     ("f,force", "Force overwrite of existing files")
+    ("j,json", "Output results in JSON format (valid with --list and --info)")
     ("no-cache", "Fetch package data without reading cached results")
     ("h,help", "Print help");
   options.add_options("Undocumented")
@@ -1257,15 +1369,25 @@ int main(int argc, char **argv) {
     return -1;
   }
 
+  if (options_parsed.count("json") &&
+      !options_parsed.count("list") && !options_parsed.count("info")) {
+    cerr << fg::red << "Error: --json option only valid with --list or --info"
+         << style::reset << endl;
+    return -1;
+  }
+
   string package_list_source;
   if (options_parsed.count("url"))
     package_list_source = options_parsed["url"].as<string>();
   bool no_cache = options_parsed.count("no-cache") > 0 ||
                   !package_list_source.empty();
 
+  bool json_output = options_parsed.count("json") > 0;
+
   if (options_parsed.count("list")) {
     bool verbose = options_parsed.count("verbose") > 0;
-    bool listed = Mads::list_packages(no_cache, verbose, package_list_source);
+    bool listed = Mads::list_packages(no_cache, verbose, json_output,
+                                      package_list_source);
     if (!listed) {
       cerr << fg::red << "Error listing packages" << style::reset << endl;
       Mads::print_github_limit_warning();
@@ -1277,7 +1399,7 @@ int main(int argc, char **argv) {
 
   if (options_parsed.count("info")) {
     string package_name = options_parsed["info"].as<string>();
-    if (!Mads::print_package_info(package_name, no_cache,
+    if (!Mads::print_package_info(package_name, no_cache, json_output,
                                   package_list_source)) {
       cerr << fg::red << "Error fetching package info: " << package_name
            << style::reset << endl;
