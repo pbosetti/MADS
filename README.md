@@ -1,163 +1,323 @@
-# MADS v2
+<div align="center">
 
-Multi-Agent Distributed System for monitoring and control of industrial processes
+# MADS
 
-> IMPORTANT: Look at <https://mads-net.github.io> for in-depth information, help, and guides.
+### Multi-Agent Distributed System
 
-## Architecture
+**A lightweight framework for real‑time robotics or monitoring and control of industrial processes — built from small, composable agents that talk over a ZeroMQ message bus.**
 
-The architecture is based on a distributed network of processes, called **agents**, connected via ZeroMQ protocol as publishers-subscribers, using a central **broker** for network discovery and settings sharing.
+[Documentation](https://mads-net.github.io) · [Compiling](COMPILE.md) · [Changelog](CHANGES.md) · [License](#license)
 
-Agents can be implemented as **monolithic processes**, i.e. a single executable that performs a specific task, or as **plugins**, i.e. shared libraries that can be loaded at runtime by a general purpose executable.
+![C++20](https://img.shields.io/badge/C%2B%2B-20-blue) ![ZeroMQ](https://img.shields.io/badge/transport-ZeroMQ-orange) ![License: CC BY-SA 4.0](https://img.shields.io/badge/license-CC%20BY--SA%204.0-lightgrey)
 
-**Plugins** can be of three different types:
+</div>
 
-* **Sources**: they grab data from the field and publish them to the broker
-* **Filters**: they receive data from other sources or filters, process them, and publish the results to the broker
-* **Sinks**: they receive data from the broker and process them locally (visualizing, logging, bridging to other networks, etc.)
+---
 
-There are three corresponding general purpose, plugin-based agents, named `source`, `filter`, and `sink`.
+## What is MADS?
 
-Some specific monolithic agents are also available for common tasks, such as `logger`, which saves incoming data to a MongoDB database.
+MADS lets you build a data pipeline out of **independent processes** — *agents* — that you can start, stop, move between machines, and rewire without touching each other. Each agent does one job (read a sensor, transform a stream, log to a database, drive an actuator) and exchanges **JSON messages** over a publish/subscribe bus. A central **broker** handles discovery and hands every agent the same configuration, so the whole fleet stays consistent even when it spans several computers.
+
+You extend MADS the way that fits you:
+
+- 🧩 **Drop‑in plugins** — write a tiny `.plugin` that turns one JSON object into another; the runtime handles all the networking.
+- 🛠️ **Native C++ agents** — subclass `Mads::Agent` and let `AgentApp` take care of CLI parsing, settings, startup and shutdown.
+- 🐍 **Python** — drive an agent end‑to‑end from a script via the ctypes wrapper.
+
+> 📖 Full guides, tutorials and API docs live at **<https://mads-net.github.io>**.
+
+### Why you might like it
+
+- **Composable** — pipelines are wired in a config file, not in code.
+- **Distributed by default** — agents find the broker automatically; settings are served centrally.
+- **Polyglot & portable** — C++ core, C ABI, Python wrapper; Linux, macOS and Windows.
+- **Fast** — ZeroMQ transport, Snappy compression, an **opt‑in MessagePack wire format**, and a zero‑copy receive fast path.
+- **Batteries included** — ready‑made agents for logging to MongoDB, bridging, feedback/inspection, and more.
+- **Secure** — optional CURVE encryption and IP allow‑listing on every socket.
+
+---
+
+## Architecture at a glance
 
 ```mermaid
 %%{init: {"flowchart": {"defaultRenderer": "elk"}} }%%
 flowchart LR
-    broker["Broker"]
-    source["Source"]
-    filter["Filter"]
-    sink["Sink"]
-    monolithic["Mon. source"]
-    source_plugin["Source Plugin"]
-    filter_plugin["Filter Plugin"]
-    sink_plugin["Sink Plugin"]
-    source_plugin <--> source
-    filter_plugin <--> filter
-    sink_plugin <--> sink
-    source --> broker
-    filter --> broker
-    broker --> sink
-    monolithic --> broker
-    broker --> filter
-    sink --> field
-    broker --> logger
-    logger --> mongodb[(MongoDB)]
+    field([Field / Sensors])
+    broker{{"Broker (pub/sub + settings)"}}
+    src["Source"]
+    flt["Filter"]
+    snk["Sink"]
+    log["Logger"]
+    db[(MongoDB)]
+
+    field --> src
+    src -- publish --> broker
+    broker -- subscribe --> flt
+    flt -- publish --> broker
+    broker -- subscribe --> snk
+    broker -- subscribe --> log
+    snk --> field
+    log --> db
 ```
 
+- **Source** — produces data and publishes it.
+- **Filter** — subscribes, transforms, republishes.
+- **Sink** — subscribes and consumes locally (UI, logging, bridging, actuation…).
+- **Broker** — a payload‑agnostic ZeroMQ `XSUB`/`XPUB` proxy that also serves settings over a `REQ`/`REP` socket and advertises itself for auto‑discovery.
 
-## Settings
+Agents come in two flavours: **monolithic** executables (one purpose‑built binary) and **plugin‑based** ones (a generic loader — `mads‑source`, `mads‑filter`, `mads‑sink` — that loads a `.plugin` at runtime).
 
-The settings are stored in an INI file according to the [TOML format](https://toml.io). By defaut, the setting file is read by the broker (which must be the first process to start), and then passed to the other processes via a ZeroMQ REQ/REP socket. This way, all agents share the same settings even if they run on different filesystems.
+---
 
-The settings file is divided into sections, one for each agent. The section name is the name of the executable file, without the path and the extension. For example, the settings for the `logger` agent are stored in a section named `[logger]`.
-
-Agents that are plugin-based (i.e. `source`, `filter`, and `sink`) have their settings stored in a section named after the plugin file name, without the path and the extension. For example, the settings for the source agent loading the plugin `my_plugin.plugin` are stored in a section named `[my_plugin]`.
-
-**NOTE**: it is possible to have multiple plugin agents with different settings, but sharing the same plugin file. This is useful when the same plugin is used in different contexts, that require different settings. To do that, the `mads-source`, `mads-filter`, and `mads-sink` executables have the command line option `-n|--name`, which sets the name of the plugin to be loaded. The name is used to select the proper settings section in the INI file. FOr example, the agent loaded as `mads source clock.plugin -n clock_slow` will load settings from the section `[clock_slow]` in the INI file. If that option is missing, the name of the plugin is assumed to be the same as the plugin file name.
-
-An `[agents]` section is also present, which contains the settings that are meant to be shared among all agents.
-
-## Database
-
-The logger agent can log all the messages to a plain file or to a MongoDB database (or both). MongoDB is the preferred route: file output is just for debugging purposes.
-
-The suggested way to install MongoDB is via Docker. The following command will install the latest version of MongoDB in a Docker container, and will expose the default port (27017) to the host machine.
+## Quick start
 
 ```bash
-docker run --name mads-mongo --restart unless-stopped -v ${PWD}/db:/data/db -p27017:27017 -d mongo
+# Build & install (see COMPILE.md for prerequisites)
+cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -GNinja
+cmake --build build -j6
+cmake --install build
 ```
 
-The `logger` agent connects to a MongoDB instance. The URI of the database (possibly on a different machine) is specified in the `mads.ini` file, as well as the name of the database to be used.
+Run your first pipeline — a data source feeding a live console sink:
 
-For each and every message received by the `logger` agent, it saves a new document on a table named as the topic of the message. The document contains the following fields:
+```bash
+mads broker &           # 1. start the hub (always first)
+mads feedback &         # 2. a sink that pretty-prints every message
+mads perf_assess -l 64 -p 500   # 3. a source emitting a 64-byte payload every 500 ms
+```
 
-* `_id`: a unique identifier for the document, automatically generated by MongoDB
-* `timestamp`: the timestamp of the message
-* `message`: the message itself, as a JSON object
-* `error`: error message when the JSON is not valid
+You’ll see `feedback` print each message the source publishes. Swap step 3 for your own source, add filters in between, point `logger` at MongoDB — all by editing `mads.ini`, not the binaries.
 
+> `mads <name>` is a convenience launcher for the `mads-<name>` executables. `mads -p` prints the install prefix; `mads plugin` scaffolds a new plugin project.
 
+---
 
-### Coding style
+## Talking to the bus: the message & wire format
 
-* We use **C++17 standard**.
-* Classes and namespaces shall be named in `CamelCase`, variables and functions in `snake_case`, member variables shall have a leading underscore.
-* Globals are discouraged, but if used, they shall be named in `__snake_case__` (two leading and trailing underscore).
-* Preprocessor macros shall be named in `SNAKE_CASE`.
-* Header files shall have `.hpp` extension, source files `.cpp` extension.
-* All classes and library files shall go in `src` dir. These are compiled as a single static library, to be included from executables
-* All source files with `main()` function shall go in `src/main` dir.
-* `clang-format` shall be used to enforce a common coding style using LLVM style.
+Every message is a pair `[topic, payload]`. Your code always works with a **`nlohmann::json` object** (or a Python `dict`); MADS handles the bytes on the wire.
 
+```mermaid
+flowchart LR
+    p["Producer (nlohmann::json)"] -->|encode| h["frame: topic · header · payload"]
+    h --> b{{"Broker (opaque — never parses payloads)"}}
+    b -->|decode| c["Consumer (nlohmann::json)"]
+```
 
-### How to implement an agent
+Because the broker never looks inside payloads, the wire format can evolve with **zero broker changes**.
 
-To implement a **monolithic agent** two files have to be created:
+### JSON by default, MessagePack when you want it
 
-* `src/new_agent.hpp`. This is a class that inherits from `Mads::Agent` and should:
-  * override the method `Mads::Agent::load_settings()`, which has to load the customized settings from the INI file
-  * implement custom methods for its specific funxtionality
-* `src/main/new_agent.cpp`: this is the executable code.
+| | Default | Opt‑in |
+|---|---|---|
+| **Encoding** | JSON (human‑readable, universal) | **MessagePack** (compact binary) |
+| **Compression** | `auto` (Snappy above 256 B) | `snappy` (always) · `none` |
+| **Framing** | legacy 2/3‑part frame | self‑describing header `{format, compression, schema_version}` |
 
-The base `Agent` class provides all the low level functionality to exchange information with the other agent via broker.
+Switch formats per agent or fleet‑wide in `mads.ini` — no recompilation:
 
-In the main function for the new agent, the steps to follow are:
+```toml
+[agents]            # fleet-wide default
+wire_format = "msgpack"   # "json" (default) | "msgpack"
+compression = "auto"      # "auto" (default) | "snappy" | "none"
 
-1. Instantiate the new agent: `auto agent = MyNewAgent(argv[0], "settings.ini")`. This way, the agent reads the settings in the ini file from the section named after the last element in `argv[0]`, i.e. the executable file name
-2. If the agent is a source, call `agent.connect_sub()`, which sets up the connection to the broker `XSUB` port
-3. If the agent is a filter or a sink, also call `agent.connect_pub()`, which sets up the connection to the broker `XPUB` port
-4. Optionally, print configuration input with `agent.info()`
-5. Within the main loop, you typically have to:
-   1. If the agent is a source, read data from the field and pack them as JSON using `nlohmann::json`
-   2. If the agent is filter or sink, read incoming topics with `agent.receive()`. This receives inbound messages and stores them in a status hash (one key per topic), retrivable with `agent.status()`. The very last message is available as a tuple `topic,content` from `agent.last_message()`. Messages are encoded as JSON, so decoding is needed with `nlohmann::json` class
-   3. Operate on inbound or field data to build the new outbound payload
-   4. Publish the new payload with `agent.publish()`. It will use the topic specified in the settings file.
-6. That's it. 
+[my_fast_source]    # …or override per agent
+wire_format = "msgpack"
+compression = "none"      # already compact; skip Snappy on a LAN
+```
 
-In order to keep the code more readable and organized, the algorithms implemented in step 5.3 are preferably implemented in the class `MyNewAgent`, rather than in the main function or in the executable file.
+It’s also reachable from C (`agent_set_wire_format`) and Python (`set_wire_format`). Mixed fleets interoperate: every up‑to‑date receiver transparently decodes both formats thanks to the self‑describing header.
 
-For **plugin agents**, see the [dedicated section below](#plugins).
+### How it performs
 
-# Plugins
+The right choice depends on your payload and your consumer. From the bundled benchmarks (Apple M‑series, release build):
 
-## Rationale
+- **Encoding is much cheaper in MessagePack** — JSON has to scan and escape every byte; MessagePack bulk‑copies. For a 16 KB payload, encoding is ~**30× faster**.
+- **Wire size** shrinks for numeric/structured data; for already‑compressible text the gap narrows once Snappy kicks in.
+- **Receiving** is fastest when your consumer wants the *object*: the agent keeps the decoded message and hands it over without re‑serializing.
 
-The project is designed to be extensible via plugins. A plugin is a shared library that can be loaded at runtime by the main executable, and that can be used to extend its functionality.
+To make that last point real, consumers can pull the parsed object directly with **`last_json()`** instead of re‑parsing text. On a MessagePack stream this **more than doubled** sink throughput:
 
-The plugin system is based on the `dlopen` and `dlsym` functions, which are available on Unix systems. On Windows, the equivalent functions are `LoadLibrary` and `GetProcAddress`.
+| Payload | `last_message()` + parse | `last_json()` (fast path) | Speed‑up |
+|--------:|-------------------------:|--------------------------:|:--------:|
+| 1 KB    | 45,400 msg/s | **92,700 msg/s** | **2.0×** |
+| 16 KB   | 5,200 msg/s | **14,300 msg/s** | **2.8×** |
 
-The plugin system is based on the C++ [pugg library](https://github.com/pbosetti/pugg), which simplifies and abstracts the loading and unloading of plugins.
+<details>
+<summary><b>Rule of thumb & methodology</b></summary>
 
-The advantages of the pluging systems are:
+- **Use JSON** for control/observability topics, debugging, and interop with external tools — it’s readable on the wire.
+- **Use MessagePack** for high‑rate or numeric/array‑heavy telemetry, especially when the consumer processes the object (filters, sinks) rather than re‑printing it as text. Pair it with `compression = "none"` on fast local links.
+- A sink that *re‑stringifies* every message (e.g. printing it) is text‑bound and won’t benefit from MessagePack — and the framework still gives it correct JSON either way.
 
-* each plugin can be developed in separate repos and compiled separately from the main executables, reducing the number of dependencies of this repository
-* the main executables can be compiled without the plugins, and the plugins can be added later, without recompiling the main executables
-* in the future, it would be possible to have the broker distribute the plugins to the agents, so that the agents can load the plugins at runtime together with the settings file
-* Respect to have completely separate projects and repos for whole agents, the plugins are supposed to be smaller and more focused, and much easier to develop: they can act as simple blocks that takes an input in the form of a JSON object and provide a similar output. No knowledge about the Miroscic agent network is required
+Benchmarks use the bundled `perf_assess` source and `feedback`/compute sinks through a real broker. Numbers are indicative, not guarantees — measure with *your* payload. The transport (Snappy + ZeroMQ + network) usually dominates the codec.
+</details>
 
+---
 
-## How to develop a plugin
+## Extending MADS
 
-To develop a plugin follow these steps:
+### 1) Plugins — the fast path
 
-1. use the command `mads plugin` that creates a stub project with template files
-2. look at the files within `src/plugin` dir
-3. customize the `CMakeLists.txt` file to compile the plugin. Add any external library needed by the plugin. If the libraries are static, you won't need to install them in the target system, but the resulting plugin file would be bigger (possibly an issue if distributing plugins via broker)
-4. in developing the plugin you must also add a `main()` function, which is used to test the plugin. This function is not used in the final plugin, but it is useful to test the plugin in isolation
-5. once the plugin is ready, compile it and copy it on the target system where the Mads agent is supposed to run
-6. the Mads agent that loads the plugis are `source`, `filter`, or `sink`: they take as argument the name of the plugin as a key for loading the proper settings section and as a publishing topic. Settings are passed to the plugin as a JSON object on loading, the name of the section being the name of the plugin file (no extension).
+A plugin is a small shared library that transforms JSON. It knows nothing about ZeroMQ, the broker, or settings plumbing — the loader injects all of that. Three kinds map to the three agent roles:
 
-# License
+```mermaid
+flowchart LR
+    subgraph L["mads-source / -filter / -sink (loader)"]
+      direction TB
+      plug["your .plugin"]
+    end
+    broker{{Broker}}
+    L <-->|JSON in / JSON out| broker
+```
+
+| Plugin kind | You implement | Loaded by |
+|---|---|---|
+| **Source** | `get_output(json &out)` | `mads-source` |
+| **Filter** | `load_data(json in)` + `process(json &out)` | `mads-filter` |
+| **Sink** | `load_data(json in)` | `mads-sink` |
+
+```bash
+mads plugin my_filter      # scaffold a ready-to-build plugin project
+# edit src/plugin/my_filter.cpp, then:
+cmake -Bbuild -GNinja && cmake --build build
+mads filter my_filter.plugin   # run it
+```
+
+Plugins are developed and versioned in their own repos, compiled independently, and selected (with their settings section) by file name — or by `-n <name>` to run the same plugin in several roles with different configs.
+
+### 2) Native agents with `AgentApp`
+
+For full control, subclass `Mads::Agent` and wrap it with `AgentApp` ([`src/agent_app.hpp`](src/agent_app.hpp)), which folds away the repetitive CLI/startup boilerplate (option parsing, settings, identity, queue sizing, events, remote control, graceful restart):
+
+```cpp
+#include "agent_app.hpp"
+using namespace Mads;
+
+int main(int argc, char *argv[]) {
+  AgentApp agent{argv[0], SETTINGS_URI};
+  agent.add_common_options();
+  auto parsed = agent.parse_options(argc, argv);
+  if (int rc = AgentApp::handle_standard_exit_options<AgentApp>(
+          parsed, agent.raw_options(), argv); rc >= 0)
+    return rc;
+
+  agent.init(parsed);
+  agent.enable_events();
+  agent.connect();
+  agent.info();
+
+  agent.loop([&]() -> std::chrono::milliseconds {
+    if (agent.receive() == message_type::json) {
+      auto [topic, msg] = agent.last_json();   // parsed object, zero re-parse
+      // …process msg, then…
+      agent.publish({{"result", 42}});
+    }
+    return 0ms;
+  });
+
+  agent.disconnect();
+  agent.restart_if_requested(argv);
+}
+```
+
+Existing subclasses (`Bridge`, `Dealer`, `Worker`, `Logger`, …) can be wrapped without modification via `AgentAppFor<T>`.
+
+### 3) Python
+
+Drive an agent from Python through the ctypes wrapper (installed at `<prefix>/python/mads_agent.py`):
+
+```python
+from mads_agent import Agent, WireFormat, MessageType
+
+agent = Agent("my_agent", "tcp://localhost:9092")  # settings URI = broker
+agent.init()
+agent.set_wire_format(WireFormat.MSGPACK)          # optional
+agent.connect()
+
+agent.publish({"temperature": 21.7, "unit": "C"})
+
+if agent.receive() == MessageType.JSON:
+    topic, message = agent.last_message()
+    print(topic, message)
+```
+
+Point it at a specific library with the `MADS_LIB_PATH` environment variable, or let it resolve via `mads -p`.
+
+---
+
+## Configuration
+
+Settings live in a single **TOML** file (`mads.ini`). The **broker reads it first** and serves it to every agent over the settings socket, so a distributed fleet shares one source of truth.
+
+- One `[section]` per agent, named after the executable (`mads-logger` → `[logger]`) or the plugin file (`clock.plugin` → `[clock]`, or `[custom]` with `-n custom`).
+- A shared `[agents]` section holds fleet‑wide defaults (endpoints, timecode FPS, wire format…).
+- Common keys: `pub_topic` (string), `sub_topic` (array; `[""]` = subscribe to all), `queue_size`, `time_step`.
+
+```toml
+[agents]
+frontend_address = "tcp://localhost:9090"
+backend_address  = "tcp://localhost:9091"
+
+[logger]
+mongo_uri = "mongodb://localhost:27017"
+mongo_db  = "mads"
+sub_topic = [""]          # log everything
+```
+
+---
+
+## Logging to MongoDB
+
+The `logger` agent persists every message to MongoDB (and/or a plain JSON file for debugging). Each message becomes a document in a collection named after its topic:
+
+| field | meaning |
+|---|---|
+| `_id` | document id (MongoDB) |
+| `timestamp` | BSON date when logged |
+| `message` | the payload, as a BSON document (extended‑JSON `$date` fields become real BSON dates) |
+| `error` | set instead of `message` if the payload was unparsable |
+
+Spin up MongoDB quickly with Docker:
+
+```bash
+docker run --name mads-mongo --restart unless-stopped \
+  -v ${PWD}/db:/data/db -p 27017:27017 -d mongo
+```
+
+---
+
+## Building
+
+See **[COMPILE.md](COMPILE.md)** for prerequisites and platform notes. In short: CMake (out‑of‑source), C++20, Ninja recommended.
+
+```bash
+cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -GNinja
+cmake --build build -j6
+cmake --install build
+```
+
+Key dependencies: ZeroMQ (`libzmq` + `zmqpp`), `nlohmann/json`, `toml++`, Snappy, `pugg` (plugins), and the MongoDB C++ driver (optional, for the logger).
+
+> All these dependencies are bundled and built from source via CMake FetchContent, so no external library installation is needed.
+
+---
+
+## Coding style
+
+- **C++20**; LLVM style enforced with `clang-format`.
+- Classes & namespaces `CamelCase`; functions & variables `snake_case`; member fields `_leading_underscore`.
+- Headers `.hpp`, sources `.cpp`. Library code in `src/`; executables (with `main()`) in `src/main/`.
+- Prefer extending existing abstractions (`Mads::Agent`, `AgentApp`, plugin drivers) over re‑implementing transport/config plumbing.
+
+---
+
+## License
 
 ![CC BY-SA](https://licensebuttons.net/l/by-sa/4.0/88x31.png)
 
-The project is distributed under [CC BY-SA license](https://creativecommons.org/licenses/by-sa/4.0/).
+Distributed under the [Creative Commons BY‑SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) license.
 
-# Authors
+## Authors
 
-Main author: 
-Paolo Bosetti (University of Trento)
-
-Contributors:
-Anna-Carla Araujo (INSA Toulouse),
-Guillaume Cohen (INSA Toulouse)
+**Paolo Bosetti** (University of Trento) — main author.
+Contributors: **Anna‑Carla Araújo** (INSA Toulouse), **Guillaume Cohen** (INSA Toulouse).
