@@ -45,6 +45,8 @@ Author(s): Paolo Bosetti
 #include <mutex>
 #include <condition_variable>
 #include <optional>
+#include <span>
+#include <atomic>
 #include "curve.hpp"
 #include "exec_path.hpp"
 
@@ -56,8 +58,6 @@ Author(s): Paolo Bosetti
 #include <rang.hpp>
 using namespace rang;
 #endif
-
-#define STARTUP_SHUTDOWN_DELAY 500
 
 namespace Mads {
 
@@ -129,18 +129,30 @@ class Agent {
 
 private:
   /**
-   * @brief Static function to read settings from broker.
+   * @brief Apply CURVE client credentials to a socket if crypto is enabled.
+   *
+   * Factors out the (previously duplicated) curve-client setup used by every
+   * REQ socket talking to the broker.
+   *
+   * @param socket The socket to configure.
+   */
+  void setup_curve_on(zmqpp::socket &socket);
+
+  /**
+   * @brief Read settings and timecode from the broker over a single REQ socket.
+   *
+   * Performs both the `settings` and `timecode` round-trips on one connection,
+   * avoiding two separate socket open/connect/close cycles.
    *
    * @param uri The URI of the broker.
    * @param name The name of the agent.
-   * @param crypto Whether to use CURVE encryption (default false).
-   * @param timeout The timeout in milliseconds (default 2000).
-   * @return a tuple with the settings and possibly the path of the attachemnt.
-   * @throws AgentError if timed out in reading settings from broker.
+   * @param timeout The timeout in milliseconds.
+   * @return a tuple {raw settings, attachment path, broker timecode}.
+   * @throws AgentError if timed out or the broker refuses to provide settings.
    */
-  std::tuple<std::string, std::filesystem::path> read_settings(std::string uri, std::string name, int timeout = 2000);
-
-  double get_broker_timecode(std::string uri, int timeout = 2000);
+  std::tuple<std::string, std::filesystem::path, double>
+  query_broker(std::string uri, std::string name,
+               int timeout = DEFAULT_SETTINGS_TIMEOUT_MS);
 
 public:
 /*
@@ -561,6 +573,30 @@ public:
 
 
   /**
+   * @brief Zero-copy view of the last received blob.
+   *
+   * Returns non-owning views (topic, format, bytes) into the agent's internally
+   * stored blob, avoiding the full copy performed by last_blob(). The returned
+   * views remain valid only until the next call to receive() and must not be
+   * used concurrently with a threaded receive/drain thread.
+   *
+   * @return A tuple of {topic, format, bytes} as views.
+   */
+  std::tuple<std::string_view, std::string_view,
+             std::span<const unsigned char>>
+  last_blob_view() const;
+
+
+  /**
+   * @brief Number of messages dropped because they were malformed or could
+   * not be decoded (bad part count, failed decompression, etc.).
+   *
+   * @return The cumulative count since startup.
+   */
+  size_t dropped_messages() const;
+
+
+  /**
    * @brief Detects if settings are local or loaded from URI.
    *
    * @return true or false.
@@ -606,7 +642,7 @@ public:
   /**
    * @brief Returns the value of timeout in receiving messages.
    *
-   * @return the timeout in ms (default to 2000).
+   * @return the timeout in ms (default DEFAULT_RECEIVE_TIMEOUT_MS = 500).
    */
   int receive_timeout();
 
@@ -691,16 +727,61 @@ public:
   std::string settings_uri();
 
   
+  [[deprecated("conflate is disabled; use set_delivery(Delivery::LastKnownValue)")]]
   void set_conflate(bool conflate);
+  [[deprecated("conflate is disabled; use delivery()")]]
   bool conflate();
 
   /**
-   * @brief Set the high watermark object
-   * 
-   * @param i The queue size. I set to 1 or 0, the agent will only keep the last message received, implementing a LastKnown Value (LKV) semantic. 
+   * @brief Set the high watermark (ZMQ receive queue bound).
+   *
+   * @param i The queue size. A value of 1 selects Last-Known-Value (LKV)
+   *   delivery for backward compatibility (equivalent to
+   *   set_delivery(Delivery::LastKnownValue)); prefer set_delivery() for
+   *   clarity. A value of 0 means "unlimited" (ZMQ semantics) and Queued
+   *   delivery.
    */
   void set_high_watermark(int i = 1000);
   int high_watermark();
+
+  /**
+   * @brief Select subscriber delivery semantics.
+   *
+   * @param d Delivery::Queued keeps the receive queue; Delivery::LastKnownValue
+   *   keeps only the latest message, draining the rest on a background thread.
+   * @throws AgentError if already connected.
+   */
+  void set_delivery(Delivery d);
+
+  /**
+   * @brief Current delivery semantics.
+   */
+  Delivery delivery() const;
+
+  /**
+   * @brief Select the on-the-wire payload encoding used when publishing.
+   *
+   * Default is WireFormat::Json (legacy, header-less, fully backward
+   * compatible). WireFormat::MsgPack emits a self-describing frame header and
+   * MessagePack-encoded payloads. Receivers accept both transparently.
+   *
+   * @param fmt The wire format to use for outgoing messages.
+   */
+  void set_wire_format(WireFormat fmt);
+
+  /**
+   * @brief The wire format used for outgoing messages.
+   */
+  WireFormat wire_format() const;
+
+  /**
+   * @brief Install SIGINT/SIGTERM handlers that request a clean shutdown.
+   *
+   * Idempotent and process-global: only the first call installs handlers, so
+   * calling loop() repeatedly (or running several agents in one process) does
+   * not clobber handler state.
+   */
+  static void install_signal_handlers();
 
 
   double timecode_fps = MADS_FPS;
@@ -764,7 +845,7 @@ protected:
   mutable std::mutex _message_state_mutex;
   bool _cross = false;
   bool _connected = false;
-  int _receive_timeout = 500;
+  int _receive_timeout = DEFAULT_RECEIVE_TIMEOUT_MS;
   int _settings_timeout = 0;
   bool _init_done = false;
   bool _restart = false;
@@ -781,6 +862,12 @@ protected:
   SharedLatest<zmqpp::message_t> _latest_message;
   std::thread _drain_thread;
   std::thread _rc_thread;
+  std::thread _watchdog_thread;
+  std::atomic<bool> _watchdog_stop{false};
+  bool _rc_owns_socket = false;
+  WireFormat _wire_format = WireFormat::Json;
+  std::atomic<size_t> _dropped_messages{0};
+  nlohmann::json _settings_json; // cached JSON projection of settings
 public:
   bool dummy = false;
 };

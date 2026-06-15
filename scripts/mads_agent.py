@@ -316,7 +316,7 @@ class Agent:
     def sub_topics(self) -> list:
         """Get the subscribe topics."""
         topics = c_char_p()
-        n_topics = c_int(0)
+        n_topics = c_size_t(0)
         result = lib.agent_sub_topics(
             self._agent, ctypes.byref(topics), ctypes.byref(n_topics)
         )

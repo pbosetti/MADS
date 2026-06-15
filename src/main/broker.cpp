@@ -203,6 +203,11 @@ template <typename T> constexpr unsigned long long htonll(T value) noexcept {
 }
 #endif
 
+// INVARIANT: the broker is payload-opaque. It forwards frames verbatim between
+// the XSUB frontend and XPUB backend and never inspects, parses, or rewrites
+// message payloads. This is what lets the wire payload format evolve (snappy,
+// MsgPack, new compression — see REFACTOR.md §4.1 / MSGPACK.md) with zero broker
+// changes. Do NOT add payload parsing here.
 void proxy(zmqpp::socket &frontend, zmqpp::socket &backend,
            zmqpp::socket &ctrl) {
   zmqpp::proxy_steerable(frontend, backend, ctrl);

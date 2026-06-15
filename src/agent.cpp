@@ -14,6 +14,9 @@
 #include <string>
 #include <string_view>
 #include <future>
+#include <cstring>
+#include <cstdlib>
+#include <mutex>
 #include "curve.hpp"
 #include "exec_path.hpp"
 #include "mads.hpp"
@@ -30,6 +33,122 @@ using namespace std;
 using namespace std::chrono;
 
 namespace Mads {
+
+/*
+ __        ___              __                            _
+ \ \      / (_)_ __ ___    / _| ___  _ __ _ __ ___   __ _| |_
+  \ \ /\ / /| | '__/ _ \  | |_ / _ \| '__| '_ ` _ \ / _` | __|
+   \ V  V / | | | |  __/  |  _| (_) | |  | | | | | | (_| | |_
+    \_/\_/  |_|_|  \___|  |_|  \___/|_|  |_| |_| |_|\__,_|\__|
+
+Self-describing frame header (see REFACTOR.md §1.3 / MSGPACK.md §5.1).
+
+A message published in the *extended* format carries a small header part right
+after the topic:
+
+  [ topic ] [ header ] [ payload ]            (data)
+  [ topic ] [ header ] [ meta ] [ raw bytes ] (blob, has_blob flag set)
+
+The header begins with the 4-byte magic "MADS" and has a fixed size, which makes
+it reliably distinguishable from legacy frames:
+
+  - legacy data:  [ topic ] [ snappy(json) ]               (2 parts)
+  - legacy blob:  [ topic ] [ json meta ] [ raw bytes ]    (3 parts)
+
+A reader first checks part #1 for the magic + exact size; if absent it falls
+back to the legacy part-count interpretation. Legacy peers never see a header
+because the header is only emitted for non-default (e.g. MsgPack) formats.
+*/
+namespace {
+
+constexpr char WIRE_MAGIC[4] = {'M', 'A', 'D', 'S'};
+constexpr uint8_t WIRE_HDR_VERSION = 1;
+constexpr uint8_t WIRE_FLAG_BLOB = 0x01;
+constexpr size_t WIRE_HEADER_SIZE = 4 /*magic*/ + 1 /*ver*/ + 1 /*format*/ +
+                                    1 /*compression*/ + 1 /*flags*/ +
+                                    4 /*schema*/;
+
+enum class Comp : uint8_t { None = 0, Snappy = 1 };
+
+struct WireHeader {
+  uint8_t hdr_version = WIRE_HDR_VERSION;
+  uint8_t format = static_cast<uint8_t>(WireFormat::Json);
+  uint8_t compression = static_cast<uint8_t>(Comp::None);
+  bool has_blob = false;
+  uint32_t schema = LIB_VERSION_NUM;
+};
+
+string make_wire_header(WireFormat fmt, Comp comp, bool has_blob) {
+  string h;
+  h.reserve(WIRE_HEADER_SIZE);
+  h.append(WIRE_MAGIC, 4);
+  h.push_back(static_cast<char>(WIRE_HDR_VERSION));
+  h.push_back(static_cast<char>(fmt));
+  h.push_back(static_cast<char>(comp));
+  h.push_back(static_cast<char>(has_blob ? WIRE_FLAG_BLOB : 0));
+  uint32_t schema = LIB_VERSION_NUM;
+  h.push_back(static_cast<char>((schema >> 24) & 0xFF));
+  h.push_back(static_cast<char>((schema >> 16) & 0xFF));
+  h.push_back(static_cast<char>((schema >> 8) & 0xFF));
+  h.push_back(static_cast<char>(schema & 0xFF));
+  return h;
+}
+
+// Returns true and fills `out` if `part` is a valid frame header.
+bool parse_wire_header(const string &part, WireHeader &out) {
+  if (part.size() != WIRE_HEADER_SIZE)
+    return false;
+  if (std::memcmp(part.data(), WIRE_MAGIC, 4) != 0)
+    return false;
+  out.hdr_version = static_cast<uint8_t>(part[4]);
+  out.format = static_cast<uint8_t>(part[5]);
+  out.compression = static_cast<uint8_t>(part[6]);
+  out.has_blob = (static_cast<uint8_t>(part[7]) & WIRE_FLAG_BLOB) != 0;
+  out.schema = (static_cast<uint32_t>(static_cast<uint8_t>(part[8])) << 24) |
+               (static_cast<uint32_t>(static_cast<uint8_t>(part[9])) << 16) |
+               (static_cast<uint32_t>(static_cast<uint8_t>(part[10])) << 8) |
+               static_cast<uint32_t>(static_cast<uint8_t>(part[11]));
+  return true;
+}
+
+// Encode a JSON object into the bytes for the given wire format.
+string encode_payload(const nlohmann::json &j, WireFormat fmt) {
+  if (fmt == WireFormat::MsgPack) {
+    auto v = nlohmann::json::to_msgpack(j);
+    return string(reinterpret_cast<const char *>(v.data()), v.size());
+  }
+  return j.dump();
+}
+
+// Materialise an encoded payload into JSON *text* (the representation the rest
+// of MADS expects). Returns false on any decompression/decoding failure.
+bool decode_to_json_text(const string &raw, uint8_t format, uint8_t comp,
+                         string &json_text_out) {
+  const string *bytes = &raw;
+  string uncompressed;
+  if (comp == static_cast<uint8_t>(Comp::Snappy)) {
+    if (!snappy::Uncompress(raw.data(), raw.size(), &uncompressed))
+      return false;
+    bytes = &uncompressed;
+  }
+  if (format == static_cast<uint8_t>(WireFormat::MsgPack)) {
+    try {
+      nlohmann::json j = nlohmann::json::from_msgpack(*bytes);
+      json_text_out = j.dump();
+    } catch (...) {
+      return false;
+    }
+  } else {
+    // Already JSON text (possibly after decompression).
+    json_text_out = *bytes;
+  }
+  return true;
+}
+
+// Process-global signal-handler guard (REFACTOR.md §1.6).
+std::once_flag g_signal_once;
+
+} // namespace
 
 unique_ptr<Agent> start_agent(string name, string settings_uri,
                               map<string, string> crypto_settings) {
@@ -55,33 +174,42 @@ unique_ptr<Agent> start_agent(string name, string settings_uri,
 
 // Private methods implementations
 
-tuple<string, filesystem::path> Agent::read_settings(string uri, string name, int timeout) {
-  zmqpp::socket socket(_context, zmqpp::socket_type::req);
-  if (_curve_auth) {
-    if (_curve_auth->client_public_key().empty() || _curve_auth->client_secret_key().empty() || _curve_auth->server_public_key().empty()) {
-      _curve_auth->setup_curve_client(socket, client_key_name, server_key_name);
-    } else {
-      _curve_auth->setup_curve_client(socket);
-    }
+void Agent::setup_curve_on(zmqpp::socket &socket) {
+  if (!_curve_auth)
+    return;
+  if (_curve_auth->client_public_key().empty() ||
+      _curve_auth->client_secret_key().empty() ||
+      _curve_auth->server_public_key().empty()) {
+    _curve_auth->setup_curve_client(socket, client_key_name, server_key_name);
+  } else {
+    _curve_auth->setup_curve_client(socket);
   }
+}
 
-  message msg_out, msg_in;
-  tuple<string, filesystem::path> result;
-  socket.connect(uri);
+tuple<string, filesystem::path, double>
+Agent::query_broker(string uri, string name, int timeout) {
+  // Single REQ socket reused for both the settings and timecode round-trips.
+  zmqpp::socket socket(_context, zmqpp::socket_type::req);
+  setup_curve_on(socket);
   if (timeout > 0) {
     socket.set(zmqpp::socket_option::receive_timeout, timeout);
     socket.set(zmqpp::socket_option::send_timeout, timeout);
   }
+  socket.connect(uri);
+
+  // ---- settings request ----
+  message msg_out, msg_in;
   msg_out << LIB_VERSION << "settings" << name;
   if (!socket.send(msg_out)) {
+    socket.close();
     throw AgentError("Timed out in sending settings request to broker");
   }
   if (!socket.receive(msg_in)) {
+    socket.close();
     throw AgentError("Timed out in receiving settings from broker");
   }
-  socket.disconnect(uri);
-  socket.close();
   if (msg_in.parts() < 2) {
+    socket.close();
     throw AgentError(
         "Broker refuses to provide settings, check for version mismatch or "
         "missing settings for agent '" +
@@ -89,60 +217,53 @@ tuple<string, filesystem::path> Agent::read_settings(string uri, string name, in
   }
   string version_str = msg_in.get(0);
   if (!Mads::check_version(version_str)) {
+    socket.close();
     throw AgentError("Received settings from broker with wrong version: " +
-      version_str);
+                     version_str);
   }
+  string raw_settings = msg_in.get(1);
+  filesystem::path attachment;
   if (msg_in.parts() == 3) {
     auto tmp_mads_dir = filesystem::temp_directory_path() / "mads";
     if (!filesystem::exists(tmp_mads_dir)) {
       if (!filesystem::create_directory(tmp_mads_dir)) {
-        throw AgentError("Failed to create temporary directory for attachments");
+        socket.close();
+        throw AgentError(
+            "Failed to create temporary directory for attachments");
       }
     }
-    // Save the attachment to a temporary file
     auto tmp_file = tmp_mads_dir / (name + ".plugin");
     ofstream ofs(tmp_file, ios::out | ios::binary);
     if (!ofs) {
-      throw AgentError("Failed to open temporary file for writing attachment from broker");
+      socket.close();
+      throw AgentError(
+          "Failed to open temporary file for writing attachment from broker");
     }
     ofs.write(msg_in.get(2).data(), msg_in.get(2).size());
     if (!ofs.good()) {
-      throw AgentError("Failed to write attachment from broker to temporary file");
+      socket.close();
+      throw AgentError(
+          "Failed to write attachment from broker to temporary file");
     }
     ofs.close();
-    result = make_tuple(msg_in.get(1), tmp_file);
-  } else {
-    result = make_tuple(msg_in.get(1), filesystem::path());
+    attachment = tmp_file;
   }
-  return result;
-}
 
-double Agent::get_broker_timecode(string uri, int timeout) {
-  zmqpp::socket socket(_context, zmqpp::socket_type::req);
-  if (_curve_auth) {
-    if (_curve_auth->client_public_key().empty() || _curve_auth->client_secret_key().empty() || _curve_auth->server_public_key().empty()) {
-      _curve_auth->setup_curve_client(socket, client_key_name, server_key_name);
-    } else {
-      _curve_auth->setup_curve_client(socket);
-    }
-  }
-  message msg;
-  if (timeout > 0) {
-    socket.set(zmqpp::socket_option::receive_timeout, timeout);
-    socket.set(zmqpp::socket_option::send_timeout, timeout);
-  }
-  socket.connect(uri);
-  msg << string("v") + LIB_VERSION << "timecode";
-  socket.send(msg);
-  if (!socket.receive(msg)) {
-    socket.disconnect(uri);
+  // ---- timecode request (same socket) ----
+  chrono::system_clock::time_point now = chrono::system_clock::now();
+  message tc_out, tc_in;
+  tc_out << string("v") + LIB_VERSION << "timecode";
+  socket.send(tc_out);
+  if (!socket.receive(tc_in)) {
     socket.close();
     throw AgentError("Timed out in receiving timecode from broker");
   }
-  double timecode = std::stod(msg.get(0));
+  double broker_tc = std::stod(tc_in.get(0));
+  double timecode_offset = broker_tc - timecode(now, timecode_fps);
+
   socket.disconnect(uri);
   socket.close();
-  return timecode;
+  return make_tuple(raw_settings, attachment, timecode_offset);
 }
 
 // Public methods implementations
@@ -212,13 +333,10 @@ void Agent::init(bool crypto, bool install_watchdog) {
   else if (settings_are_local()) {
     _config = (toml::table)toml::parse_file(_settings_uri);
   } else {
-    double broker_tc;
-    auto received = read_settings(_settings_uri, _name, _settings_timeout);
+    auto received = query_broker(_settings_uri, _name, _settings_timeout);
     _raw_settings = get<0>(received);
     _attachment_path = get<1>(received);
-    chrono::system_clock::time_point now = chrono::system_clock::now();
-    broker_tc = get_broker_timecode(_settings_uri, _settings_timeout);
-    _timecode_offset = broker_tc - timecode(now, timecode_fps);
+    _timecode_offset = get<2>(received);
     _config = (toml::table)toml::parse(_raw_settings);
   }
   // member variables
@@ -274,6 +392,15 @@ void Agent::init(bool crypto, bool install_watchdog) {
 
   load_settings();
 
+  // Cache the JSON projection of the settings: they are effectively immutable
+  // after init(), so there is no need to re-serialise TOML -> string -> JSON on
+  // every register_event()/info call (REFACTOR.md §2.3).
+  if (_config[_name].is_table()) {
+    stringstream ss;
+    ss << toml::json_formatter{*_config[_name].as_table()};
+    _settings_json = nlohmann::json::parse(ss.str());
+  }
+
   _init_done = true;
 }
 
@@ -286,6 +413,11 @@ Agent::~Agent() {
 void Agent::shutdown() {
   if (_shutdown_done) return;
   _shutdown_done = true;
+
+  // 0. Stop the watchdog first so that setting Mads::running=false below does
+  //    not trip its force-exit countdown during an orderly shutdown.
+  _watchdog_stop = true;
+  if (_watchdog_thread.joinable()) _watchdog_thread.join();
 
   // 1. Signal all threads to stop
   Mads::running = false;
@@ -322,30 +454,48 @@ void Agent::shutdown() {
 }
 
 void Agent::install_loop_watchdog(uint8_t max_count) {
-  thread([max_count]() {
-    while(true) {
+  // Cooperative failsafe (REFACTOR.md §1.5): when Mads::running goes false the
+  // main thread is expected to leave loop() and run shutdown(), which sets
+  // _watchdog_stop and joins this thread promptly. Only if the orderly path
+  // does NOT complete within the bounded grace period do we force-exit, and we
+  // use quick_exit() to skip static destructors that might themselves hang.
+  _watchdog_stop = false;
+  _watchdog_thread = thread([this, max_count]() {
+    using namespace std::chrono;
+    bool counting = false;
+    steady_clock::time_point deadline{};
+    while (!_watchdog_stop) {
       if (!Mads::running) {
-        std::signal(SIGINT, SIG_DFL);
-        cerr << style::italic << "\nWaiting for all resources to close"
-             << " (or CTRL-C again to force)";
-        for (uint8_t count = 0; count < max_count; count++) {
-          this_thread::sleep_for(chrono::seconds(2));
-          cerr << ".";
-          flush(cerr);
+        if (!counting) {
+          counting = true;
+          std::signal(SIGINT, SIG_DFL);
+          deadline = steady_clock::now() + seconds(2 * max_count);
+#ifndef MADS_AGENT_NO_INFO
+          cerr << style::italic << "\nWaiting for all resources to close"
+               << " (or CTRL-C again to force)..." << style::reset << endl;
+#endif
         }
-        cerr << " done." << style::reset << endl;
-        exit(EXIT_SUCCESS);
-      } else {
-        this_thread::sleep_for(chrono::seconds(2));
+        if (steady_clock::now() >= deadline) {
+          // Force exit, skipping static destructors that might themselves hang.
+          std::_Exit(EXIT_SUCCESS);
+        }
       }
-    } 
-  }).detach();
+      this_thread::sleep_for(milliseconds(200));
+    }
+  });
 }
 
 nlohmann::json Agent::get_settings() {
-  stringstream ss;
-  ss << toml::json_formatter{*_config[_name].as_table()};
-  return nlohmann::json::parse(ss.str());
+  // Return the cached projection computed in init(). Fall back to computing it
+  // on demand if called before initialization completed.
+  if (!_settings_json.is_null())
+    return _settings_json;
+  if (_config[_name].is_table()) {
+    stringstream ss;
+    ss << toml::json_formatter{*_config[_name].as_table()};
+    _settings_json = nlohmann::json::parse(ss.str());
+  }
+  return _settings_json;
 }
 
 #ifndef MADS_AGENT_NO_INFO
@@ -456,10 +606,36 @@ void Agent::register_event(const event_type event, const nlohmann::json &info,
   if (!_init_done)
     throw AgentError("Agent not initialized");
   nlohmann::json settings = get_settings();
-  thread t([info, info_name, event, settings, this]() {
+
+  auto build_payload = [&]() {
     nlohmann::json payload;
+    payload["name"] = _name;
+    payload["version"] = LIB_VERSION;
+    payload["event"] = event_map.at(event);
+    payload["timecode_offset"] = _timecode_offset;
+    payload["settings_path"] = _settings_uri;
+    payload["settings"] = settings;
+    if (!_agent_id.empty()) {
+      payload["agent_id"] = _agent_id;
+    }
+    if (!info.empty()) {
+      payload[info_name] = info;
+    }
+    return payload;
+  };
+
+  // Only startup/shutdown need the timing offset that the delayed thread
+  // provides. Every other event is published synchronously, avoiding a thread
+  // (and a full settings-copy) per event (REFACTOR.md §2.4).
+  if (event != event_type::startup && event != event_type::shutdown) {
+    publish(build_payload(), METADATA_TOPIC);
+    return;
+  }
+
+  thread t([info, info_name, event, settings, this]() {
     if (event == event_type::startup)
-      this_thread::sleep_for(chrono::milliseconds(STARTUP_SHUTDOWN_DELAY));
+      this_thread::sleep_for(chrono::milliseconds(STARTUP_SHUTDOWN_DELAY_MS));
+    nlohmann::json payload;
     payload["name"] = _name;
     payload["version"] = LIB_VERSION;
     payload["event"] = event_map.at(event);
@@ -476,7 +652,7 @@ void Agent::register_event(const event_type event, const nlohmann::json &info,
   });
   if (event == event_type::shutdown) {
     // wait for the thread to publish the message
-    this_thread::sleep_for(chrono::milliseconds(STARTUP_SHUTDOWN_DELAY));
+    this_thread::sleep_for(chrono::milliseconds(STARTUP_SHUTDOWN_DELAY_MS));
     t.join();
   } else {
     t.detach();
@@ -487,29 +663,40 @@ void Agent::publish(nlohmann::json payload, string topic) {
   if (!_init_done)
     throw AgentError("Agent not initialized");
   message message;
-  string str;
   int32_t offset = 0;
   if (payload.contains("event"))
     if (payload["event"] == event_map.at(event_type::shutdown) ||
         payload["event"] == event_map.at(event_type::startup)) {
-      offset = STARTUP_SHUTDOWN_DELAY;
+      offset = STARTUP_SHUTDOWN_DELAY_MS;
     }
   chrono::system_clock::time_point now = chrono::system_clock::now();
+  // Only stamp fields the caller has not already provided (REFACTOR.md §3.2).
   if (!payload.contains("agent_id")) {
     payload["agent_id"] = _agent_id;
   }
-  payload["hostname"] = _hostname;
-  payload["timestamp"]["$date"] = get_ISODate_time(now, -offset);
+  if (!payload.contains("hostname")) {
+    payload["hostname"] = _hostname;
+  }
+  if (!payload.contains("timestamp")) {
+    payload["timestamp"]["$date"] = get_ISODate_time(now, -offset);
+  }
   if (!payload.contains("timecode")) {
     payload["timecode"] = timecode(now, timecode_fps) - (offset / 1000.0);
   }
-  str = payload.dump();
   if (topic.empty()) {
     topic = _pub_topic;
   }
+  string body = encode_payload(payload, _wire_format);
   string compressed;
-  snappy::Compress(str.data(), str.size(), &compressed);
-  message << topic << compressed;
+  snappy::Compress(body.data(), body.size(), &compressed);
+  if (_wire_format == WireFormat::MsgPack) {
+    message << topic
+            << make_wire_header(WireFormat::MsgPack, Comp::Snappy, false)
+            << compressed;
+  } else {
+    // Legacy header-less frame: [topic][snappy(json)].
+    message << topic << compressed;
+  }
   _publisher.send(message);
 }
 
@@ -519,15 +706,25 @@ void Agent::publish(const char *payload, size_t len,
     throw AgentError("Agent not initialized");
   message message;
   chrono::system_clock::time_point now = chrono::system_clock::now();
-  meta["timestamp"]["$date"] = get_ISODate_time(now);
-  meta["timecode"] = timecode(now, timecode_fps);
+  if (!meta.contains("timestamp"))
+    meta["timestamp"]["$date"] = get_ISODate_time(now);
+  if (!meta.contains("timecode"))
+    meta["timecode"] = timecode(now, timecode_fps);
   if (!meta.contains("agent_id"))
     meta["agent_id"] = _agent_id;
   if (!meta.contains("hostname"))
     meta["hostname"] = _hostname;
   if (topic.empty())
     topic = _pub_topic;
-  message << topic << meta.dump();
+  if (_wire_format == WireFormat::MsgPack) {
+    // [topic][header(has_blob)][msgpack(meta)][raw bytes]. Metadata is small,
+    // so it is left uncompressed.
+    message << topic << make_wire_header(WireFormat::MsgPack, Comp::None, true)
+            << encode_payload(meta, WireFormat::MsgPack);
+  } else {
+    // Legacy blob frame: [topic][json meta][raw bytes].
+    message << topic << meta.dump();
+  }
   message.add_raw(payload, len);
   _publisher.send(message);
 }
@@ -575,63 +772,126 @@ inline bool Agent::receive_raw(message &message, bool dont_block) {
 message_type Agent::receive(bool dont_block) {
   if (!_init_done)
     throw AgentError("Agent not initialized");
+  // Concurrency guard (REFACTOR.md §1.7): when threaded remote control owns the
+  // subscriber socket, the application must not also call receive().
+  if (_rc_owns_socket)
+    throw AgentError("receive() cannot be used while threaded remote control "
+                     "owns the subscriber socket");
   message message;
-  message_type result = message_type::none;
-  string topic, format, payload, j;
   if (!receive_raw(message, dont_block)) {
-    return result;
+    return message_type::none;
   }
-  switch (message.parts()) {
-  case 0:
-    throw AgentError("Received message with no parts");
-  case 1:
-    throw AgentError("Received message with only one part");
-  case 2: // Payload is JSON
-    message >> topic >> payload;
-    if (payload.empty()) {
-      result = message_type::none;
-      break;
+
+  const size_t parts = message.parts();
+  // Malformed frames from the network are dropped, never fatal (§1.2).
+  if (parts < 2) {
+    _dropped_messages++;
+    return message_type::none;
+  }
+
+  string topic = message.get(0);
+
+  // Extended, self-describing frame? (§1.3)
+  WireHeader hdr;
+  if (parse_wire_header(message.get(1), hdr)) {
+    if (hdr.has_blob) {
+      if (parts < 4) {
+        _dropped_messages++;
+        return message_type::none;
+      }
+      string meta_text;
+      if (!decode_to_json_text(message.get(2), hdr.format, hdr.compression,
+                               meta_text)) {
+        _dropped_messages++;
+        return message_type::none;
+      }
+      const auto *p =
+          static_cast<const unsigned char *>(message.raw_data(3));
+      const size_t n = message.size(3);
+      std::lock_guard<std::mutex> lock(_message_state_mutex);
+      _last_blob = make_tuple(std::move(topic), std::move(meta_text),
+                              vector<unsigned char>(p, p + n));
+      return message_type::blob;
     }
-    snappy::Uncompress(payload.data(), payload.size(), &j);
+    // Data frame: [topic][header][payload]
+    if (parts < 3) {
+      _dropped_messages++;
+      return message_type::none;
+    }
+    string j;
+    if (!decode_to_json_text(message.get(2), hdr.format, hdr.compression, j)) {
+      _dropped_messages++;
+      return message_type::none;
+    }
     if (_remote_controlled && topic == "control") {
       remote_control(j);
-      break;
+      return message_type::json;
     }
-    {
-      std::lock_guard<std::mutex> lock(_message_state_mutex);
-      _status[topic] = j;
-      _last_message = make_tuple(topic, j);
-    }
-    result = message_type::json;
-    break;
-  case 3: // Payload is a binary blob, type is in message[1]
-    message >> topic >> format >> payload;
-    {
-      std::lock_guard<std::mutex> lock(_message_state_mutex);
-      _last_blob = make_tuple(
-          topic, format, vector<unsigned char>(payload.begin(), payload.end()));
-    }
-    result = message_type::blob;
-    break;
-  default:
-    throw AgentError("Received message with "s + to_string(message.parts()) +
-                     " parts"s);
+    std::lock_guard<std::mutex> lock(_message_state_mutex);
+    _status[topic] = j;
+    _last_message = make_tuple(std::move(topic), std::move(j));
+    return message_type::json;
   }
-  return result;
+
+  // Legacy frames, disambiguated by part count.
+  switch (parts) {
+  case 2: { // [topic][snappy(json)]
+    string payload = message.get(1);
+    if (payload.empty()) {
+      return message_type::none;
+    }
+    string j;
+    if (!snappy::Uncompress(payload.data(), payload.size(), &j)) {
+      // Not a snappy frame (foreign/corrupt): drop instead of storing garbage
+      // and crashing the downstream json::parse (§1.1).
+      _dropped_messages++;
+      return message_type::none;
+    }
+    if (_remote_controlled && topic == "control") {
+      remote_control(j);
+      return message_type::json;
+    }
+    std::lock_guard<std::mutex> lock(_message_state_mutex);
+    _status[topic] = j;
+    _last_message = make_tuple(std::move(topic), std::move(j));
+    return message_type::json;
+  }
+  case 3: { // [topic][json meta][raw bytes]
+    string format = message.get(1);
+    const auto *p = static_cast<const unsigned char *>(message.raw_data(2));
+    const size_t n = message.size(2);
+    std::lock_guard<std::mutex> lock(_message_state_mutex);
+    _last_blob = make_tuple(std::move(topic), std::move(format),
+                            vector<unsigned char>(p, p + n));
+    return message_type::blob;
+  }
+  default:
+    _dropped_messages++;
+    return message_type::none;
+  }
+}
+
+void Agent::install_signal_handlers() {
+  // Idempotent and process-global (REFACTOR.md §1.6): handlers are installed
+  // once, so repeated loop() calls or multiple agents in one process do not
+  // clobber each other's handler state.
+  std::call_once(g_signal_once, []() {
+    std::signal(SIGINT, [](int signum) {
+      UNUSED(signum);
+      Mads::running = false;
+    });
+    std::signal(SIGTERM, [](int signum) {
+      UNUSED(signum);
+      Mads::running = false;
+    });
+  });
 }
 
 #ifdef MADS_LOOP_USES_THREADS
 void Agent::loop(loop_fun_t const &lambda, chrono::milliseconds duration) {
   if (!_init_done)
     throw AgentError("Agent not initialized");
-  std::signal(SIGINT, [](int signum) {
-    UNUSED(signum);
-    Mads::running = false;
-  });
-  std::signal(SIGTERM, [](int signum) {
-    UNUSED(signum);
-    Mads::running = false;
-  });
+  install_signal_handlers();
   chrono::milliseconds nld(0); // next loop duration
   while (Mads::running) {
     if (duration > 0ms || nld > 0ms) {
@@ -656,14 +916,7 @@ void Agent::loop(loop_fun_t const &lambda, chrono::milliseconds duration) {
 void Agent::loop(loop_fun_t const &lambda, chrono::milliseconds duration) {
   if (!_init_done)
     throw AgentError("Agent not initialized");
-  std::signal(SIGINT, [](int signum) {
-    UNUSED(signum);
-    Mads::running = false;
-  });
-  std::signal(SIGTERM, [](int signum) {
-    UNUSED(signum);
-    Mads::running = false;
-  });
+  install_signal_handlers();
   chrono::milliseconds nld(0); // next loop duration
   while (Mads::running) {
     chrono::milliseconds sleep_duration = nld == 0ms ? duration : nld;
@@ -696,22 +949,38 @@ void Agent::enable_remote_control(bool threaded) {
     throw AgentError("Cannot enable remote control after connecting");
   _remote_controlled = true;
   _sub_topic.push_back("control");
-  if (threaded)
+  if (threaded) {
+    // The drain thread owns the subscriber socket exclusively (§1.7).
+    _rc_owns_socket = true;
     _rc_thread = thread([this]() {
       _subscriber.set(zmqpp::socket_option::receive_timeout, 500);
       message msg;
-      string topic, payload, j;
       while (Mads::running) {
-        _subscriber.receive(msg, false);
-        if (msg.parts() == 2) {
-          msg >> topic >> payload;
-          if (topic == "control") {
-            snappy::Uncompress(payload.data(), payload.size(), &j);
-            remote_control(j);
-          }
+        if (!_subscriber.receive(msg, false))
+          continue;
+        const size_t parts = msg.parts();
+        if (parts < 2)
+          continue;
+        string topic = msg.get(0);
+        if (topic != "control")
+          continue;
+        string j;
+        bool ok = false;
+        WireHeader hdr;
+        if (parse_wire_header(msg.get(1), hdr) && !hdr.has_blob &&
+            parts >= 3) {
+          ok = decode_to_json_text(msg.get(2), hdr.format, hdr.compression, j);
+        } else if (parts == 2) {
+          string payload = msg.get(1);
+          ok = snappy::Uncompress(payload.data(), payload.size(), &j);
         }
+        if (ok)
+          remote_control(j);
+        else
+          _dropped_messages++;
       }
     });
+  }
 }
 
 
@@ -832,6 +1101,16 @@ tuple<string, string, vector<unsigned char>> Agent::last_blob() {
   return _last_blob;
 }
 
+tuple<string_view, string_view, span<const unsigned char>>
+Agent::last_blob_view() const {
+  std::lock_guard<std::mutex> lock(_message_state_mutex);
+  return make_tuple(string_view(get<0>(_last_blob)),
+                    string_view(get<1>(_last_blob)),
+                    span<const unsigned char>(get<2>(_last_blob)));
+}
+
+size_t Agent::dropped_messages() const { return _dropped_messages.load(); }
+
 
 bool Agent::is_connected() { return _connected; }
 
@@ -906,9 +1185,11 @@ bool Agent::conflate() {
 
 void Agent::set_high_watermark(int i) {
   if (_connected) throw AgentError("Cannot set_high_watermark after connection");
-  if (i == 0) i = 1;
-  _last_value_only = (i == 1);
+  // i == 0 now means "unlimited" (ZMQ semantics); it no longer silently
+  // switches to Last-Known-Value mode as it used to (REFACTOR.md §1.4).
   _subscriber.set(socket_option::receive_high_water_mark, i);
+  // Backward-compatible convenience: a queue of exactly 1 selects LKV delivery.
+  set_delivery(i == 1 ? Delivery::LastKnownValue : Delivery::Queued);
 }
 
 int Agent::high_watermark() {
@@ -916,6 +1197,19 @@ int Agent::high_watermark() {
   _subscriber.get(socket_option::receive_high_water_mark, i);
   return i;
 }
+
+void Agent::set_delivery(Delivery d) {
+  if (_connected) throw AgentError("Cannot set_delivery after connection");
+  _last_value_only = (d == Delivery::LastKnownValue);
+}
+
+Delivery Agent::delivery() const {
+  return _last_value_only ? Delivery::LastKnownValue : Delivery::Queued;
+}
+
+void Agent::set_wire_format(WireFormat fmt) { _wire_format = fmt; }
+
+WireFormat Agent::wire_format() const { return _wire_format; }
 
 
 
