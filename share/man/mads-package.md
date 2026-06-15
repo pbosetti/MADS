@@ -7,6 +7,7 @@
 
 **mads-package**
   [**\-l**, **\-\-list**]
+  [**\-v**, **\-\-verbose**]
   [**\-n**, **\-\-info** *package*]
   [**\-i**, **\-\-install** *package*]
   [**\-f**, **\-\-force**]
@@ -28,6 +29,9 @@ The package index and package metadata are cached under the user's home director
 
 **\-l**, **\-\-list**
 :  List installable MADS packages. For each package, show the repository, the latest stable release or latest pre-release fallback, and compatible ZIP release assets for the current platform.
+
+**\-v**, **\-\-verbose**
+:  Show additional information when listing packages. This includes the GitHub repository About text when available, plus package requirements read from an optional **mads_package.json** file in the repository root.
 
 **\-n**, **\-\-info** *package*
 :  Print detailed information for *package*. This includes the GitHub repository About text when available, plus package requirements read from an optional **mads_package.json** file in the repository root.
