@@ -1,0 +1,195 @@
+name: CI
+
+on:
+  push:
+    branches: [v2]
+    tags: ['v*.*.*']
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+
+  # ── macOS universal (arm64 + x86_64) ──────────────────────────────────────
+  build-macos:
+    name: macOS (universal)
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # git describe --tags needs full history
+
+      - name: Install build tools
+        run: brew install ninja openssl@3
+
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-${{ runner.os }}-universal-${{ hashFiles('vendors/CMakeLists.txt') }}
+          restore-keys: deps-${{ runner.os }}-universal-
+
+      - name: Configure
+        run: |
+          cmake -Bbuild \
+            -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)" \
+            -DMADS_DIRECTOR=OFF
+
+      - name: Build
+        run: cmake --build build -j$(sysctl -n hw.logicalcpu)
+
+      - name: Package
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: build
+        run: cpack
+
+      - name: Upload package
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-macos-universal
+          path: packages/Mads-*
+
+  # ── Linux x86_64 + arm64 (native runners, clang) ──────────────────────────
+  build-linux:
+    name: Linux (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            ninja-build clang \
+            libssl-dev libsasl2-dev
+
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-linux-${{ matrix.arch }}-${{ hashFiles('vendors/CMakeLists.txt') }}
+          restore-keys: deps-linux-${{ matrix.arch }}-
+
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -Bbuild \
+            -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DMADS_DIRECTOR=OFF
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Package
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: build
+        run: cpack
+
+      - name: Upload package
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-linux-${{ matrix.arch }}
+          path: packages/Mads-*
+
+  # ── Windows amd64 (MSVC + Ninja) ──────────────────────────────────────────
+  build-windows:
+    name: Windows (amd64)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install OpenSSL
+        run: choco install openssl --no-progress -y
+
+      - name: Set up MSVC (amd64)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64
+
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-windows-amd64-${{ hashFiles('vendors/CMakeLists.txt') }}
+          restore-keys: deps-windows-amd64-
+
+      - name: Configure
+        run: >
+          cmake -Bbuild
+          -GNinja
+          -DCMAKE_BUILD_TYPE=Release
+          -DMADS_DIRECTOR=OFF
+          "-DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install"
+          "-DOPENSSL_ROOT_DIR=C:/Program Files/OpenSSL-Win64"
+
+      - name: Build
+        run: cmake --build build -j $env:NUMBER_OF_PROCESSORS
+
+      - name: Add InnoSetup to PATH
+        if: startsWith(github.ref, 'refs/tags/')
+        run: echo "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      # Windows CPack uses CPACK_INSTALLED_DIRECTORIES which references
+      # CMAKE_INSTALL_PREFIX, so we must install before packaging.
+      - name: Install (stage for packaging)
+        if: startsWith(github.ref, 'refs/tags/')
+        run: cmake --install build
+
+      - name: Package
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: build
+        run: cpack
+
+      - name: Upload package
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-windows-amd64
+          path: packages/Mads-*
+
+  # ── GitHub Release (tag pushes only) ──────────────────────────────────────
+  release:
+    name: GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-macos, build-linux, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: packages
+          merge-multiple: true
+
+      - name: Create release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: packages/**
+          generate_release_notes: true
+          fail_on_unmatched_files: false
