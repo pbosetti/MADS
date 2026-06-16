@@ -17,7 +17,7 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0   # git describe --tags needs full history
 
@@ -25,7 +25,7 @@ jobs:
         run: brew install ninja openssl@3
 
       - name: Cache FetchContent dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: build/_deps
           key: deps-${{ runner.os }}-universal-${{ hashFiles('vendors/CMakeLists.txt') }}
@@ -50,7 +50,7 @@ jobs:
 
       - name: Upload package
         if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: package-macos-universal
           path: packages/Mads-*
@@ -69,7 +69,7 @@ jobs:
             runner: ubuntu-22.04-arm
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -81,7 +81,7 @@ jobs:
             libssl-dev libsasl2-dev
 
       - name: Cache FetchContent dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: build/_deps
           key: deps-linux-${{ matrix.arch }}-${{ hashFiles('vendors/CMakeLists.txt') }}
@@ -107,7 +107,7 @@ jobs:
 
       - name: Upload package
         if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: package-linux-${{ matrix.arch }}
           path: packages/Mads-*
@@ -131,7 +131,7 @@ jobs:
           arch: amd64
 
       - name: Cache FetchContent dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: build/_deps
           key: deps-windows-amd64-${{ hashFiles('vendors/CMakeLists.txt') }}
