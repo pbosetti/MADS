@@ -12,6 +12,7 @@
   [**\-i**, **\-\-install** *package*]
   [**\-f**, **\-\-force**]
   [**\-\-no-cache**]
+  [**\-\-json**]
   [**\-v**, **\-\-version**]
   [**\-h**, **\-\-help**]
 
@@ -44,6 +45,9 @@ The package index and package metadata are cached under the user's home director
 
 **\-\-no-cache**
 :  Fetch package data without reading cached results. The cache is still updated after a successful fetch, unless a GitHub HTTP 403 response was observed.
+  
+**\-\-json**
+:  Output information in JSON format.
 
 **\-v**, **\-\-version**
 :  Show version information.
