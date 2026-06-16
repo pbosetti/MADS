@@ -165,7 +165,7 @@ FetchContent_Declare(
 FetchContent_Declare(
   gv2fsm
   GIT_REPOSITORY https://github.com/pbosetti/gv2fsm.git
-  GIT_TAG v1.2.1
+  GIT_TAG v1.3.0
   GIT_SHALLOW TRUE
 )
 
