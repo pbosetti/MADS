@@ -38,7 +38,7 @@ include(FetchContent)
 # pugg is for the plugin system
 FetchContent_Declare(pugg 
   GIT_REPOSITORY https://github.com/pbosetti/pugg.git
-  GIT_TAG        1.0.2
+  GIT_TAG        1.0.4
   GIT_SHALLOW    TRUE
   EXCLUDE_FROM_ALL
 )

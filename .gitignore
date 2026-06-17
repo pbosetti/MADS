@@ -6,6 +6,7 @@ db
 src/mads.hpp
 .vscode
 .venv
+/.claude
 
 /*.jpg
 /*.txt

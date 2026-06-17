@@ -122,7 +122,7 @@ FetchContent_Declare(
 FetchContent_Declare(
   pugg
   GIT_REPOSITORY https://github.com/pbosetti/pugg.git
-  GIT_TAG master
+  GIT_TAG 1.0.4
   GIT_SHALLOW TRUE
 )
 
@@ -165,7 +165,7 @@ FetchContent_Declare(
 FetchContent_Declare(
   gv2fsm
   GIT_REPOSITORY https://github.com/pbosetti/gv2fsm.git
-  GIT_TAG v1.3.0
+  GIT_TAG v1.3.3
   GIT_SHALLOW TRUE
 )
 
@@ -342,6 +342,17 @@ add_vendor(tomlplusplus)
 # existing target instead of reconfiguring inja with a conflicting json setup.
 add_vendor_exclude_from_all(inja)
 add_vendor(gv2fsm)
+# gv2fsm installs its own `gv2fsm` executable, which is identical to our
+# `mads-fsm`. We only want `mads-fsm` installed, so drop the redundant binary
+# after gv2fsm's own install rules have run. (The static library and headers are
+# still installed for SDK consumers.)
+install(CODE "
+  set(_mads_install_root \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}\")
+  file(REMOVE
+    \"\${_mads_install_root}/${CMAKE_INSTALL_BINDIR}/gv2fsm\"
+    \"\${_mads_install_root}/${CMAKE_INSTALL_BINDIR}/gv2fsm.exe\"
+  )
+")
 add_vendor_exclude_from_all(pugg)
 add_vendor_exclude_from_all(libsodium)
 set(SODIUM_INCLUDE_DIRS

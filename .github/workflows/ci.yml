@@ -4,10 +4,11 @@ on:
   push:
     branches: [v2]
     tags: ['v*.*.*']
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' }}
 
 jobs:
 
@@ -44,12 +45,12 @@ jobs:
         run: cmake --build build -j$(sysctl -n hw.logicalcpu)
 
       - name: Package
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         working-directory: build
         run: cpack
 
       - name: Upload package
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v7
         with:
           name: package-macos-universal
@@ -101,12 +102,12 @@ jobs:
         run: cmake --build build -j$(nproc)
 
       - name: Package
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         working-directory: build
         run: cpack
 
       - name: Upload package
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v7
         with:
           name: package-linux-${{ matrix.arch }}
@@ -118,7 +119,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -150,46 +151,58 @@ jobs:
         run: cmake --build build -j $env:NUMBER_OF_PROCESSORS
 
       - name: Add InnoSetup to PATH
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         run: echo "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       # Windows CPack uses CPACK_INSTALLED_DIRECTORIES which references
       # CMAKE_INSTALL_PREFIX, so we must install before packaging.
       - name: Install (stage for packaging)
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         run: cmake --install build
 
       - name: Package
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         working-directory: build
         run: cpack
 
       - name: Upload package
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
         with:
           name: package-windows-amd64
           path: packages/Mads-*
 
-  # ── GitHub Release (tag pushes only) ──────────────────────────────────────
+  # ── GitHub Release (tag pushes and manual dispatch) ───────────────────────
   release:
     name: GitHub Release
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     needs: [build-macos, build-linux, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
+      - uses: actions/checkout@v6
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          fetch-depth: 0
+
+      - name: Compute release tag (manual dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        id: version
+        run: echo "tag=$(git describe --tags)" >> $GITHUB_OUTPUT
+
       - name: Download all package artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: packages
           merge-multiple: true
 
       - name: Create release and upload assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          prerelease: ${{ github.event_name == 'workflow_dispatch' }}
           files: packages/**
           generate_release_notes: true
           fail_on_unmatched_files: false
