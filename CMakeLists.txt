@@ -24,14 +24,22 @@ execute_process(
   ERROR_QUIET
 )
 if(IS_GIT_REPO STREQUAL "true")
-  # Get the latest tag
+  # Get the latest tag. We only ever anchor on official release tags
+  # (vMAJOR.MINOR.PATCH), so --exclude=*-g* skips any stray describe-style
+  # pre-release tags that may exist in the history.
   execute_process(
-    COMMAND git describe --tags --dirty
+    COMMAND git describe --tags --dirty --exclude=*-g*
     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
     OUTPUT_VARIABLE GIT_TAG
     OUTPUT_STRIP_TRAILING_WHITESPACE
     ERROR_QUIET
   )
+  # On an exact release tag this is just "v1.2.3". On commits past a tag (i.e.
+  # manually dispatched, unofficial builds) git describe appends "-<n>-g<hash>";
+  # mark these as pre-releases by turning that into "-p<n>-g<hash>", e.g.
+  # v1.2.3-p3-gabc1234.
+  string(REGEX REPLACE "^(v[0-9]+\\.[0-9]+\\.[0-9]+)-([0-9]+)-g" "\\1-p\\2-g"
+         GIT_TAG "${GIT_TAG}")
   if(GIT_TAG MATCHES "^v([0-9]+)\\.([0-9]+)\\.([0-9]+)(.*)?$")
     string(REGEX REPLACE "^v([0-9]+)\\.([0-9]+)\\.([0-9]+)(.*)?$" "\\1" CPACK_PACKAGE_VERSION_MAJOR "${GIT_TAG}")
     string(REGEX REPLACE "^v([0-9]+)\\.([0-9]+)\\.([0-9]+)(.*)?$" "\\2" CPACK_PACKAGE_VERSION_MINOR "${GIT_TAG}")

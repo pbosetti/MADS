@@ -172,26 +172,19 @@ jobs:
           name: package-windows-amd64
           path: packages/Mads-*
 
-  # ── GitHub Release (tag pushes and manual dispatch) ───────────────────────
+  # ── GitHub Release (tag pushes only) ──────────────────────────────────────
+  # Only runs for pushed release tags (v*.*.*). Manual (workflow_dispatch) runs
+  # still build and upload package artifacts in the build jobs above, but never
+  # create a git tag or a GitHub Release.
   release:
     name: GitHub Release
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    if: startsWith(github.ref, 'refs/tags/')
     needs: [build-macos, build-linux, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
-      - uses: actions/checkout@v6
-        if: github.event_name == 'workflow_dispatch'
-        with:
-          fetch-depth: 0
-
-      - name: Compute release tag (manual dispatch)
-        if: github.event_name == 'workflow_dispatch'
-        id: version
-        run: echo "tag=$(git describe --tags)" >> $GITHUB_OUTPUT
-
       - name: Download all package artifacts
         uses: actions/download-artifact@v8
         with:
@@ -201,8 +194,8 @@ jobs:
       - name: Create release and upload assets
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          prerelease: ${{ github.event_name == 'workflow_dispatch' }}
+          # tag_name defaults to the pushed tag (github.ref); the release is
+          # attached to the tag I created manually, none is auto-created.
           files: packages/**
           generate_release_notes: true
           fail_on_unmatched_files: false
