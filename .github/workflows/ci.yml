@@ -172,19 +172,35 @@ jobs:
           name: package-windows-amd64
           path: packages/Mads-*
 
-  # ── GitHub Release (tag pushes only) ──────────────────────────────────────
-  # Only runs for pushed release tags (v*.*.*). Manual (workflow_dispatch) runs
-  # still build and upload package artifacts in the build jobs above, but never
-  # create a git tag or a GitHub Release.
+  # ── GitHub Release ────────────────────────────────────────────────────────
+  # Runs on pushed release tags (v*.*.*) -> full release, and on manual dispatch
+  # -> pre-release. Never runs on a normal branch push.
   release:
     name: GitHub Release
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     needs: [build-macos, build-linux, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
+      - uses: actions/checkout@v6
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          fetch-depth: 0   # git describe needs tags + history
+
+      # Manual dispatch has no pushed tag, so derive the pre-release tag from
+      # git describe using the SAME rules as CMake (exclude stray *-g* tags,
+      # rewrite "-<n>-g" to "-p<n>-g") so the tag matches the package names,
+      # e.g. v1.2.3-p3-gabc1234.
+      - name: Compute pre-release tag (manual dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        id: version
+        run: |
+          raw=$(git describe --tags --exclude='*-g*')
+          tag=$(echo "$raw" | sed -E 's/^(v[0-9]+\.[0-9]+\.[0-9]+)-([0-9]+)-g/\1-p\2-g/')
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
       - name: Download all package artifacts
         uses: actions/download-artifact@v8
         with:
@@ -194,8 +210,12 @@ jobs:
       - name: Create release and upload assets
         uses: softprops/action-gh-release@v3
         with:
-          # tag_name defaults to the pushed tag (github.ref); the release is
-          # attached to the tag I created manually, none is auto-created.
+          # On a tag push, tag_name is empty and defaults to the pushed tag.
+          # On manual dispatch, it is the computed v1.2.3-p<n>-g<hash> tag, which
+          # softprops creates at the current commit (non-compounding, since
+          # CMake's git describe excludes *-g* tags).
+          tag_name: ${{ steps.version.outputs.tag }}
+          prerelease: ${{ github.event_name == 'workflow_dispatch' }}
           files: packages/**
           generate_release_notes: true
           fail_on_unmatched_files: false
