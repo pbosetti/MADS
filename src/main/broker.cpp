@@ -27,6 +27,7 @@ Author(s): Paolo Bosetti
 #include "../keypress.hpp"
 #include "../goback.hpp"
 #include "../service_discovery.hpp"
+#include <csignal>
 #include <cstring>
 #include <cxxopts.hpp>
 #include <filesystem>
@@ -211,6 +212,15 @@ template <typename T> constexpr unsigned long long htonll(T value) noexcept {
 void proxy(zmqpp::socket &frontend, zmqpp::socket &backend,
            zmqpp::socket &ctrl) {
   zmqpp::proxy_steerable(frontend, backend, ctrl);
+}
+
+// Install SIGINT/SIGTERM handlers that request a clean shutdown by clearing
+// Mads::running. Used in daemon mode so a `kill`/`systemctl stop` (or CTRL-C)
+// unwinds the proxy and stops advertising instead of killing the process
+// abruptly. Only async-signal-safe work is done here (a store to an atomic).
+void install_signal_handlers() {
+  std::signal(SIGINT, [](int) { Mads::running = false; });
+  std::signal(SIGTERM, [](int) { Mads::running = false; });
 }
 
 std::string &read_settings_file(std::string const &settings_path) {
@@ -491,22 +501,67 @@ int main(int argc, char **argv) {
   cout << "Timecode FPS: " << style::bold << timecode_fps << style::reset
        << endl;
 
-  try {
-    discovery_service.start_advertising(
-        service_info, std::chrono::milliseconds(
-                          config[name]["discovery_interval_ms"].value_or(1000)));
-    cout << "Advertising service on UDP discovery port " << MADS_SERVICE_PORT
-         << " with room name '" << style::bold << service_info.room
-         << style::reset << "'" << endl;
-    // if (service_info.prefer_loopback_for_local_services) {
-    //   cout << style::italic << "            (preferring loopback for local agents)"
-    //        << style::reset;
-    // }
-    // cout << endl;
-  } catch (const runtime_error &e) {
-    cerr << fg::red << "Error starting service discovery: " << e.what() << endl
-         << style::bold << "Service discovery will be disabled"  << style::reset
-         << fg::reset << endl;
+  // In daemon mode, install the shutdown signal handlers before the (possibly
+  // slow) discovery startup so that a SIGINT/SIGTERM arriving during early
+  // startup is handled gracefully rather than terminating the process.
+  if (daemon) {
+    install_signal_handlers();
+  }
+
+  auto discovery_interval = std::chrono::milliseconds(
+      config[name]["discovery_interval_ms"].value_or(1000));
+
+  // Attempt to start advertising once. Returns true on success. On failure
+  // (e.g. the network is not up yet) it returns false and, unless quiet, prints
+  // a warning. start_advertising() throws when there are no broadcast-capable
+  // interfaces, which is exactly the situation we want to keep retrying from.
+  auto try_start_discovery = [&](bool quiet) -> bool {
+    try {
+      discovery_service.start_advertising(service_info, discovery_interval);
+      cout << "Advertising service on UDP discovery port " << MADS_SERVICE_PORT
+           << " with room name '" << style::bold << service_info.room
+           << style::reset << "'" << endl;
+      return true;
+    } catch (const runtime_error &e) {
+      if (!quiet) {
+        cerr << fg::red << "Error starting service discovery: " << e.what()
+             << endl;
+      }
+      return false;
+    }
+  };
+
+  // Background retry: when started as a daemon (e.g. as a system service during
+  // early boot) the network may not be up yet. Keep trying to open the
+  // advertising sockets every 5 seconds until it succeeds, so that advertising
+  // eventually starts on its own. Interactively we just warn once.
+  thread discovery_retry_thread;
+  constexpr auto discovery_retry_interval = std::chrono::seconds(5);
+  if (!try_start_discovery(false)) {
+    if (daemon) {
+      cerr << style::bold << "Will keep retrying every "
+           << discovery_retry_interval.count() << "s in the background"
+           << style::reset << fg::reset << endl;
+      discovery_retry_thread = thread([&, discovery_retry_interval]() {
+        while (Mads::running && !discovery_service.is_advertising()) {
+          // Interruptible sleep so shutdown is not delayed by up to 5s.
+          for (auto waited = std::chrono::milliseconds::zero();
+               waited < discovery_retry_interval && Mads::running;
+               waited += std::chrono::milliseconds(100)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+          }
+          if (!Mads::running) {
+            break;
+          }
+          if (try_start_discovery(true)) {
+            break;
+          }
+        }
+      });
+    } else {
+      cerr << style::bold << "Service discovery will be disabled" << style::reset
+           << fg::reset << endl;
+    }
   }
 
   // print settings URI for clients
@@ -546,9 +601,40 @@ int main(int argc, char **argv) {
 #endif
          << ", will watch for changes to " << settings_path << endl
          << fg::reset << endl;
-    zmqpp::proxy(frontend, backend);
-    cerr << "Proxy exited" << endl;
+
+    // Graceful shutdown: run the proxy in steerable mode so that SIGINT/SIGTERM
+    // (clearing Mads::running, see install_signal_handlers above) can unwind it
+    // cleanly. The blocking zmqpp::proxy() cannot be interrupted by a signal, so
+    // we drive a steerable proxy from a control socket and send TERMINATE once a
+    // shutdown is requested.
+    zmqpp::socket controlled(context, zmqpp::socket_type::rep);
+    controlled.bind("inproc://broker-ctrl");
+    zmqpp::socket controller(context, zmqpp::socket_type::req);
+    controller.connect("inproc://broker-ctrl");
+
+    thread proxy_thread(proxy, ref(frontend), ref(backend), ref(controlled));
+
+    while (Mads::running) {
+      this_thread::sleep_for(200ms);
+    }
+
+    cout << fg::green << "Shutdown requested, stopping proxy..." << fg::reset
+         << endl;
+    zmqpp::message msg;
+    controller.send("TERMINATE");
+    controller.receive(msg);
+    proxy_thread.join();
+
+    if (discovery_retry_thread.joinable()) {
+      discovery_retry_thread.join();
+    }
     discovery_service.stop_advertising();
+    // Stop the settings worker before terminating the context, otherwise its
+    // blocking receive() would throw "Context was terminated".
+    running = false;
+    settings_thread.join();
+    controller.close();
+    controlled.close();
     frontend.close();
     backend.close();
     context.terminate();
