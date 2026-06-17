@@ -566,9 +566,28 @@ static void extract_zip_file(const fs::path &zip_path, const fs::path &prefix,
       source_dir = top_entries[0];
   }
 
+  error_code ec;
+
+  // Unless forcing, refuse to install when any target file already exists.
+  // Check up front so we never leave a partial installation behind.
+  if (!force) {
+    for (auto &entry : fs::recursive_directory_iterator(source_dir)) {
+      if (fs::is_directory(entry.path()))
+        continue;
+      fs::path rel = fs::relative(entry.path(), source_dir, ec);
+      if (ec)
+        continue;
+      fs::path dest = prefix / rel;
+      if (fs::exists(dest, ec)) {
+        fs::remove_all(extract_dir, ec);
+        throw runtime_error("File already exists: " + dest.string() +
+                            ". Use --force to overwrite existing files.");
+      }
+    }
+  }
+
   // Recursively merge source_dir into prefix, copying each file individually
   // so that existing directories are merged rather than skipped or replaced.
-  error_code ec;
   for (auto &entry : fs::recursive_directory_iterator(source_dir)) {
     fs::path rel = fs::relative(entry.path(), source_dir, ec);
     if (ec)
@@ -578,8 +597,6 @@ static void extract_zip_file(const fs::path &zip_path, const fs::path &prefix,
       fs::create_directories(dest, ec);
       continue;
     }
-    if (fs::exists(dest, ec) && !force)
-      continue;
     fs::copy_file(entry.path(), dest,
                   fs::copy_options::overwrite_existing, ec);
     if (ec) {
