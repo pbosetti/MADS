@@ -31,6 +31,7 @@ Author: Paolo Bosetti, July 2024
 #include <inja/inja.hpp>
 #include <iostream>
 #include <cstdlib>
+#include <optional>
 #include <nlohmann/json.hpp>
 #include <rang.hpp>
 #include <zmqpp/zmqpp.hpp>
@@ -326,7 +327,7 @@ int make_ini(int argc, char **argv) {
        |_|                        
 */
 
-void describe_release(const json &release) {
+void describe_release(const json &release, bool show_running = true) {
   std::string plat, arch;
 #ifdef _WIN32
   plat = "Windows-";
@@ -353,9 +354,10 @@ void describe_release(const json &release) {
 #else
   arch = "unknown";
 #endif
-  cout << "You are running MADS " << style::bold << LIB_GIT_TAG 
-       << style::reset << endl
-       << "Latest ";
+  if (show_running)
+    cout << "You are running MADS " << style::bold << LIB_GIT_TAG
+         << style::reset << endl;
+  cout << "Latest ";
   if (release["prerelease"])
     cout << fg::yellow << "pre-release ";
   else
@@ -378,28 +380,21 @@ void describe_release(const json &release) {
        << fg::green << plat + arch << fg::reset << ")" << style::reset << endl;
 }
 
-void check_update(bool beta = false, size_t n = 3) {
-  Mads::HttpsClient::Response response;
+// Fetch and parse a GitHub API endpoint as JSON, retrying up to n times on
+// transient errors. Returns std::nullopt if all attempts fail.
+static std::optional<json> github_get_json(
+    const std::string &path,
+    const std::vector<std::pair<std::string, std::string>> &queries,
+    size_t n) {
   for (size_t i = 1; i <= n; i++) {
     try {
       Mads::HttpsClient client;
       client.set_hostname("api.github.com");
-      if (beta) {
-        client.set_path("/repos/pbosetti/mads/releases");
-        client.add_query_pair("per_page", "1");
-      } else {
-        client.set_path("/repos/pbosetti/mads/releases/latest");
-      }
+      client.set_path(path);
+      for (auto const &[key, value] : queries)
+        client.add_query_pair(key, value);
       client.set_user_agent("MADS" LIB_VERSION);
-
-      response = client.get();
-
-      json releases = json::parse(response.body);
-      if (releases.is_array())
-        describe_release(releases[0]);
-      else
-        describe_release(releases);
-      break;
+      return json::parse(client.get().body);
     } catch (const json::exception &e) {
       cerr << "Error fetching info, retry " << i << "/" << n << endl;
       cerr << "Error: " << e.what() << endl;
@@ -407,6 +402,46 @@ void check_update(bool beta = false, size_t n = 3) {
     } catch (const std::exception &e) {
       cerr << "Unexpected error: " << e.what() << endl;
     }
+  }
+  return std::nullopt;
+}
+
+void check_update(bool beta = false, size_t n = 3) {
+  // `mads beta`: report the single most recent release, prerelease or not.
+  if (beta) {
+    auto releases =
+        github_get_json("/repos/pbosetti/mads/releases", {{"per_page", "1"}}, n);
+    if (releases && releases->is_array() && !releases->empty())
+      describe_release((*releases)[0]);
+    return;
+  }
+
+  // `mads update`: report the latest stable release...
+  auto latest =
+      github_get_json("/repos/pbosetti/mads/releases/latest", {}, n);
+  if (!latest)
+    return;
+  describe_release(*latest);
+
+  // ...then, in a second section, the latest pre-release if it was published
+  // after that stable release. The releases list is sorted newest-first, so the
+  // first non-draft pre-release encountered is the most recent one.
+  auto releases =
+      github_get_json("/repos/pbosetti/mads/releases", {{"per_page", "30"}}, n);
+  if (!releases || !releases->is_array())
+    return;
+  const std::string latest_published = latest->value("published_at", "");
+  for (json const &rel : *releases) {
+    if (rel.value("draft", false) || !rel.value("prerelease", false))
+      continue;
+    if (rel.value("published_at", "") > latest_published) {
+      cout << endl
+           << style::bold << fg::magenta
+           << "A newer pre-release is also available:" << fg::reset
+           << style::reset << endl;
+      describe_release(rel, false);
+    }
+    break;
   }
 }
 
