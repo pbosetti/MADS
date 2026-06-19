@@ -198,10 +198,7 @@ int main(int argc, char *argv[]) {
     settings["agent_id"] = options_parsed["agent-id"].as<string>();
   }
   settings["prefix"] = Mads::prefix();
-  if (settings["receive_timeout"].is_number()) {
-    agent.set_receive_timeout(settings["receive_timeout"].get<int>());
-  }
-  // settings override
+  // settings override: -o <key>=<value> patches the plugin-facing settings.
   if (options_parsed.count("option")) {
     auto re = regex(R"((.+?)=(.*))");
     smatch match;
@@ -210,6 +207,27 @@ int main(int argc, char *argv[]) {
         settings[match[1].str()] = str_to_num(match[2].str());
       }
     }
+  }
+  // Re-apply core agent settings that init() already consumed into member
+  // variables, so that -o <key>=<value> overrides them too (not just plugin
+  // params). Mirrors the string->enum mapping used in Agent::init().
+  if (settings["receive_timeout"].is_number()) {
+    agent.set_receive_timeout(settings["receive_timeout"].get<int>());
+  }
+  if (settings["wire_format"].is_string()) {
+    string wf = settings["wire_format"].get<string>();
+    agent.set_wire_format((wf == "msgpack" || wf == "MsgPack")
+                              ? WireFormat::MsgPack
+                              : WireFormat::Json);
+  }
+  if (settings["compression"].is_string()) {
+    string comp = settings["compression"].get<string>();
+    if (comp == "none")
+      agent.set_compression(Compression::None);
+    else if (comp == "snappy")
+      agent.set_compression(Compression::Snappy);
+    else
+      agent.set_compression(Compression::Auto);
   }
   // deprecated queue size option:
   if (!settings["high_watermark"].is_null()) {
