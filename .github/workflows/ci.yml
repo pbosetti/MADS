@@ -79,7 +79,14 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y \
             ninja-build clang \
-            libssl-dev libsasl2-dev
+            libssl-dev libsasl2-dev \
+            libx11-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxext-dev \
+            libgl1-mesa-dev
 
       - name: Cache FetchContent dependencies
         uses: actions/cache@v5
