@@ -27,7 +27,10 @@ Author: Paolo Bosetti, July 2024
 #include <winsock2.h>
 #endif
 #include <cxxopts.hpp>
+#include <array>
+#include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <inja/inja.hpp>
 #include <iostream>
 #include <cstdlib>
@@ -552,6 +555,215 @@ int make_service(int argc, char **argv) {
 
 
 /*
+            _                                  _   _
+  ___  ___ | |_ _   _ _ __        _ __  _   _| |_| |__   ___  _ __
+ / __|/ _ \| __| | | | '_ \ _____| '_ \| | | | __| '_ \ / _ \| '_ \
+ \__ \  __/| |_| |_| | |_) |_____| |_) | |_| | |_| | | | (_) | | | |
+ |___/\___| \__|\__,_| .__/      | .__/ \__, |\__|_| |_|\___/|_| |_|
+                     |_|         |_|    |___/
+*/
+
+// Run a shell command and capture its trimmed stdout. Returns nullopt if the
+// process cannot be spawned or exits with a non-zero status.
+static std::optional<std::string> capture_output(const std::string &cmd) {
+#ifdef _WIN32
+  FILE *pipe = _popen(cmd.c_str(), "r");
+#else
+  FILE *pipe = popen(cmd.c_str(), "r");
+#endif
+  if (!pipe)
+    return std::nullopt;
+  std::string out;
+  std::array<char, 512> buffer{};
+  while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr)
+    out += buffer.data();
+#ifdef _WIN32
+  int rc = _pclose(pipe);
+#else
+  int rc = pclose(pipe);
+#endif
+  if (rc != 0)
+    return std::nullopt;
+  while (!out.empty() && (out.back() == '\n' || out.back() == '\r' ||
+                          out.back() == ' ' || out.back() == '\t'))
+    out.pop_back();
+  return out;
+}
+
+// Locate the Python interpreter inside an environment root, probing the layout
+// differences between venv/uv and conda on Unix and Windows.
+static fs::path find_python(const fs::path &env_root) {
+  std::vector<fs::path> candidates{
+#ifdef _WIN32
+      env_root / "Scripts" / "python.exe", // venv / uv
+      env_root / "python.exe"              // conda env root
+#else
+      env_root / "bin" / "python3", env_root / "bin" / "python"
+#endif
+  };
+  for (auto const &c : candidates)
+    if (fs::exists(c))
+      return c;
+  return {};
+}
+
+int setup_python(int argc, char **argv) {
+  Options options("mads setup-python",
+                  "Install the MADS Python wrapper into a Python environment, "
+                  "version " +
+                      Mads::version());
+  // clang-format off
+  options.add_options()
+    ("venv", "Path to a venv (or uv) environment root", value<string>())
+    ("conda", "Path to a conda environment root", value<string>())
+    ("uv", "Path to a uv-managed venv root", value<string>())
+    ("h,help", "Print help");
+  // clang-format on
+  ParseResult parsed;
+  try {
+    parsed = options.parse(argc, argv);
+  } catch (const std::exception &e) {
+    cerr << e.what() << endl;
+    cerr << fg::red << "Unknown CLI option" << fg::reset << '\n';
+    cerr << options.help() << endl;
+    return -1;
+  }
+  if (parsed.count("help")) {
+    cout << options.help() << endl;
+    return 0;
+  }
+
+  // 1. Determine the target environment root and kind.
+  string env_root, kind;
+  size_t n_flags =
+      parsed.count("venv") + parsed.count("conda") + parsed.count("uv");
+  if (n_flags > 1) {
+    cerr << fg::red << "Specify only one of --venv, --conda or --uv."
+         << fg::reset << endl;
+    return -1;
+  }
+  if (parsed.count("venv")) {
+    env_root = parsed["venv"].as<string>();
+    kind = "venv";
+  } else if (parsed.count("uv")) {
+    env_root = parsed["uv"].as<string>();
+    kind = "uv";
+  } else if (parsed.count("conda")) {
+    env_root = parsed["conda"].as<string>();
+    kind = "conda";
+  } else {
+    const char *venv = getenv("VIRTUAL_ENV");
+    const char *conda = getenv("CONDA_PREFIX");
+    if (venv && *venv) {
+      env_root = venv;
+      kind = "venv";
+    } else if (conda && *conda) {
+      env_root = conda;
+      kind = "conda";
+    } else {
+      cerr << fg::red << "No active Python environment detected." << fg::reset
+           << endl;
+      cerr << "Activate a venv/conda/uv environment, or pass one explicitly:"
+           << endl;
+      cerr << "  mads setup-python --venv=/path/to/venv" << endl;
+      cerr << "  mads setup-python --conda=/path/to/conda/env" << endl;
+      cerr << "  mads setup-python --uv=/path/to/uv/venv" << endl;
+      return -1;
+    }
+  }
+
+  fs::path env_path = fs::absolute(env_root);
+  if (!fs::exists(env_path)) {
+    cerr << fg::red << "Environment path does not exist: " << env_path.string()
+         << fg::reset << endl;
+    return -1;
+  }
+
+  // 2. Find the interpreter inside the environment.
+  fs::path python = find_python(env_path);
+  if (python.empty()) {
+    cerr << fg::red << "No Python interpreter found under " << env_path.string()
+         << fg::reset << endl;
+    return -1;
+  }
+
+  // 3. Locate the installed wrapper (kept in an isolated directory so the .pth
+  //    entry exposes only mads_agent, not the other helper scripts).
+  fs::path wrapper_dir = Mads::exec_dir("../share/mads-python");
+  fs::path wrapper = fs::path(wrapper_dir) / "mads_agent.py";
+  if (!fs::exists(wrapper)) {
+    cerr << fg::red << "Cannot find the MADS Python wrapper at "
+         << wrapper.string() << fg::reset << endl;
+    cerr << "Is this a complete MADS installation?" << endl;
+    return -1;
+  }
+
+  // 4. Ask the interpreter for its site-packages directory. A temp probe file
+  //    avoids fragile nested-quote escaping across shells.
+  fs::path tmp = fs::temp_directory_path();
+  fs::path probe = tmp / "mads_setup_sitepkg.py";
+  {
+    ofstream f(probe);
+    f << "import sysconfig\nprint(sysconfig.get_path('purelib'))\n";
+  }
+  string probe_cmd = "\"" + python.string() + "\" \"" + probe.string() + "\"";
+  auto purelib = capture_output(probe_cmd);
+  error_code ec;
+  fs::remove(probe, ec);
+  if (!purelib || purelib->empty()) {
+    cerr << fg::red << "Could not determine site-packages for " << python.string()
+         << fg::reset << endl;
+    return -1;
+  }
+
+  // 5. Write the .pth file pointing at the wrapper directory.
+  fs::path pth = fs::path(*purelib) / "mads_agent.pth";
+  {
+    ofstream f(pth);
+    if (!f) {
+      cerr << fg::red << "Cannot write " << pth.string()
+           << " (insufficient permissions?)" << fg::reset << endl;
+      return -1;
+    }
+    f << wrapper_dir.string() << "\n";
+  }
+
+  // 6. Verify the import works.
+  fs::path vprobe = tmp / "mads_setup_import.py";
+  {
+    ofstream f(vprobe);
+    f << "import mads_agent\n";
+  }
+  string verify_cmd = "\"" + python.string() + "\" \"" + vprobe.string() + "\"";
+  auto verified = capture_output(verify_cmd);
+  fs::remove(vprobe, ec);
+
+  cout << fg::green << "MADS Python wrapper installed for " << kind
+       << " environment:" << fg::reset << endl;
+  cout << "  Environment: " << style::bold << env_path.string() << style::reset
+       << endl;
+  cout << "  Interpreter: " << style::bold << python.string() << style::reset
+       << endl;
+  cout << "  Path file:   " << style::bold << pth.string() << style::reset
+       << "\n               -> " << wrapper_dir.string() << endl;
+  if (verified) {
+    cout << fg::green << "  Verified: import mads_agent works." << fg::reset
+         << endl;
+  } else {
+    cout << fg::yellow
+         << "  Warning: could not verify the import (see errors above)."
+         << fg::reset << endl;
+  }
+  cout << "You can now use " << style::bold << "from mads_agent import Agent"
+      << style::reset << " in this environment." << endl
+      << "This is a one-time setup; the wrapper will remain available in " 
+      << "this environment;" << endl
+      << "being a .pth file, it will automatically provide "
+      << "the latest MADS installed version." << endl;
+  return 0;
+}
+
+/*
   __  __       _
  |  \/  | __ _(_)_ __
  | |\/| |/ _` | | '_ \
@@ -590,6 +802,8 @@ int main(int argc, char **argv) {
     } else if (strncmp(argv[1], "beta", 3) == 0) {
       check_update(true);
       return 0;
+    } else if (strcmp(argv[1], "setup-python") == 0) {
+      return setup_python(argc - 1, argv + 1);
     }
 #ifdef __linux__
     else if (strncmp(argv[1], "service", 7) == 0) {
@@ -783,7 +997,7 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-#define FIELD_WIDTH 11
+#define FIELD_WIDTH 15
 #ifndef _WIN32
   auto logo = filesystem::path(image_dir) / "logo_white.png";
   if(filesystem::exists(logo)) {
@@ -809,6 +1023,8 @@ int main(int argc, char **argv) {
   cout << setw(FIELD_WIDTH) << "update" << style::italic << " (internal)"
        << style::reset << endl;
   cout << setw(FIELD_WIDTH) << "beta" << style::italic << " (internal)"
+       << style::reset << endl;
+  cout << setw(FIELD_WIDTH) << "setup-python" << style::italic << " (internal)"
        << style::reset << endl;
 #ifdef __linux__
   cout << setw(FIELD_WIDTH) << "service" << style::italic << " (internal)"

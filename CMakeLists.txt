@@ -406,8 +406,16 @@ install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/templates
 )
 
 file(GLOB PYTHON_SCRIPTS ${CMAKE_CURRENT_LIST_DIR}/scripts/*.py)
-install(PROGRAMS ${PYTHON_SCRIPTS} 
-  DESTINATION python 
+install(PROGRAMS ${PYTHON_SCRIPTS}
+  DESTINATION python
+  COMPONENT MadsApps
+)
+
+# Isolated copy of the Python wrapper used by `mads setup-python`: a .pth file
+# is written into the target environment pointing at this directory, so only
+# mads_agent (and not the other helper scripts) becomes importable.
+install(FILES ${CMAKE_CURRENT_LIST_DIR}/scripts/mads_agent.py
+  DESTINATION share/mads-python
   COMPONENT MadsApps
 )
 
