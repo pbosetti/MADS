@@ -8,7 +8,7 @@
 
 [Documentation](https://mads-net.github.io) · [Compiling](COMPILE.md) · [Changelog](CHANGES.md) · [License](#license)
 
-![C++20](https://img.shields.io/badge/C%2B%2B-20-blue) ![ZeroMQ](https://img.shields.io/badge/transport-ZeroMQ-orange) ![License: CC BY-SA 4.0](https://img.shields.io/badge/license-CC%20BY--SA%204.0-lightgrey)
+![C++20](https://img.shields.io/badge/C%2B%2B-20-blue) ![ZeroMQ](https://img.shields.io/badge/transport-ZeroMQ-orange) [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202-green)](http://www.apache.org/licenses/LICENSE-2.0)
 
 </div>
 
@@ -313,9 +313,7 @@ Key dependencies: ZeroMQ (`libzmq` + `zmqpp`), `nlohmann/json`, `toml++`, Snappy
 
 ## License
 
-![CC BY-SA](https://licensebuttons.net/l/by-sa/4.0/88x31.png)
-
-Distributed under the [Creative Commons BY‑SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) license.
+Distributed under the [Apache 2.0 license](http://www.apache.org/licenses/LICENSE-2.0) license.
 
 ## Authors
 

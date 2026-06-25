@@ -56,4 +56,4 @@ The upstream bug tracker can be found at https://github.com/pbosetti/MADS/issues
 
 # LICENSE
 
-https://creativecommons.org/licenses/by-sa/4.0/
+http://www.apache.org/licenses/LICENSE-2.0
