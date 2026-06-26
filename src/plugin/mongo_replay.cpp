@@ -140,7 +140,8 @@ public:
       {"Repeat", _repeat ? "Yes" : "No"},
       {"Max Loop Dur. ms", to_string(_max_loop_duration.count())},
       {"View Name", _params.value("view_name", "")},
-      {"Reuse View", _params.value("reuse_view", false) ? "Yes" : "No"}
+      {"Reuse View", _params.value("reuse_view", false) ? "Yes" : "No"},
+      {"Unwrap original", _params.value("unwrap_original", false) ? "Yes" : "No"}
     };
     
   };
