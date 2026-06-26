@@ -486,7 +486,11 @@ std::chrono::milliseconds MongoFetch::load_next(
   }
 
   collection_name = current.collection_name;
-  out = current.data;
+  if (_unwrap_original && current.data.contains("message")) {
+    out = current.data["message"];
+  } else {
+    out = current.data;
+  }
 
   if (_next_row) {
     return _next_row->timestamp - current.timestamp;

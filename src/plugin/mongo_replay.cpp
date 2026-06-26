@@ -68,6 +68,8 @@ public:
   void set_params(const json &params) override {
     Source::set_params(params);
     _params["db_uri"] = "mongodb://localhost:27017/";
+    _params["unwrap_original"] = false;
+    _params["unroll_timestamp"] = false;
     _params.merge_patch(params);
     try {
       _fetcher = make_unique<Mads::MongoFetch>(_params["db_uri"].get<string>());
@@ -124,6 +126,8 @@ public:
       cout << "Unexpected error: " << e.what() << endl;
       exit(EXIT_FAILURE);
     }
+
+    _fetcher->set_unwrap_original(_params.value("unwrap_original", false));
   }
 
   map<string, string> info() override {     

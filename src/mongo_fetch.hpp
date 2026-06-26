@@ -156,6 +156,15 @@ public:
    */
   std::chrono::milliseconds load_next(nlohmann::json &out, std::string &collection_name);
 
+  /**
+   * @brief Set whether to unwrap the original document.
+   * @param unwrap If `true`, the original document is unwrapped; otherwise, 
+   * it is kept as a nested object.
+   */
+
+  void set_unwrap_original(bool unwrap) { _unwrap_original = unwrap; }
+
+
 private:
   struct ReplayRow {
     std::chrono::milliseconds timestamp{0};
@@ -183,6 +192,8 @@ private:
   std::optional<mongocxx::cursor> _cursor;
   std::optional<mongocxx::cursor::iterator> _cursor_it;
   std::optional<ReplayRow> _next_row;
+
+  bool _unwrap_original{false};
 };
 
 }  // namespace Mads
