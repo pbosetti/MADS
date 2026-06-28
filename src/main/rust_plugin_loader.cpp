@@ -53,6 +53,15 @@ using namespace Mads;
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
+/* mirror Mads::return_type (defined in the generated pugg plugin headers) */
+enum class return_type : int {
+  success  = MADS_SUCCESS,
+  retry    = MADS_RETRY,
+  warning  = MADS_WARNING,
+  error    = MADS_ERROR,
+  critical = MADS_CRITICAL,
+};
+
 /* ── helpers ─────────────────────────────────────────────────────────────── */
 
 json str_to_num(const string &s) {
