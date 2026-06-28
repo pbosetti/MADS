@@ -1,0 +1,25 @@
+# {% include "rust_header.tpl" %}
+
+[package]
+name    = "{{name}}"
+version = "0.1.0"
+edition = "2021"
+description = "MADS {{type_lower}} plugin"
+
+[lib]
+# cdylib is required to produce a loadable .so / .dylib
+crate-type = ["cdylib"]
+
+[dependencies]
+serde_json = "1"
+
+# mads-plugin dependency — choose one:
+#
+# 1. From the MADS system installation (recommended after `sudo cmake --install`):
+mads-plugin = { path = "{{install_dir}}/share/rust/mads-plugin" }
+#
+# 2. Directly from the git repository:
+# mads-plugin = { git = "https://github.com/pbosetti/MADS", subdirectory = "rust/mads-plugin" }
+#
+# 3. From crates.io (once published):
+# mads-plugin = "0.1"
