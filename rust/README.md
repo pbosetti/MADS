@@ -1,4 +1,4 @@
-# MADS Rust Plugins
+# MADS Rust Plugins {#rust_plugins}
 
 Write MADS plugins in safe Rust.  The plugin compiles to a standard shared
 library (`.so` / `.dylib`) that is loaded at runtime by dedicated MADS
@@ -35,11 +35,19 @@ Edit `Cargo.toml`:
 crate-type = ["cdylib"]   # required — produces a .so
 
 [dependencies]
-mads-plugin = { git = "https://github.com/pbosetti/MADS", subdirectory = "rust/mads-plugin" }
+mads-plugin = "0.1"       # once published to crates.io
 ```
 
-> Until the crate is published to crates.io you can also use a local path:
-> `mads-plugin = { path = "/path/to/MADS/rust/mads-plugin" }`
+Until the crate is on crates.io, use a local path.  The crate source is
+installed alongside MADS under `share/rust/mads-plugin/`:
+
+```toml
+# via the MADS system installation
+mads-plugin = { path = "/usr/local/share/rust/mads-plugin" }
+
+# or directly from the repository
+mads-plugin = { git = "https://github.com/pbosetti/MADS", subdirectory = "rust/mads-plugin" }
+```
 
 ### 2. Write the plugin (`src/lib.rs`)
 

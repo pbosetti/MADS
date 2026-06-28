@@ -395,6 +395,24 @@ install(
   COMPONENT MadsCore
 )
 
+# Rust plugin ABI header — lets C/C++ plugin wrappers include the vtable struct
+if(NOT WIN32)
+  install(
+    FILES ${CMAKE_CURRENT_LIST_DIR}/src/main/mads_rust_plugin.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    COMPONENT MadsApps
+  )
+
+  # mads-plugin Rust crate source — installed so plugin authors can use a local
+  # path dependency without network access when crates.io is unavailable.
+  install(
+    DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/rust/mads-plugin
+    DESTINATION share/rust
+    COMPONENT MadsApps
+    PATTERN "target" EXCLUDE
+  )
+endif()
+
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/images
   DESTINATION share
   COMPONENT MadsApps

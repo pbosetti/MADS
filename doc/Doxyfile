@@ -31,7 +31,8 @@ INPUT                  = README.md \
                          CHANGES.md \
                          COMPILE.md \
                          CRYPTO.md \
-                         src
+                         src \
+                         rust/README.md
 RECURSIVE              = YES
 FILE_PATTERNS          = *.h \
                          *.hh \
@@ -41,7 +42,8 @@ FILE_PATTERNS          = *.h \
 EXCLUDE_PATTERNS       = */build/* \
                          */_deps/* \
                          */CMakeFiles/* \
-                         */_*.md
+                         */_*.md \
+                         */rust/target/*
 USE_MDFILE_AS_MAINPAGE = README.md
 
 MARKDOWN_SUPPORT       = YES
