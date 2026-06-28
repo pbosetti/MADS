@@ -177,13 +177,26 @@ flowchart LR
 | **Sink** | `load_data(json in)` | `mads-sink` |
 
 ```bash
-mads plugin my_filter      # scaffold a ready-to-build plugin project
-# edit src/plugin/my_filter.cpp, then:
+mads plugin my_filter --type filter   # scaffold a C++ plugin project
+# edit src/my_filter.cpp, then:
 cmake -Bbuild -GNinja && cmake --build build
-mads filter my_filter.plugin   # run it
+mads filter my_filter.plugin          # run it
 ```
 
 Plugins are developed and versioned in their own repos, compiled independently, and selected (with their settings section) by file name — or by `-n <name>` to run the same plugin in several roles with different configs.
+
+#### Rust plugins
+
+The same three plugin kinds are also supported in **Rust** — no C++ toolchain needed. The `--rust` flag scaffolds a Cargo project instead; a dedicated set of loaders (`mads-rsource`, `mads-rfilter`, `mads-rsink`) handle the runtime side via a stable C ABI.
+
+```bash
+mads plugin my_filter --type filter --rust   # scaffold a Rust plugin project
+# implement the FilterPlugin trait in src/lib.rs, then:
+cargo build --release
+mads-rfilter target/release/libmy_filter.so  # run it
+```
+
+See **[rust/README.md](rust/README.md)** for the full guide: trait reference, return codes, output types, loader options, and packaging.
 
 ### 2) Native agents with `AgentApp`
 
