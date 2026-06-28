@@ -1,3 +1,44 @@
+# Release v2.3.0
+
+This document summarizes what changed between `v2.2.0` and `v2.3.0`.
+
+To **install this version**, have a look at [the Guide](https://mads-net.github.io/guides/install.html)
+
+> **License change:** this release switches the project license from CC-BY-SA 4.0 to the **Apache 2.0** license.
+
+# Changes
+
+These changes summarize what was added or updated since `v2.2.0`.
+
+## New features
+
+- **Rust plugin support.** MADS plugins can now be written in Rust — no C++ toolchain required. Three dedicated loaders (`mads-rsource`, `mads-rfilter`, `mads-rsink`) dynamically load Rust-compiled shared libraries via a stable C ABI (`mads_rust_plugin_t` vtable, exported as `mads_rust_plugin_register()`). Plugin authors implement one of the three Rust traits (`SourcePlugin`, `FilterPlugin`, `SinkPlugin`) from the new `mads-plugin` crate (installed at `share/rust/mads-plugin`) and export it with the corresponding `export_*_plugin!` macro. Panic safety across the FFI boundary is guaranteed via `std::panic::catch_unwind`. See [rust/README.md](rust/README.md) for the full trait reference, return codes, output types, and packaging guide.
+- **`mads plugin --rust` scaffolding.** The `mads plugin` command accepts a new `--rust` flag that generates a ready-to-build Cargo project (`Cargo.toml`, `src/lib.rs`, `README.md`) instead of a CMake/C++ stub. The `--install-dir` option writes the local path to the `mads-plugin` crate into `Cargo.toml`. The `--datastore` flag is ignored when `--rust` is set.
+- **`mads setup-python` command.** New `mads` sub-command that installs (or updates) the Python ctypes agent wrapper (`mads_agent.py`) into a target Python environment, removing the need to locate the file manually.
+- **`mads package --json` option.** Both `mads package list` and `mads package info` accept `-j`/`--json` to emit machine-readable JSON instead of the formatted table, enabling scripting and tooling integration.
+- **Mongo replay `unwrap_original` parameter.** The `mongo_replay` plugin gained an `unwrap_original` boolean parameter. When true, the outer envelope added during MongoDB logging is stripped and the original payload is re-published directly, simplifying replay-based testing.
+- **MADS Director re-enabled.** The optional GUI process supervisor (`mads-director`) is back in the default build and updated to v2.2.0. It provides a graphical interface for starting, stopping, and monitoring agent processes.
+
+## Improvements
+
+- **Broker daemon-mode resilience.** When running in daemon mode, the broker now continuously retries the mDNS/DNS-SD advertising service after failures instead of giving up on the first error. This prevents silent loss of auto-discovery in environments where the network interface comes up after the broker starts.
+- **Plugin loader settings re-application.** The settings override mechanism in `mads-source`, `mads-filter`, and `mads-sink` now re-applies core agent settings (e.g. `sub_topic`, `queue_size`) after user-supplied overrides so that built-in parameters are always honoured correctly, even when the plugin's settings section also provides them.
+- **`mads update` improvements.** The self-update command received more robust error handling, better progress feedback, and improved version-detection logic for pre-release builds.
+- **Package installation guard.** `mads package install` now refuses to overwrite files that are already present at the destination and reports the conflict clearly. A `--force` flag overrides this behaviour when an explicit overwrite is intended.
+- **pugg updated to 1.0.4.** The bundled plugin kernel is updated; the change is backward-compatible with existing `.plugin` files.
+- **gv2fsm version update.** The bundled finite-state-machine generator is updated to its latest release.
+- **macOS: multiple CPack generators.** The macOS CI build now produces packages via multiple CPack generators (STGZ + productbuild) in a single pass.
+
+## Bug fixes
+
+- **Rust loader compile error on macOS/Linux.** `rust_plugin_loader.cpp` failed to build on Clang and GCC because `return_type` is defined inside the generated pugg plugin headers that the Rust loader intentionally does not include. Fixed by defining a self-contained `enum class return_type` from the `MADS_*` constants already present in `mads_rust_plugin.h`.
+
+## License
+
+- Project relicensed from CC-BY-SA 4.0 to **Apache License 2.0**. The full license text is in the `LICENSE` file.
+
+---
+
 # Release v2.2.0
 
 This document summarizes what changed between `v2.1.1` and `v2.2.0`.
