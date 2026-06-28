@@ -56,7 +56,7 @@ macro(create_mads_target name main_file)
 endmacro()
 
 file(GLOB MADS_MAIN_SOURCES "${CMAKE_CURRENT_LIST_DIR}/*.cpp")
-list(APPEND MADS_MAIN_EXCLUDE plugin_loader)
+list(APPEND MADS_MAIN_EXCLUDE plugin_loader rust_plugin_loader)
 if(MSVC)
   list(APPEND MADS_MAIN_EXCLUDE image)
 endif()
@@ -73,7 +73,15 @@ endforeach()
 
 create_mads_target(source plugin_loader.cpp DEFS "PLUGIN_LOADER_SOURCE")
 create_mads_target(filter plugin_loader.cpp DEFS "PLUGIN_LOADER_FILTER")
-create_mads_target(sink plugin_loader.cpp DEFS "PLUGIN_LOADER_SINK")
+create_mads_target(sink   plugin_loader.cpp DEFS "PLUGIN_LOADER_SINK")
+
+# Rust plugin loaders (use mads_rust_plugin_t C ABI via dlopen, no pugg)
+if(NOT WIN32)
+  create_mads_target(rsource rust_plugin_loader.cpp DEFS "RUST_PLUGIN_LOADER_SOURCE" LIBS dl)
+  create_mads_target(rfilter rust_plugin_loader.cpp DEFS "RUST_PLUGIN_LOADER_FILTER" LIBS dl)
+  create_mads_target(rsink   rust_plugin_loader.cpp DEFS "RUST_PLUGIN_LOADER_SINK"   LIBS dl)
+endif()
+
 set_target_properties(${MADS_EXECUTABLE_PREFIX}-make_plugin PROPERTIES OUTPUT_NAME "${MADS_EXECUTABLE_PREFIX}-plugin")
 
 target_link_libraries(mads-fsm PRIVATE Gv2Fsm::Gv2Fsm)

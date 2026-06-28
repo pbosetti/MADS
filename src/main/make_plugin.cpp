@@ -85,11 +85,12 @@ int main(int argc, char **argv) {
   options.add_options()
   // clang-format off
     ("n,name", "Name of the plugin", value<string>())
-    ("t,type", "Type of the plugin", value<string>())
+    ("t,type", "Type of the plugin (source, filter, sink)", value<string>())
     ("d,dir", "Directory of the plugin", value<string>())
     ("i,install-dir", "Directory where to install the plugin (def. " + plugins_dir + ")", value<string>())
     ("o,overwrite", "Overwrite existing files")
-    ("s,datastore", "Enable Datastore class for persistency")
+    ("r,rust", "Create a Rust plugin (uses mads-rsource/rfilter/rsink loader)")
+    ("s,datastore", "Enable Datastore class for persistency (C++ only)")
     ("v,version", "Print version")
     ("h,help", "Print usage");
   options.parse_positional({"name"});
@@ -164,6 +165,8 @@ int main(int argc, char **argv) {
   data["type"] = ucfirst(data["type"]);
   data["parent"] = ucfirst(data["type"]);
   data["driver_name"] = uppercase(data["type"]);
+  data["type_lower"] = lowercase(string(data["type"]));
+  data["rust_loader"] = "mads-r" + string(data["type_lower"]);
   data["source_file"] = string(data["name"]) + ".cpp";
   if (Mads::version().rfind('v', 0) == 0) {
     data["mads_version"] = Mads::version().substr(1); // remove leading 'v'
@@ -188,50 +191,104 @@ int main(int argc, char **argv) {
   }
 
 
+  bool rust = options_parsed.count("rust") > 0;
+
+  if (rust && options_parsed.count("datastore") > 0) {
+    cerr << fg::yellow << "Warning: --datastore is not applicable to Rust plugins, ignoring"
+         << fg::reset << endl;
+  }
+
   filesystem::create_directory(dir);
   filesystem::create_directory(dir + "src/");
-  Environment env_cmake{template_dir + "/", dir};
+
+  Environment env_primary{template_dir + "/", dir};
   Environment env_src{template_dir + "/", dir + "src/"};
-  Environment env_md(template_dir + "/", dir);
+  Environment env_md{template_dir + "/", dir};
   env_md.set_line_statement("%%");
 
-  string cmake_file = dir + "CMakeLists.txt";
-  string source_file = dir + "src/" + string(data["source_file"]);
   string readme_file = dir + "README.md";
-  
-  cout << "Creating plugin " << style::bold << data["name"] << style::reset 
-       <<" of type " << style::bold << data["type"] << " in " 
-       << style::bold << dir << style::reset << endl;
-       
-  cout << "==> " << style::bold << cmake_file << style::reset << ": ";
-  if (!overwrite && filesystem::exists(cmake_file)) {
-    cout << fg::red << " already exists, skipped; use -o to overwrite" 
-    << fg::reset << endl;
-  } else {
-    env_cmake.write("CMakeLists.txt", data, "CMakeLists.txt");
-    cout << fg::green << "created" << fg::reset << endl;
-  }
 
-  cout << "==> " << style::bold << source_file << style::reset << ": ";
-  if (!overwrite && filesystem::exists(source_file)) {
-    cerr << fg::red << " already exists, skipped; use -o to overwrite" 
-    << fg::reset << endl;
-  } else {
-    env_src.write(data["source_template"], data, data["source_file"]);
-    cout << fg::green << "created" << fg::reset << endl;
-  }
+  if (rust) {
+    // ── Rust plugin ──────────────────────────────────────────────────────────
+    string cargo_file = dir + "Cargo.toml";
+    string lib_file   = dir + "src/lib.rs";
 
-  cout << "==> " << style::bold << readme_file << style::reset << ": ";
-  if (!overwrite && filesystem::exists(readme_file)) {
-    cerr << fg::red << " already exists, skipped; use -o to overwrite" 
-    << fg::reset << endl;
-  } else {
-    env_md.write("README.md", data, "README.md");
-    cout << fg::green << "created" << fg::reset << endl;
-  }
+    cout << "Creating Rust plugin " << style::bold << data["name"] << style::reset
+         << " of type " << style::bold << data["type"]
+         << " in " << style::bold << dir << style::reset << endl;
 
-  cout << "To build: "  << style::bold << "cd " << dir 
-       << " && cmake -Bbuild && cmake --build build" << style::reset << endl;
+    cout << "==> " << style::bold << cargo_file << style::reset << ": ";
+    if (!overwrite && filesystem::exists(cargo_file)) {
+      cout << fg::red << "already exists, skipped; use -o to overwrite"
+           << fg::reset << endl;
+    } else {
+      env_primary.write("rust_Cargo.toml", data, "Cargo.toml");
+      cout << fg::green << "created" << fg::reset << endl;
+    }
+
+    cout << "==> " << style::bold << lib_file << style::reset << ": ";
+    if (!overwrite && filesystem::exists(lib_file)) {
+      cerr << fg::red << "already exists, skipped; use -o to overwrite"
+           << fg::reset << endl;
+    } else {
+      env_src.write("rust_" + string(data["type_lower"]) + ".rs", data, "lib.rs");
+      cout << fg::green << "created" << fg::reset << endl;
+    }
+
+    cout << "==> " << style::bold << readme_file << style::reset << ": ";
+    if (!overwrite && filesystem::exists(readme_file)) {
+      cerr << fg::red << "already exists, skipped; use -o to overwrite"
+           << fg::reset << endl;
+    } else {
+      env_md.write("rust_README.md", data, "README.md");
+      cout << fg::green << "created" << fg::reset << endl;
+    }
+
+    cout << "To build: " << style::bold << "cd " << dir
+         << " && cargo build --release" << style::reset << endl;
+    cout << "To run:   " << style::bold << string(data["rust_loader"])
+         << " target/release/lib" << string(data["name"]) << ".so"
+         << style::reset << endl;
+
+  } else {
+    // ── C++ plugin ───────────────────────────────────────────────────────────
+    string cmake_file  = dir + "CMakeLists.txt";
+    string source_file = dir + "src/" + string(data["source_file"]);
+
+    cout << "Creating plugin " << style::bold << data["name"] << style::reset
+         << " of type " << style::bold << data["type"]
+         << " in " << style::bold << dir << style::reset << endl;
+
+    cout << "==> " << style::bold << cmake_file << style::reset << ": ";
+    if (!overwrite && filesystem::exists(cmake_file)) {
+      cout << fg::red << "already exists, skipped; use -o to overwrite"
+           << fg::reset << endl;
+    } else {
+      env_primary.write("CMakeLists.txt", data, "CMakeLists.txt");
+      cout << fg::green << "created" << fg::reset << endl;
+    }
+
+    cout << "==> " << style::bold << source_file << style::reset << ": ";
+    if (!overwrite && filesystem::exists(source_file)) {
+      cerr << fg::red << "already exists, skipped; use -o to overwrite"
+           << fg::reset << endl;
+    } else {
+      env_src.write(data["source_template"], data, data["source_file"]);
+      cout << fg::green << "created" << fg::reset << endl;
+    }
+
+    cout << "==> " << style::bold << readme_file << style::reset << ": ";
+    if (!overwrite && filesystem::exists(readme_file)) {
+      cerr << fg::red << "already exists, skipped; use -o to overwrite"
+           << fg::reset << endl;
+    } else {
+      env_md.write("README.md", data, "README.md");
+      cout << fg::green << "created" << fg::reset << endl;
+    }
+
+    cout << "To build: " << style::bold << "cd " << dir
+         << " && cmake -Bbuild && cmake --build build" << style::reset << endl;
+  }
 
   return 0;
 }
