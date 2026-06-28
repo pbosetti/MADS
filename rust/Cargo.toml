@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "mads-plugin",
+    "mads-plugin-example",
+]
+resolver = "2"

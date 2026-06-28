@@ -30,6 +30,7 @@ TODO.md
 *.toml
 
 !mads.ini
+!rust/**/Cargo.toml
 
 _*.md
 

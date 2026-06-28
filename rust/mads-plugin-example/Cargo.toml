@@ -1,0 +1,12 @@
+[package]
+name    = "mads-plugin-example"
+version = "0.1.0"
+edition = "2021"
+description = "Example MADS Rust plugins (filter, source, sink)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+mads-plugin = { path = "../mads-plugin" }
+serde_json  = "1"
