@@ -1,4 +1,4 @@
-# {% include "rust_header.tpl" %}
+{% include "rust_header_toml.tpl" %}
 
 [package]
 name    = "{{name}}"
