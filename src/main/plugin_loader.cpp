@@ -302,7 +302,11 @@ int main(int argc, char *argv[]) {
   // Loading plugin
   pugg::Kernel kernel;
   kernel.add_server<PLUGIN_CLASS<>>();
-  kernel.load_plugin(plugin_file);
+  if (!kernel.load_plugin(plugin_file)) {
+    cerr << fg::red << "Error: cannot load plugin file " << plugin_file 
+         << fg::reset << endl;
+    exit(1);
+  }
   PluginDriver *plugin_driver =
       kernel.get_driver<PluginDriver>(Plugin::server_name(), plugin_name);
   if (plugin_driver == nullptr) {

@@ -135,16 +135,20 @@ int main(int argc, char *argv[]) {
   // Loading plugin
   pugg::Kernel kernel;
   kernel.add_server<Filter<>>();
-  kernel.load_plugin(plugin_file);
+  if (!kernel.load_plugin(plugin_file)) {
+    cerr << fg::red << "Error: cannot load plugin file " << plugin_file 
+         << fg::reset << endl;
+    exit(1);
+  }
   FilterDriverJ *filter_driver =
       kernel.get_driver<FilterDriverJ>(FilterJ::server_name(), plugin_name);
   if (filter_driver == nullptr) {
-    cout << fg::red << "Error: cannot find plugin driver " << plugin_name
+    cerr << fg::red << "Error: cannot find plugin driver " << plugin_name
          << " in plugin at " << plugin_file << fg::reset << endl;
     auto drivers = kernel.get_all_drivers<FilterDriverJ>(FilterJ::server_name());
-    cout << "Available drivers:" << endl;
+    cerr << "Available drivers:" << endl;
     for (auto &d : drivers) {
-      cout << "- " << d->name() << endl;
+      cerr << "- " << d->name() << endl;
     }
     exit(1);
   }
