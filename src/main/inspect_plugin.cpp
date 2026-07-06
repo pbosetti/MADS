@@ -1,6 +1,10 @@
 #include <common.hpp>
 
+#include <cctype>
+#include <cstdlib>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <string>
 #include <vector>
@@ -42,11 +46,109 @@ struct ProbeResult {
   bool library_loaded = false;
   std::string load_error;
   std::vector<DriverInfo> drivers;
+  std::string json_version; ///< nlohmann/json version the plugin was built with
 };
 
 constexpr const char *kSourceServerName = "SourceServer";
 constexpr const char *kFilterServerName = "FilterServer";
 constexpr const char *kSinkServerName = "SinkServer";
+
+// The nlohmann/json version this inspector (and therefore the MADS loaders) was
+// compiled against — the version a plugin must match for its driver RTTI to be
+// recognized by the loaders. Two-level stringify expands the integer macros.
+#define MADS_STRINGIFY_HELPER(x) #x
+#define MADS_STRINGIFY(x) MADS_STRINGIFY_HELPER(x)
+const std::string kJsonExpected = MADS_STRINGIFY(NLOHMANN_JSON_VERSION_MAJOR) "." \
+    MADS_STRINGIFY(NLOHMANN_JSON_VERSION_MINOR) "." \
+    MADS_STRINGIFY(NLOHMANN_JSON_VERSION_PATCH);
+#undef MADS_STRINGIFY
+#undef MADS_STRINGIFY_HELPER
+
+// Parse the "MAJOR_MINOR_PATCH" of an nlohmann inline-namespace tag that starts at
+// `pos` (the 'j' of "json_abi_v") inside a mangled type name. The patch number
+// cannot be read greedily: in Itanium mangling the tag is immediately followed by
+// the next component's own length prefix (e.g. `...json_abi_v3_11_3` + `10basic_json`),
+// so "3_11_3" would be misread as "3_11_310". We therefore use the source-name
+// length prefix (the decimal digits right before the tag) to find the exact end of
+// the component; for manglings without such a prefix (e.g. MSVC decorated names,
+// where the tag is followed by a separator) we read the trailing [0-9_] run.
+std::string parse_json_abi_at(const std::string &data, std::size_t pos) {
+  constexpr std::size_t kKeyLen = 10; // strlen("json_abi_v")
+  const std::size_t vstart = pos + kKeyLen;
+  std::size_t vend;
+
+  std::size_t prefix_begin = pos;
+  while (prefix_begin > 0 &&
+         std::isdigit(static_cast<unsigned char>(data[prefix_begin - 1])))
+    --prefix_begin;
+  if (prefix_begin < pos) { // Itanium length prefix present
+    const long len =
+        std::strtol(data.substr(prefix_begin, pos - prefix_begin).c_str(),
+                    nullptr, 10);
+    if (len <= static_cast<long>(kKeyLen) ||
+        pos + static_cast<std::size_t>(len) > data.size())
+      return "";
+    vend = pos + static_cast<std::size_t>(len);
+  } else { // no length prefix: read until a non [0-9_] separator
+    vend = vstart;
+    while (vend < data.size() &&
+           (std::isdigit(static_cast<unsigned char>(data[vend])) ||
+            data[vend] == '_'))
+      ++vend;
+  }
+
+  std::vector<std::string> parts;
+  std::string cur;
+  for (std::size_t i = vstart; i <= vend; ++i) {
+    const char c = (i < vend) ? data[i] : '_';
+    if (c == '_') {
+      if (cur.empty())
+        return "";
+      parts.push_back(cur);
+      cur.clear();
+    } else if (std::isdigit(static_cast<unsigned char>(c))) {
+      cur += c;
+    } else {
+      return "";
+    }
+  }
+  if (parts.size() != 3)
+    return "";
+  return parts[0] + "." + parts[1] + "." + parts[2];
+}
+
+// Discover which nlohmann/json version a plugin was compiled against by scanning
+// its binary for the inline-namespace tag `json_abi_vMAJOR_MINOR_PATCH`, embedded
+// in the mangled names of the Source/Filter/SinkDriver<json> types every MADS
+// plugin exports. Prefer the tag bound to a driver type (the exact type the
+// loaders cast to), falling back to any occurrence. Independent of whether the
+// plugin actually loads; returns "" if no tag is found.
+std::string detect_plugin_json_version(const std::string &plugin_path) {
+  std::ifstream file(plugin_path, std::ios::binary);
+  if (!file)
+    return "";
+  const std::string data((std::istreambuf_iterator<char>(file)),
+                         std::istreambuf_iterator<char>());
+
+  for (const char *kind : {"SourceDriver", "FilterDriver", "SinkDriver"}) {
+    for (std::size_t dp = data.find(kind); dp != std::string::npos;
+         dp = data.find(kind, dp + 1)) {
+      const std::size_t jp = data.find("json_abi_v", dp);
+      if (jp != std::string::npos && jp - dp < 48) {
+        const std::string v = parse_json_abi_at(data, jp);
+        if (!v.empty())
+          return v;
+      }
+    }
+  }
+  for (std::size_t jp = data.find("json_abi_v"); jp != std::string::npos;
+       jp = data.find("json_abi_v", jp + 10)) {
+    const std::string v = parse_json_abi_at(data, jp);
+    if (!v.empty())
+      return v;
+  }
+  return "";
+}
 
 const char *type_to_string(PluginType type) {
   switch (type) {
@@ -160,6 +262,7 @@ ProbeResult inspect_plugin(const std::string &plugin_path) {
   kernel.add_server(kSinkServerName, std::numeric_limits<int>::min());
 
   result.load_error = native_load_error(plugin_path);
+  result.json_version = detect_plugin_json_version(plugin_path);
   result.library_loaded = kernel.load_plugin(plugin_path);
   collect_drivers<pugg::Driver>(kernel, kSourceServerName, PluginType::source,
                                 result.drivers);
@@ -221,6 +324,11 @@ int main(int argc, char *argv[]) {
     json output;
     output["plugin"] = plugin_path;
     output["library_loaded"] = library_loaded;
+    output["json_expected"] = kJsonExpected;
+    output["json_found"] =
+        probe.json_version.empty() ? "unknown" : probe.json_version;
+    output["json_match"] =
+        !probe.json_version.empty() && probe.json_version == kJsonExpected;
     if (!load_error.empty()) {
       output["load_error"] = load_error;
     }
@@ -237,10 +345,23 @@ int main(int argc, char *argv[]) {
     return protocol_current ? 0 : 2;
   } else {
 
-    std::cout << "plugin: " << style::bold << plugin_path 
+    std::cout << "plugin: " << style::bold << plugin_path
               << style::reset << std::endl;
-    std::cout << "loadable: " << style::bold << (loadable ? "yes" : "no") 
+    std::cout << "loadable: " << style::bold << (loadable ? "yes" : "no")
               << style::reset << std::endl;
+
+    std::cout << "json_expected: " << style::bold << kJsonExpected
+              << style::reset << std::endl;
+    std::cout << "json_found: " << style::bold
+              << (probe.json_version.empty() ? "unknown" : probe.json_version)
+              << style::reset << std::endl;
+    if (!probe.json_version.empty() && probe.json_version != kJsonExpected) {
+      std::cout << fg::yellow
+                << "warning: plugin built against nlohmann/json "
+                << probe.json_version << " but MADS uses " << kJsonExpected
+                << "; ABI mismatch can prevent loading with pugg >= 1.1.0."
+                << fg::reset << std::endl;
+    }
 
     if (!library_loaded) {
       std::cout << fg::yellow;
