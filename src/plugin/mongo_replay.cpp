@@ -163,7 +163,7 @@ private:
                 |___/
 Enable the class as plugin
 */
-INSTALL_SOURCE_DRIVER(Mongo_replayPlugin, json)
+MADS_REGISTER_PLUGINS(Mongo_replayPlugin)
 
 
 /*

@@ -153,8 +153,8 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
   
-  // Create the class from the plugin:
-  FilterJ *filter = filter_driver->create();
+  // Create the class from the plugin (P8: create() returns a unique_ptr):
+  auto filter = filter_driver->create();
   filter->set_params(settings);
   for (auto &[k, v] : filter->info()) {
     cout << "  " << left << setw(18) << k << style::bold << v << style::reset 
@@ -199,7 +199,7 @@ int main(int argc, char *argv[]) {
   // Cleanup
   agent.register_event(event_type::shutdown);
   agent.disconnect();
-  delete filter;
+  filter.reset();
   kernel.clear_drivers();
 
   if (agent.restart()) {

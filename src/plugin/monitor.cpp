@@ -141,7 +141,7 @@ private:
                 |___/
 Enable the class as plugin
 */
-INSTALL_SINK_DRIVER(Monitor_pluginPlugin, json)
+MADS_REGISTER_PLUGINS(Monitor_pluginPlugin)
 
 /*
                   _

@@ -122,7 +122,7 @@ FetchContent_Declare(
 FetchContent_Declare(
   pugg
   GIT_REPOSITORY https://github.com/pbosetti/pugg.git
-  GIT_TAG 1.1.0
+  GIT_TAG 1.2.0
   GIT_SHALLOW TRUE
 )
 

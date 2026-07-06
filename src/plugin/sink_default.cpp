@@ -81,6 +81,6 @@ private:
                 |___/                                      
 Enable the class as plugin 
 */
-INSTALL_SINK_DRIVER(FeedbackPlugin, json)
+MADS_REGISTER_PLUGINS(FeedbackPlugin)
 
 

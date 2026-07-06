@@ -80,7 +80,7 @@ private:
                 |___/
 Enable the class as plugin
 */
-INSTALL_FILTER_DRIVER(BridgePlugin, json, json);
+MADS_REGISTER_PLUGINS(BridgePlugin);
 
 
 

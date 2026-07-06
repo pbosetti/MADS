@@ -72,6 +72,6 @@ private:
                 |___/
 Enable the class as plugin
 */
-INSTALL_SOURCE_DRIVER(PublishPlugin, json)
+MADS_REGISTER_PLUGINS(PublishPlugin)
 
 

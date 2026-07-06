@@ -45,13 +45,6 @@ static string lowercase(string str) {
   });
   return str;
 }
-static string uppercase(string str) {
-  transform(str.begin(), str.end(), str.begin(), [](unsigned char c){ 
-    return std::toupper(c); 
-  });
-  return str;
-}
-
 static string ucfirst(string str) {
   str[0] = toupper(str[0]);
   return str;
@@ -193,7 +186,6 @@ int main(int argc, char **argv) {
   data["source_template"] = string(data["type"]) + ".cpp";
   data["type"] = ucfirst(data["type"]);
   data["parent"] = ucfirst(data["type"]);
-  data["driver_name"] = uppercase(data["type"]);
   data["type_lower"] = lowercase(string(data["type"]));
   data["rust_loader"] = "mads-r" + string(data["type_lower"]);
   data["source_file"] = string(data["name"]) + ".cpp";

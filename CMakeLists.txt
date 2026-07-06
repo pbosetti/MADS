@@ -334,7 +334,7 @@ if(MADS_BUILD_APPS)
   include(FetchContent)
   FetchContent_Populate(plugin 
     GIT_REPOSITORY https://github.com/pbosetti/mads_plugin.git
-    GIT_TAG        v2.3-P7
+    GIT_TAG        v2.4-P8
     GIT_SHALLOW    TRUE
   )
   include_directories(

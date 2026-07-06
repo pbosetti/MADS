@@ -124,7 +124,7 @@ private:
                 |___/
 Enable the class as plugin
 */
-INSTALL_{{driver_name}}_DRIVER({{class_name}}, json, json);
+MADS_REGISTER_PLUGINS({{class_name}});
 
 
 /*

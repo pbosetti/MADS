@@ -1,0 +1,39 @@
+{
+  "_comment": "Migration step for the plugin protocol jump P7 -> P8. Consumed by `mads plugin --update`. P8 does NOT change the plugin child-class method signatures (kind/load_data/process/get_output/set_params/info are identical to P7); it replaces the per-type registration macros with a single type-deducing macro. See src/main/plugin_migrate.hpp for the transform semantics.",
+  "from": 7,
+  "to": 8,
+  "lang": "cpp",
+
+  "cmake": {
+    "plugin_git_tag": "v2.4-P8",
+    "pugg_git_tag": "1.2.0"
+  },
+
+  "source": [
+    {
+      "kind": "regex",
+      "pattern": "INSTALL_SOURCE_DRIVER\\s*\\(\\s*([A-Za-z_]\\w*)\\s*,[^)]*\\)",
+      "replacement": "MADS_REGISTER_PLUGINS($1)",
+      "description": "Replace INSTALL_SOURCE_DRIVER(klass, type) with MADS_REGISTER_PLUGINS(klass)"
+    },
+    {
+      "kind": "regex",
+      "pattern": "INSTALL_FILTER_DRIVER\\s*\\(\\s*([A-Za-z_]\\w*)\\s*,[^)]*\\)",
+      "replacement": "MADS_REGISTER_PLUGINS($1)",
+      "description": "Replace INSTALL_FILTER_DRIVER(klass, type_in, type_out) with MADS_REGISTER_PLUGINS(klass)"
+    },
+    {
+      "kind": "regex",
+      "pattern": "INSTALL_SINK_DRIVER\\s*\\(\\s*([A-Za-z_]\\w*)\\s*,[^)]*\\)",
+      "replacement": "MADS_REGISTER_PLUGINS($1)",
+      "description": "Replace INSTALL_SINK_DRIVER(klass, type) with MADS_REGISTER_PLUGINS(klass)"
+    }
+  ],
+
+  "notes": [
+    "Registration changed: INSTALL_SOURCE/FILTER/SINK_DRIVER are now deprecated aliases; the new MADS_REGISTER_PLUGINS(klass) macro deduces the input/output types from the class and can register several plugins from one library, e.g. MADS_REGISTER_PLUGINS(MySrc, MySink).",
+    "Plugin child-class method signatures are unchanged from P7 (kind/load_data/process/get_output/set_params/info), so no method bodies need editing.",
+    "The generated driver's create() now returns std::unique_ptr and register_pugg_plugin returns bool, but both live inside the macro; hand-written custom drivers must be updated to match.",
+    "pugg is bumped to 1.2.0 alongside mads_plugin v2.4-P8."
+  ]
+}
