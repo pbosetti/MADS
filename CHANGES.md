@@ -6,6 +6,9 @@ This is a purely bugfix release, fully backward compatible. Fixed bugs:
 
 * fixed `mads update` command on Linux (previously showing an unmanaged error message);
 * fixed `mads package --install` command, which previously was failing with some packages like `mads-python`;
+* fixed Rust plugin loader;
+* Update to pugg 1.1.0 and mads_plugin v2.3-p7 (backward compatible with existing `.plugin` files);
+* improved `mads inspect_plugin` command to detect `nlohmann::json` version mismatches between the plugin and the loader;
 * Removed some harmless compilation warnings.
 
 # Release v2.3.0
