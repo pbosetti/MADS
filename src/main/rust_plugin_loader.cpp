@@ -498,7 +498,7 @@ int main(int argc, char *argv[]) {
   agent.loop([&]() -> chrono::milliseconds {
     type = message_type::none;
     in.clear(); err.clear();
-    try { type = agent.receive(); }
+    try { type = agent.receive(dont_block); }
     catch (const AgentError &e) {
       cerr << fg::red << "Receive error: " << e.what() << fg::reset << endl;
     }
