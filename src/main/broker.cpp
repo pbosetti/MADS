@@ -257,9 +257,9 @@ int main(int argc, char **argv) {
                       "BACKEND msg in    ", "BACKEND bytes in  ",
                       "BACKEND msg out   ", "BACKEND bytes out "};
   ServiceDiscovery discovery_service(MADS_SERVICE_PORT);
-  ServiceDiscovery::ServiceInfo service_info{
-      .room = MADS_SERVICE_ROOM, 
-      .encrypted = false};
+  ServiceDiscovery::ServiceInfo service_info;
+  service_info.room = MADS_SERVICE_ROOM;
+  service_info.encrypted = false;
 
   // clang-format off
   options.add_options()
