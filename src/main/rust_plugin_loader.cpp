@@ -290,7 +290,7 @@ int main(int argc, char *argv[]) {
   agent.info(cerr);
   agent.connect();
 
-#if defined(RUST_PLUGIN_LOADER_FILTER) || defined(RUST_PLUGIN_LOADER_SINK)
+#if defined(RUST_PLUGIN_LOADER_FILTER)
   bool dont_block = settings.value("dont_block", false);
   if (opts.count("dont-block")) dont_block = true;
 #endif

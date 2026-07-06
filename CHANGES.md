@@ -1,3 +1,13 @@
+# Release 2.3.1
+
+This document summarizes what changed between `v2.3.0` and `v2.3.1`.
+
+This is a purely bugfix release, fully backward compatible. Fixed bugs:
+
+* fixed `mads update` command on Linux (previously showing an unmanaged error message);
+* fixed `mads package --install` command, which previously was failing with some packages like `mads-python`;
+* Removed some harmless compilation warnings.
+
 # Release v2.3.0
 
 This document summarizes what changed between `v2.2.0` and `v2.3.0`.
