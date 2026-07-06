@@ -11,7 +11,15 @@ if(CMAKE_BUILD_TYPE STREQUAL "")
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
 endif()
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-  set(CMAKE_INSTALL_PREFIX "{{install_dir}}" CACHE PATH "Install path prefix, prepended onto install directories." FORCE)
+  execute_process(
+    COMMAND mads -p
+    OUTPUT_VARIABLE MADS_PREFIX
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  if(MADS_PREFIX)
+    set(CMAKE_INSTALL_PREFIX "${MADS_PREFIX}" CACHE PATH "Install path prefix, prepended onto install directories." FORCE)
+  endif()
 endif()
 message(STATUS "CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}")
 message(STATUS "CMAKE_INSTALL_PREFIX: ${CMAKE_INSTALL_PREFIX}")
