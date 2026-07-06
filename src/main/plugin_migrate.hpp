@@ -436,18 +436,79 @@ inline int detect_protocol(const std::string &cmake) {
 }
 
 // Rewrite the GIT_TAG of a named FetchContent block (`plugin`, `pugg`, ...).
+//
+// A regex alone is fragile here: a `#` comment containing the token GIT_TAG
+// before the real one would be matched (lazy `[\s\S]*?GIT_TAG` is comment-blind),
+// and building a `std::regex_replace` replacement as `"$1" + new_tag` breaks when
+// new_tag starts with a digit (e.g. pugg "1.2.0" -> "$11.2.0" reads as $11). So we
+// only use a regex to locate the block header, then tokenize the block with a tiny
+// CMake-aware scanner (honouring `#` line comments, quoted args, and nested parens)
+// to find the GIT_TAG value token, and replace exactly that span by position. This
+// tolerates arbitrary whitespace/line-splitting and comments.
 inline int bump_git_tag(std::string &cmake, const std::string &block,
                         const std::string &new_tag, std::vector<Change> &out) {
-  std::regex re("(FetchContent_(?:Populate|Declare)\\s*\\(\\s*" + block +
-                "\\b[\\s\\S]*?GIT_TAG\\s+)(\\S+)");
+  std::regex header("FetchContent_(?:Populate|Declare)\\s*\\(\\s*" + block +
+                    "\\b");
   std::smatch m;
-  if (!std::regex_search(cmake, m, re))
+  if (!std::regex_search(cmake, m, header))
     return 0;
-  if (m[2].str() == new_tag)
+
+  const std::size_t n = cmake.size();
+  std::size_t i = m.position(0) + m.length(0); // just past the block name
+  int depth = 1;                               // inside the block's '('
+  bool saw_tag = false;
+  std::size_t val_begin = std::string::npos, val_end = std::string::npos;
+
+  while (i < n && depth > 0) {
+    const char c = cmake[i];
+    if (c == '#') { // CMake line comment: skip to end of line
+      while (i < n && cmake[i] != '\n')
+        ++i;
+      continue;
+    }
+    if (c == '"') { // quoted argument: its inner content may be the value
+      const std::size_t q_begin = ++i;
+      while (i < n && cmake[i] != '"') {
+        if (cmake[i] == '\\' && i + 1 < n)
+          ++i;
+        ++i;
+      }
+      const std::size_t q_end = i;
+      if (i < n)
+        ++i; // consume closing quote
+      if (saw_tag) {
+        val_begin = q_begin;
+        val_end = q_end;
+        break;
+      }
+      continue;
+    }
+    if (c == '(') { ++depth; ++i; continue; }
+    if (c == ')') { --depth; ++i; continue; }
+    if (std::isspace(static_cast<unsigned char>(c))) { ++i; continue; }
+
+    // A bare (unquoted) token: runs until whitespace or a delimiter.
+    const std::size_t tok_begin = i;
+    while (i < n && !std::isspace(static_cast<unsigned char>(cmake[i])) &&
+           cmake[i] != '(' && cmake[i] != ')' && cmake[i] != '#' &&
+           cmake[i] != '"')
+      ++i;
+    if (saw_tag) {
+      val_begin = tok_begin;
+      val_end = i;
+      break;
+    }
+    if (cmake.compare(tok_begin, i - tok_begin, "GIT_TAG") == 0)
+      saw_tag = true;
+  }
+
+  if (val_begin == std::string::npos)
     return 0;
-  cmake = std::regex_replace(cmake, re, "$1" + new_tag,
-                             std::regex_constants::format_first_only);
-  out.push_back({0, block + " GIT_TAG -> " + new_tag});
+  if (cmake.compare(val_begin, val_end - val_begin, new_tag) == 0)
+    return 0;
+  const std::size_t line = line_of_offset(cmake, val_begin);
+  cmake.replace(val_begin, val_end - val_begin, new_tag);
+  out.push_back({line, block + " GIT_TAG -> " + new_tag});
   return 1;
 }
 

@@ -34,6 +34,7 @@
     "Registration changed: INSTALL_SOURCE/FILTER/SINK_DRIVER are now deprecated aliases; the new MADS_REGISTER_PLUGINS(klass) macro deduces the input/output types from the class and can register several plugins from one library, e.g. MADS_REGISTER_PLUGINS(MySrc, MySink).",
     "Plugin child-class method signatures are unchanged from P7 (kind/load_data/process/get_output/set_params/info), so no method bodies need editing.",
     "The generated driver's create() now returns std::unique_ptr and register_pugg_plugin returns bool, but both live inside the macro; hand-written custom drivers must be updated to match.",
-    "pugg is bumped to 1.2.0 alongside mads_plugin v2.4-P8."
+    "pugg is bumped to 1.2.0 alongside mads_plugin v2.4-P8.",
+    "If you have heavily customized CMakeLists.txt, compare it with that of a freshly generated plugin (e.g., using `git diff` or a file comparison tool)."
   ]
 }
