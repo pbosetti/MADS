@@ -595,14 +595,28 @@ static void extract_zip_file(const fs::path &zip_path, const fs::path &prefix,
     fs::path dest = prefix / rel;
     if (fs::is_directory(entry.path())) {
       fs::create_directories(dest, ec);
+      if (ec) {
+        string reason = ec.message();
+        fs::remove_all(extract_dir, ec);
+        throw runtime_error("Failed to create directory " + rel.string() +
+                            ": " + reason);
+      }
       continue;
     }
-    fs::copy_file(entry.path(), dest,
-                  fs::copy_options::overwrite_existing, ec);
+    fs::create_directories(dest.parent_path(), ec);
     if (ec) {
+      string reason = ec.message();
+      fs::remove_all(extract_dir, ec);
+      throw runtime_error("Failed to create directory " +
+                          dest.parent_path().string() + ": " + reason);
+    }
+    bool copied = fs::copy_file(entry.path(), dest,
+                                fs::copy_options::overwrite_existing, ec);
+    if (!copied || ec) {
+      string reason = ec ? ec.message() : "copy skipped";
       fs::remove_all(extract_dir, ec);
       throw runtime_error("Failed to install " + rel.string() + ": " +
-                          ec.message());
+                          reason);
     }
   }
 
