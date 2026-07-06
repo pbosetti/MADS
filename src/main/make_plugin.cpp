@@ -9,12 +9,14 @@ Plugin maker: creates stub files for developing a new MADS plugin
 *******************************************************************************/
 #include <iostream>
 #include <algorithm>
+#include <fstream>
 #include <inja/inja.hpp>
 #include <cxxopts.hpp>
 #include <filesystem>
 #include <rang.hpp>
 #include "../exec_path.hpp"
 #include "../mads.hpp"
+#include "plugin_migrate.hpp"
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -91,6 +93,11 @@ int main(int argc, char **argv) {
     ("o,overwrite", "Overwrite existing files")
     ("r,rust", "Create a Rust plugin (uses mads-rsource/rfilter/rsink loader)")
     ("s,datastore", "Enable Datastore class for persistency (C++ only)")
+    ("u,update", "Migrate an existing plugin (dir from --dir or positional) to the current protocol")
+    ("dry-run", "With --update: show the changes without writing any file")
+    ("no-check", "With --update: skip the post-migration compile check")
+    ("from", "With --update: override the detected source protocol", value<int>())
+    ("to", "With --update: override the target protocol", value<int>())
     ("v,version", "Print version")
     ("h,help", "Print usage");
   options.parse_positional({"name"});
@@ -107,6 +114,28 @@ int main(int argc, char **argv) {
   if (options_parsed.count("help") > 0) {
     std::cout << options.help() << endl;
     exit(0);
+  }
+
+  // ── Migration mode: update an existing plugin instead of scaffolding a new one
+  if (options_parsed.count("update") > 0) {
+    filesystem::path project_dir = ".";
+    if (options_parsed.count("dir") > 0)
+      project_dir = options_parsed["dir"].as<string>();
+    else if (options_parsed.count("name") > 0)
+      project_dir = options_parsed["name"].as<string>();
+
+    Mads::PluginMigrate::Options mopts;
+    mopts.dry_run = options_parsed.count("dry-run") > 0;
+    mopts.check = options_parsed.count("no-check") == 0;
+    if (options_parsed.count("from") > 0)
+      mopts.from_override = options_parsed["from"].as<int>();
+    if (options_parsed.count("to") > 0)
+      mopts.to_override = options_parsed["to"].as<int>();
+
+    filesystem::path migrations_dir = Mads::exec_dir("../share/plugin_migrations/");
+    filesystem::path deps_manifest = Mads::exec_dir("../share/plugin_deps.json");
+    return Mads::PluginMigrate::run(project_dir, migrations_dir, deps_manifest,
+                                    mopts);
   }
 
   data["type"] = "source";
@@ -190,6 +219,28 @@ int main(int argc, char **argv) {
     data["hostname"] = hostname;
   }
 
+  // Dependency pins for the generated CMakeLists.txt come from the shared
+  // manifest (share/plugin_deps.json) — the single source of truth kept in sync
+  // with the newest migration step. Fall back to sane defaults if it is missing.
+  data["plugin_git_tag"] = "v2.3-P7";
+  data["pugg_git_tag"] = "1.1.0";
+  data["json_version"] = "v3.11.3";
+  {
+    ifstream mf(Mads::exec_dir("../share/plugin_deps.json"));
+    if (mf) {
+      try {
+        json manifest = json::parse(mf);
+        if (manifest.contains("plugin_git_tag"))
+          data["plugin_git_tag"] = manifest["plugin_git_tag"];
+        if (manifest.contains("pugg_git_tag"))
+          data["pugg_git_tag"] = manifest["pugg_git_tag"];
+        if (manifest.contains("json_version"))
+          data["json_version"] = manifest["json_version"];
+      } catch (...) {
+        // keep defaults on malformed manifest
+      }
+    }
+  }
 
   bool rust = options_parsed.count("rust") > 0;
 

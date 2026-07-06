@@ -1,0 +1,7 @@
+{
+  "_comment": "Single source of truth for the dependency versions a freshly scaffolded C++ plugin pins to. `mads plugin` fills the template CMakeLists.txt placeholders from here, and `mads plugin --update` reads plugin_protocol/plugin_git_tag as the default migration target. Keep plugin_git_tag consistent with the newest file in share/plugin_migrations/ (its `to`/`cmake.plugin_git_tag`).",
+  "plugin_protocol": 7,
+  "plugin_git_tag": "v2.3-P7",
+  "pugg_git_tag": "1.1.0",
+  "json_version": "v3.11.3"
+}

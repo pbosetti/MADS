@@ -423,6 +423,18 @@ install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/templates
   COMPONENT MadsApps
 )
 
+# Data-driven plugin migration: definitions consumed by `mads plugin --update`,
+# plus the dependency manifest that pins versions for freshly scaffolded plugins.
+install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/plugin_migrations
+  DESTINATION share
+  COMPONENT MadsApps
+)
+
+install(FILES ${CMAKE_CURRENT_LIST_DIR}/share/plugin_deps.json
+  DESTINATION share
+  COMPONENT MadsApps
+)
+
 file(GLOB PYTHON_SCRIPTS ${CMAKE_CURRENT_LIST_DIR}/scripts/*.py)
 install(PROGRAMS ${PYTHON_SCRIPTS}
   DESTINATION python

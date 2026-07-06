@@ -16,10 +16,20 @@
   [**\-h, \-\-help**]
   [*plugin name*]
 
+**mads-plugin** **\-\-update**
+  [**\-d, \-\-dir** *plugin directory*]
+  [**\-\-dry-run**]
+  [**\-\-no-check**]
+  [**\-\-from** *protocol*]
+  [**\-\-to** *protocol*]
+  [*plugin directory*]
+
 # DESCRIPTION
 
 **mads-plugin** creates a stub for implementing a new MADS plugin, either
-in C++ (default) or in Rust (**\-\-rust**).
+in C++ (default) or in Rust (**\-\-rust**). With **\-\-update** it instead
+migrates an *existing* C++ plugin to the current plugin protocol (see
+**Migrating an existing plugin** below).
 
 ## C++ plugins
 
@@ -36,6 +46,26 @@ and export a single C ABI symbol via the **export_*_plugin!** macro. The
 library is loaded by the dedicated Rust loaders **mads-rsource**,
 **mads-rfilter**, or **mads-rsink**, which mirror the behaviour of their C++
 counterparts. No C++ toolchain is required to write or build a Rust plugin.
+
+## Migrating an existing plugin
+
+When the plugin harness bumps the plugin protocol version (the **\-P**\ *N*
+suffix of the **mads_plugin** git tag, e.g. **v2.3-P7**), older C++ plugins must
+update their pinned **GIT_TAG** and adapt their overridden methods to the new
+base-class signatures. **mads plugin \-\-update** *dir* automates this:
+
+1. it detects the plugin's current protocol from its **CMakeLists.txt**;
+2. it chains the migration steps in **share/plugin_migrations** up to the current
+   protocol (from **share/plugin_deps.json**), bumping the **GIT_TAG** and
+   rewriting the affected method signatures. Signatures are located
+   structurally (balanced parentheses), so reformatted or multi-line
+   declarations migrate correctly;
+3. it saves each modified file as *file*.**bak**, prints a change report and a
+   manual follow-up checklist, then (unless **\-\-no-check**) compiles the
+   migrated plugin so the compiler flags anything the rewrite could not handle.
+
+Rust plugins are not handled by **\-\-update**: they track the **mads-plugin**
+crate version in **Cargo.toml** rather than the **\-P**\ *N* tag.
 
 # ARGUMENTS
 
@@ -74,6 +104,25 @@ counterparts. No C++ toolchain is required to write or build a Rust plugin.
 :  Enable datastore support in the generated C++ plugin (default: false).
    Not applicable to Rust plugins.
 
+**\-u**, **\-\-update**
+:  Migrate an existing C++ plugin instead of scaffolding a new one. The plugin
+   directory is taken from **\-\-dir** or the positional argument (default: the
+   current directory). See **Migrating an existing plugin** above.
+
+**\-\-dry-run**
+:  With **\-\-update**: report the changes that would be made without writing any
+   file.
+
+**\-\-no-check**
+:  With **\-\-update**: skip the post-migration compile check.
+
+**\-\-from** *protocol*
+:  With **\-\-update**: override the auto-detected source protocol number.
+
+**\-\-to** *protocol*
+:  With **\-\-update**: migrate up to this protocol number instead of the current
+   one from **share/plugin_deps.json**.
+
 **\-v**, **\-\-version**
 :  Show version information.
 
@@ -98,6 +147,13 @@ cd my_filter && cargo build --release
 mads-rfilter target/release/libmy_filter.so
 ```
 
+Preview a protocol migration of an existing plugin, then apply it:
+
+```
+mads plugin --update ./my_filter --dry-run
+mads plugin --update ./my_filter
+```
+
 # BUGS
 
 The upstream bug tracker can be found at https://github.com/pbosetti/MADS/issues.
@@ -113,6 +169,10 @@ The upstream bug tracker can be found at https://github.com/pbosetti/MADS/issues
 **/usr/local/share/templates**: directory containing C++ and Rust plugin templates.
 
 **/usr/local/share/rust/mads-plugin**: source of the **mads-plugin** Rust crate.
+
+**/usr/local/share/plugin_migrations**: JSON migration definitions used by **\-\-update**.
+
+**/usr/local/share/plugin_deps.json**: dependency version manifest pinned into scaffolded C++ plugins and used as the default **\-\-update** target.
 
 # AUTHOR
 
