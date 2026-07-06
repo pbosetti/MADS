@@ -44,6 +44,80 @@ static std::string linux_get_header(const std::string &headers,
     return "";
 }
 
+static std::string linux_lower_copy(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    return value;
+}
+
+static std::string linux_trim_copy(const std::string &value) {
+    size_t start = value.find_first_not_of(" \t");
+    if (start == std::string::npos)
+        return "";
+    size_t end = value.find_last_not_of(" \t");
+    return value.substr(start, end - start + 1);
+}
+
+static bool linux_header_has_token(const std::string &headers,
+                                   const std::string &lower_name,
+                                   const std::string &lower_token) {
+    std::string value = linux_lower_copy(linux_get_header(headers, lower_name));
+    size_t pos = 0;
+    while (pos <= value.size()) {
+        size_t comma = value.find(',', pos);
+        std::string token = linux_trim_copy(value.substr(
+            pos, comma == std::string::npos ? std::string::npos : comma - pos));
+        if (token == lower_token)
+            return true;
+        if (comma == std::string::npos)
+            break;
+        pos = comma + 1;
+    }
+    return false;
+}
+
+static std::string linux_decode_chunked_body(const std::string &body) {
+    std::string decoded;
+    size_t pos = 0;
+
+    while (true) {
+        size_t line_end = body.find("\r\n", pos);
+        if (line_end == std::string::npos)
+            throw std::runtime_error("Invalid chunked HTTP response");
+
+        std::string size_line = body.substr(pos, line_end - pos);
+        size_t extension = size_line.find(';');
+        if (extension != std::string::npos)
+            size_line = size_line.substr(0, extension);
+        size_line = linux_trim_copy(size_line);
+        if (size_line.empty())
+            throw std::runtime_error("Invalid chunked HTTP response");
+
+        size_t parsed = 0;
+        unsigned long long parsed_size = 0;
+        try {
+            parsed_size = std::stoull(size_line, &parsed, 16);
+        } catch (const std::exception &) {
+            throw std::runtime_error("Invalid chunked HTTP response");
+        }
+        if (parsed != size_line.size())
+            throw std::runtime_error("Invalid chunked HTTP response");
+
+        pos = line_end + 2;
+        if (parsed_size == 0)
+            return decoded;
+        if (parsed_size > body.size() - pos)
+            throw std::runtime_error("Invalid chunked HTTP response");
+
+        size_t chunk_size = static_cast<size_t>(parsed_size);
+        decoded.append(body.data() + pos, chunk_size);
+        pos += chunk_size;
+        if (pos + 2 > body.size() || body.compare(pos, 2, "\r\n") != 0)
+            throw std::runtime_error("Invalid chunked HTTP response");
+        pos += 2;
+    }
+}
+
 HttpsClient::Response HttpsClient::_get_linux() {
     SSL_library_init();
     SSL_load_error_strings();
@@ -105,6 +179,8 @@ HttpsClient::Response HttpsClient::_get_linux() {
 
             std::string headers = raw_response.substr(0, header_end);
             response.body = raw_response.substr(header_end + 4);
+            if (linux_header_has_token(headers, "transfer-encoding", "chunked"))
+                response.body = linux_decode_chunked_body(response.body);
 
             // Parse status line
             size_t first_line_end = headers.find("\r\n");
