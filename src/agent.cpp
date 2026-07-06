@@ -412,6 +412,13 @@ void Agent::init(bool crypto, bool install_watchdog) {
     throw AgentError("Invalid sub_topic type for " + _name);
   }
   _time_step = chrono::milliseconds(cfg["time_step"].value_or(0));
+  // Finer-grained override: if time_step_us is present, it wins over time_step.
+  if (cfg["time_step_us"].type() != toml::node_type::none) {
+    _time_step = chrono::microseconds(cfg["time_step_us"].value_or<int64_t>(0));
+  }
+  _high_res_loop = cfg["high_res_loop"].value_or(false);
+  _spin_margin =
+      chrono::microseconds(cfg["spin_margin_us"].value_or<int64_t>(200));
 
   // Wire format / compression policy for outgoing messages (opt-in).
   // Both can be set fleet-wide under [agents] and overridden per agent section.
@@ -962,15 +969,38 @@ void Agent::install_signal_handlers() {
   });
 }
 
+namespace {
+// Waits until `deadline`. In high-res mode, sleeps for all but the last
+// `spin_margin` of the remaining time, then busy-spins on steady_clock for
+// microsecond-accurate wake-up (at the cost of keeping a core busy). In the
+// default mode, a single sleep_for is used: nanosecond-accurate in its
+// accounting, but the actual wake-up jitter is limited by the OS scheduler.
+void wait_until(chrono::steady_clock::time_point deadline, bool high_res,
+                chrono::nanoseconds spin_margin) {
+  auto now = chrono::steady_clock::now();
+  if (now >= deadline)
+    return;
+  if (high_res) {
+    if (deadline - now > spin_margin)
+      this_thread::sleep_for(deadline - now - spin_margin);
+    while (chrono::steady_clock::now() < deadline) {
+      // busy-spin for microsecond-accurate wake-up
+    }
+  } else {
+    this_thread::sleep_for(deadline - now);
+  }
+}
+} // namespace
+
 #ifdef MADS_LOOP_USES_THREADS
-void Agent::loop(loop_fun_t const &lambda, chrono::milliseconds duration) {
+void Agent::loop(loop_fun_t const &lambda, chrono::nanoseconds duration) {
   if (!_init_done)
     throw AgentError("Agent not initialized");
   install_signal_handlers();
-  chrono::milliseconds nld(0); // next loop duration
+  chrono::nanoseconds nld(0); // next loop duration
   while (Mads::running) {
-    if (duration > 0ms || nld > 0ms) {
-      thread t([&]() { this_thread::sleep_for(nld == 0ms ? duration : nld); });
+    if (duration > 0ns || nld > 0ns) {
+      thread t([&]() { this_thread::sleep_for(nld == 0ns ? duration : nld); });
       try {
         nld = lambda();
       } catch (...) {
@@ -988,13 +1018,13 @@ void Agent::loop(loop_fun_t const &lambda, chrono::milliseconds duration) {
   }
 }
 #else
-void Agent::loop(loop_fun_t const &lambda, chrono::milliseconds duration) {
+void Agent::loop(loop_fun_t const &lambda, chrono::nanoseconds duration) {
   if (!_init_done)
     throw AgentError("Agent not initialized");
   install_signal_handlers();
-  chrono::milliseconds nld(0); // next loop duration
+  chrono::nanoseconds nld(0); // next loop duration
   while (Mads::running) {
-    chrono::milliseconds sleep_duration = nld == 0ms ? duration : nld;
+    chrono::nanoseconds sleep_duration = nld == 0ns ? duration : nld;
     auto start = chrono::steady_clock::now();
     try {
       nld = lambda();
@@ -1002,12 +1032,8 @@ void Agent::loop(loop_fun_t const &lambda, chrono::milliseconds duration) {
       cerr << "Exception in loop: " << e.what() << endl;
       Mads::running = false;
     }
-    if (sleep_duration > 0ms) {
-      auto elapsed = chrono::duration_cast<chrono::milliseconds>(
-          chrono::steady_clock::now() - start);
-      if (elapsed < sleep_duration) {
-        this_thread::sleep_for(sleep_duration - elapsed);
-      }
+    if (sleep_duration > 0ns) {
+      wait_until(start + sleep_duration, _high_res_loop, _spin_margin);
     }
   }
 }
@@ -1015,6 +1041,15 @@ void Agent::loop(loop_fun_t const &lambda, chrono::milliseconds duration) {
 
 void Agent::loop(loop_fun_t const &lambda) {
   loop(lambda, _time_step);
+}
+
+void Agent::enable_high_res_loop(bool on, chrono::nanoseconds spin_margin) {
+  _high_res_loop = on;
+  _spin_margin = spin_margin;
+}
+
+bool Agent::high_res_loop() const {
+  return _high_res_loop;
 }
 
 void Agent::enable_remote_control(bool threaded) {

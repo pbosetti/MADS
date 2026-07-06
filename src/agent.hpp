@@ -460,30 +460,73 @@ public:
    * @brief Enters the main loop of the agent. It also sets a signal handler for
    * SIGNINT, which will set the running flag to false.
    *
-   * @param lambda the function to be executed in the main loop; it can return 
-   *  the requested duration of the next loop: if this is 0, the default loop 
+   * The loop period is expressed in nanoseconds internally, so that any
+   * std::chrono::duration (milliseconds, microseconds, ...) can be passed or
+   * returned by the lambda: e.g. `agent.loop(cb, 500us);` opts into
+   * microsecond-resolution pacing, while existing millisecond-based code
+   * (`agent.loop(cb, 100ms);`, `return 0ms;`) keeps compiling and behaving as
+   * before (the conversion to nanoseconds is implicit and lossless).
+   *
+   * By default, the wait between iterations uses this_thread::sleep_for,
+   * whose actual wake-up jitter is limited by the OS scheduler (typically
+   * within a fraction of a millisecond). For tighter, microsecond-accurate
+   * pacing, opt into enable_high_res_loop(), which busy-spins the tail of
+   * each interval instead of sleeping through it, trading CPU time for
+   * precision: the fraction of each interval spent spinning (and so the
+   * extra CPU load) scales with spin_margin relative to the loop period, so
+   * it is most noticeable on short periods and/or a large spin_margin.
+   *
+   * @param lambda the function to be executed in the main loop; it can return
+   *  the requested duration of the next loop: if this is 0, the default loop
    *  time is used, otherwise the value returned by the lambda
    * @param duration the duration of the loop (default 0, max speed)
    * @throws AgentError if not initialized
    */
-  using loop_fun_t = std::function<std::chrono::milliseconds()>;
+  using loop_fun_t = std::function<std::chrono::nanoseconds()>;
   void loop(loop_fun_t const &lambda,
-            std::chrono::milliseconds duration);
+            std::chrono::nanoseconds duration);
 
 
   /**
    * @brief Enters the main loop of the agent. It also sets a signal handler for
    * SIGNINT, which will set the running flag to false.
-   * The loop duration is set to the time step of the agent, as pased in the 
-   * ini file with the time_step parameter. It it is zero or not set,
-   * it will run at max speed.
+   * The loop duration is set to the time step of the agent, as pased in the
+   * ini file with the time_step parameter (or the finer time_step_us). It it
+   * is zero or not set, it will run at max speed.
    *
-   * @param lambda the function to be executed in the main loop; it can return 
-   *  the requested duration of the next loop: if this is 0, the default loop 
+   * @param lambda the function to be executed in the main loop; it can return
+   *  the requested duration of the next loop: if this is 0, the default loop
    *  time is used, otherwise the value returned by the lambda
    * @throws AgentError if not initialized
    */
   void loop(loop_fun_t const &lambda);
+
+
+  /**
+   * @brief Opt into (or out of) high-resolution loop pacing.
+   *
+   * When enabled, the wait between loop iterations sleeps for most of the
+   * remaining interval and then busy-spins on a steady_clock check for the
+   * last `spin_margin`, trading CPU usage for microsecond-accurate wake-up
+   * timing: the extra CPU cost is roughly proportional to spin_margin
+   * divided by the loop period (e.g. a 200us margin on a 500us period keeps
+   * a core busy on the order of ~20-40% of the time; a 200us margin on a
+   * 100ms period costs a negligible fraction). Leave disabled (the default)
+   * for millisecond-granular loops, where plain sleep_for is sufficient and
+   * cheaper.
+   *
+   * @param on whether to enable high-resolution pacing (default true).
+   * @param spin_margin the portion of each interval to busy-spin instead of
+   *  sleep (default 200us); only relevant when `on` is true.
+   */
+  void enable_high_res_loop(bool on = true,
+                            std::chrono::nanoseconds spin_margin =
+                                std::chrono::microseconds(200));
+
+  /**
+   * @brief Returns whether high-resolution loop pacing is enabled.
+   */
+  bool high_res_loop() const;
 
 
   /**
@@ -929,7 +972,9 @@ protected:
   bool _init_done = false;
   bool _restart = false;
   bool _remote_controlled = false;
-  std::chrono::milliseconds _time_step = std::chrono::milliseconds(0);
+  std::chrono::nanoseconds _time_step = std::chrono::nanoseconds(0);
+  bool _high_res_loop = false;
+  std::chrono::nanoseconds _spin_margin = std::chrono::microseconds(200);
   double _timecode_offset = 0.0;
   std::filesystem::path _attachment_path;
   bool _crypto = false;
