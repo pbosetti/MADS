@@ -1,3 +1,28 @@
+# Release v2.4.0
+
+This document summarizes what changed between `v2.3.1` and `v2.4.0`.
+
+To **install this version**, have a look at [the Guide](https://mads-net.github.io/guides/install.html)
+
+# Changes
+
+These changes summarize what was added or updated since `v2.3.1`.
+
+## New features
+
+- **`mads-federate` agent.** New agent that relays selected topics between two independent MADS networks, each with its own broker. It owns two ordinary agent connections ("side A" and "side B"), each configured via a normal `[name]` section in that network's own broker settings; whatever a side subscribes to via its `sub_topic` is forwarded to the other network. Only JSON messages are relayed (no blobs), and the `control`/`agent_event` topics are never forwarded, so remote-control commands and lifecycle events stay local. Relayed messages are tagged with the relay's id in a `mads_relay_path` field to prevent A→B→A loops. See [share/man/mads-federate.md](share/man/mads-federate.md).
+- **High-resolution loop pacing.** `Agent::loop()` now paces its internal timing in nanoseconds instead of milliseconds (existing millisecond-based code keeps compiling and behaving as before). Agents can set a `time_step_us` key in their settings section (wins over `time_step`) for microsecond-granularity periods, and opt into `enable_high_res_loop()` (or the `high_res_loop`/`spin_margin_us` settings keys) to busy-spin the tail of each interval instead of sleeping through it, trading CPU time for microsecond-accurate wake-up timing.
+- **`mads plugin --update` migration command.** C++ plugins can now be migrated in place to the current plugin protocol version instead of being rewritten by hand. It detects the plugin's current protocol from its `CMakeLists.txt`, chains the migration steps recorded in `share/plugin_migrations` up to the current protocol, bumps the pinned `GIT_TAG`, and rewrites affected method signatures (located structurally, so reformatted/multi-line declarations migrate correctly). Each modified file is saved as `*.bak`, and a change report plus manual follow-up checklist is printed; unless `--no-check`, the migrated plugin is then compiled so the compiler flags anything the rewrite could not handle. `--dry-run`, `--from`, and `--to` are also available. Rust plugins are unaffected (they track the `mads-plugin` crate version in `Cargo.toml`). See [share/man/mads-plugin.md](share/man/mads-plugin.md).
+- **`plugin_deps.json` dependency manifest.** Scaffolded C++ plugins now pin their dependency versions (plugin protocol, `mads_plugin`/`pugg` git tags, bundled `nlohmann::json` version) from a single `share/plugin_deps.json` file, which also supplies the default target protocol for `mads plugin --update`, instead of being hard-coded into the CMake template.
+
+## Improvements
+
+- **Updated to `mads_plugin` v2.4-P8 (protocol P8) and `pugg` 1.2.0.** Plugin registration is simplified: the per-type `INSTALL_SOURCE_DRIVER`/`INSTALL_FILTER_DRIVER`/`INSTALL_SINK_DRIVER` macros are replaced by a single type-deducing `MADS_REGISTER_PLUGINS(klass, ...)` macro that can register several plugins from one library. Plugin child-class method signatures (`kind`/`load_data`/`process`/`get_output`/`set_params`/`info`) are unchanged from P7. The generated driver's `create()` now returns a `std::unique_ptr` rather than a raw pointer. A migration step (`P7-P8.json`) is provided for `mads plugin --update`.
+- **More robust `GIT_TAG` rewriting during plugin migration.** The CMake `GIT_TAG` bump used by `mads plugin --update` no longer relies on a single fragile regex spanning the whole `FetchContent` block (which could match a tag mentioned in a comment, or mis-substitute a replacement value starting with a digit). It now locates the block header and then tokenizes it with a small CMake-aware scanner that honours `#` comments, quoted arguments, and nested parentheses, replacing exactly the `GIT_TAG` value token by position.
+- **gv2fsm updated to v2.0.0.** The bundled finite-state-machine generator is updated to its latest release.
+
+---
+
 # Release 2.3.1
 
 This document summarizes what changed between `v2.3.0` and `v2.3.1`.
