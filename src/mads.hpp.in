@@ -203,6 +203,10 @@ inline bool check_version(const std::string &version) {
  *   "shutdown"/"restart" commands) stops every Runtime in the process.
  *
  * running() reports true only if neither level has been stopped.
+ *
+ * @see \ref md_RUNTIME "Run state and agent lifecycle" (RUNTIME.md) for the
+ * full model, usage patterns, and the migration table from the deprecated
+ * Mads::running flag.
  */
 class Runtime {
 public:
@@ -235,6 +239,9 @@ private:
  * process, and reading it reports the process-wide state. Prefer
  * agent.runtime()->stop() to stop a single agent, or
  * Mads::Runtime::stop_process() for a process-wide stop.
+ *
+ * @see \ref md_RUNTIME "Run state and agent lifecycle" (RUNTIME.md) for the
+ * migration table.
  */
 [[deprecated("use Mads::Runtime (agent.runtime()->stop() or "
              "Mads::Runtime::stop_process()) instead of the process-global "
