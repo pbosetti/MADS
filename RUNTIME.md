@@ -2,7 +2,7 @@
 
 ## Context
 
-Since MADS v2.5, the "keep going" state that drives `Mads::Agent::loop()` is
+Since MADS v2.4.0, the "keep going" state that drives `Mads::Agent::loop()` is
 owned by a dedicated object, `Mads::Runtime`, instead of a single
 process-global flag. This page explains the model, how to control agent
 lifecycles with it, and how the deprecated `Mads::running` flag maps onto it.
