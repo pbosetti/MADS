@@ -7,7 +7,7 @@ coverage:
       default:
         target: 80%
         threshold: 2%
-        informational: true # flip to false once the suite stabilizes
+        informational: false
     patch:
       default:
         target: 70%
