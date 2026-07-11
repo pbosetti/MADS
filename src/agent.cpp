@@ -231,6 +231,10 @@ Agent::query_broker(string uri, string name, int timeout) {
   // Single REQ socket reused for both the settings and timecode round-trips.
   zmqpp::socket socket(_context, zmqpp::socket_type::req);
   setup_curve_on(socket);
+  // Drop any undelivered request on close: with the default infinite linger,
+  // a request queued toward an unreachable broker keeps the context alive and
+  // context termination (Agent shutdown) blocks forever.
+  socket.set(zmqpp::socket_option::linger, 0);
   if (timeout > 0) {
     socket.set(zmqpp::socket_option::receive_timeout, timeout);
     socket.set(zmqpp::socket_option::send_timeout, timeout);
