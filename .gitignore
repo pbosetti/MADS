@@ -36,3 +36,10 @@ TODO.md
 _*.md
 
 /*.json
+# Coverage artifacts
+coverage.xml
+coverage_html/
+*.gcda
+*.gcno
+*.gcov
+*.profraw
