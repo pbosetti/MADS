@@ -1,13 +1,15 @@
 // Unit tests for Mads::Agent's main loop machinery and remote_control()
-// (src/agent.cpp ~995-1120). Every TEST_CASE that touches Agent::loop() or
-// remote_control()'s effect on Mads::running instantiates
-// mads_test::RunningGuard, since Mads::running is a process-global atomic
-// (src/mads.hpp.in:193).
+// (src/agent.cpp ~995-1120). Each agent owns its own Mads::Runtime, so loop
+// tests stop agents through agent.runtime()->stop() without touching shared
+// state. remote_control("restart"/"shutdown") is process-level by design
+// (it stops Mads::Runtime::process_running()), so those TEST_CASEs
+// instantiate mads_test::RunningGuard to restore the process flag.
 //
 // The watchdog *firing* path (install_loop_watchdog()'s force-exit branch)
 // is intentionally not exercised: it calls std::_Exit() and would kill the
 // test binary. install_loop_watchdog() itself is exercised once, in a way
-// that never lets the countdown start (Mads::running stays true throughout).
+// that never lets the countdown start (the agent is never asked to stop
+// while looping).
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
@@ -25,10 +27,9 @@ using namespace std::chrono_literals;
 // loop()
 // ---------------------------------------------------------------------------
 
-TEST_CASE("loop() invokes the lambda repeatedly until Mads::running is "
-          "cleared",
+TEST_CASE("loop() invokes the lambda repeatedly until the agent's Runtime "
+          "is stopped",
           "[agent_loop]") {
-  mads_test::RunningGuard guard;
   Mads::Agent a("loopA", "none");
   a.init(false, false);
 
@@ -38,7 +39,7 @@ TEST_CASE("loop() invokes the lambda repeatedly until Mads::running is "
       [&]() -> std::chrono::nanoseconds {
         ++count;
         if (count >= target)
-          Mads::running = false;
+          a.runtime()->stop();
         return std::chrono::nanoseconds(0);
       },
       std::chrono::nanoseconds(0));
@@ -48,7 +49,6 @@ TEST_CASE("loop() invokes the lambda repeatedly until Mads::running is "
 
 TEST_CASE("loop() paces iterations by the requested duration",
           "[agent_loop]") {
-  mads_test::RunningGuard guard;
   Mads::Agent a("loopB", "none");
   a.init(false, false);
 
@@ -60,7 +60,7 @@ TEST_CASE("loop() paces iterations by the requested duration",
       [&]() -> std::chrono::nanoseconds {
         ++count;
         if (count >= target)
-          Mads::running = false;
+          a.runtime()->stop();
         return std::chrono::nanoseconds(0); // keep using the fixed `period`
       },
       period);
@@ -77,7 +77,6 @@ TEST_CASE("loop() paces iterations by the requested duration",
 TEST_CASE("loop()'s lambda-returned duration overrides the fixed duration "
           "on subsequent iterations",
           "[agent_loop]") {
-  mads_test::RunningGuard guard;
   Mads::Agent a("loopE", "none");
   a.init(false, false);
 
@@ -92,7 +91,7 @@ TEST_CASE("loop()'s lambda-returned duration overrides the fixed duration "
       [&]() -> std::chrono::nanoseconds {
         ++count;
         if (count >= 5)
-          Mads::running = false;
+          a.runtime()->stop();
         return std::chrono::microseconds(500);
       },
       std::chrono::seconds(1));
@@ -104,9 +103,8 @@ TEST_CASE("loop()'s lambda-returned duration overrides the fixed duration "
 }
 
 TEST_CASE("loop() catches an exception thrown by the lambda and stops "
-          "Mads::running",
+          "only that agent's loop",
           "[agent_loop]") {
-  mads_test::RunningGuard guard;
   Mads::Agent a("loopF", "none");
   a.init(false, false);
 
@@ -119,7 +117,10 @@ TEST_CASE("loop() catches an exception thrown by the lambda and stops "
       std::chrono::nanoseconds(0));
 
   REQUIRE(count == 1); // the loop exits after the first, throwing iteration
-  REQUIRE_FALSE(Mads::running.load());
+  // The stop is agent-local: neither the agent's Runtime nor the process-wide
+  // flag is touched, so other agents in the process keep running.
+  REQUIRE(a.runtime()->running());
+  REQUIRE(Mads::Runtime::process_running().load());
 }
 
 // ---------------------------------------------------------------------------
@@ -127,7 +128,6 @@ TEST_CASE("loop() catches an exception thrown by the lambda and stops "
 // ---------------------------------------------------------------------------
 
 TEST_CASE("enable_high_res_loop toggles high_res_loop()", "[agent_loop]") {
-  mads_test::RunningGuard guard;
   Mads::Agent a("loopC", "none");
   a.init(false, false);
 
@@ -147,9 +147,9 @@ TEST_CASE("install_loop_watchdog() starts and joins cleanly on an orderly "
           "[agent_loop]") {
   mads_test::RunningGuard guard;
   Mads::Agent a("loopD", "none");
-  // Default install_watchdog=true exercises install_loop_watchdog().
-  // Mads::running stays true for the whole test (RunningGuard), so the
-  // watchdog's force-exit countdown never starts.
+  // Default install_watchdog=true exercises install_loop_watchdog(). The
+  // agent is never asked to stop while looping, so the watchdog's force-exit
+  // countdown never starts before shutdown() joins it.
   a.init();
   a.shutdown(); // stops and joins the watchdog thread promptly
   SUCCEED("watchdog thread installed and joined without tripping");
@@ -159,8 +159,8 @@ TEST_CASE("install_loop_watchdog() starts and joins cleanly on an orderly "
 // remote_control()
 // ---------------------------------------------------------------------------
 
-TEST_CASE("remote_control(\"restart\") sets restart() and clears "
-          "Mads::running",
+TEST_CASE("remote_control(\"restart\") sets restart() and requests a "
+          "process-wide stop",
           "[agent_loop]") {
   mads_test::RunningGuard guard;
   Mads::Agent a("rcA", "none");
@@ -169,11 +169,11 @@ TEST_CASE("remote_control(\"restart\") sets restart() and clears "
   REQUIRE_FALSE(a.restart());
   a.remote_control(R"({"cmd":"restart"})");
   REQUIRE(a.restart());
-  REQUIRE_FALSE(Mads::running.load());
+  REQUIRE_FALSE(Mads::Runtime::process_running().load());
 }
 
-TEST_CASE("remote_control(\"shutdown\") clears Mads::running without "
-          "setting restart()",
+TEST_CASE("remote_control(\"shutdown\") requests a process-wide stop "
+          "without setting restart()",
           "[agent_loop]") {
   mads_test::RunningGuard guard;
   Mads::Agent a("rcB", "none");
@@ -181,18 +181,18 @@ TEST_CASE("remote_control(\"shutdown\") clears Mads::running without "
 
   a.remote_control(R"({"cmd":"shutdown"})");
   REQUIRE_FALSE(a.restart());
-  REQUIRE_FALSE(Mads::running.load());
+  REQUIRE_FALSE(Mads::Runtime::process_running().load());
 }
 
 TEST_CASE("remote_control() with malformed JSON is a no-op that leaves "
-          "Mads::running set",
+          "the process-wide run flag set",
           "[agent_loop]") {
   mads_test::RunningGuard guard;
   Mads::Agent a("rcC", "none");
   a.init(false, false);
 
   a.remote_control("not json at all");
-  REQUIRE(Mads::running.load());
+  REQUIRE(Mads::Runtime::process_running().load());
   REQUIRE_FALSE(a.restart());
 }
 
@@ -203,7 +203,7 @@ TEST_CASE("remote_control() with an unrecognized cmd is a no-op",
   a.init(false, false);
 
   a.remote_control(R"({"cmd":"frobnicate"})");
-  REQUIRE(Mads::running.load());
+  REQUIRE(Mads::Runtime::process_running().load());
   REQUIRE_FALSE(a.restart());
 }
 
@@ -248,5 +248,6 @@ TEST_CASE("remote_control(\"info\") publishes the agent's settings on the "
   auto [topic, doc] = sub->last_json();
   REQUIRE(topic == "info");
   REQUIRE(doc.at("agent") == "rcD");
-  REQUIRE(Mads::running.load()); // "info" must not touch the running flag
+  // "info" must not touch the run state
+  REQUIRE(Mads::Runtime::process_running().load());
 }

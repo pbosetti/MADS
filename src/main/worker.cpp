@@ -170,7 +170,7 @@ int main(int argc, char *argv[]) {
   agent.loop([&]() -> chrono::milliseconds {
     json payload = agent.pull();
     return_type rt;
-    if (payload.empty() && !Mads::running) return 0ms;
+    if (payload.empty() && !agent.runtime()->running()) return 0ms;
     // TODO: verify if we need to check return type
     // message_type type = agent.receive();
     agent.receive();

@@ -33,10 +33,13 @@ inline std::string loopback(uint16_t port) {
 }
 
 // Restores the global run flag on scope exit so a test that stops the loop
-// cannot poison later tests in the same binary.
+// cannot poison later tests in the same binary. Since the Runtime refactor
+// only process-level stops (signal handlers, remote_control shutdown/restart,
+// Runtime::stop_process()) touch shared state; this guard resets that flag.
+// Agent shutdown()/disconnect() are per-agent and need no guard.
 struct RunningGuard {
-  RunningGuard() { Mads::running = true; }
-  ~RunningGuard() { Mads::running = true; }
+  RunningGuard() { Mads::Runtime::process_running() = true; }
+  ~RunningGuard() { Mads::Runtime::process_running() = true; }
 };
 
 // Polls a predicate until it returns true or the timeout expires. Use this

@@ -401,7 +401,7 @@ int main(int argc, char *argv[]) {
       // cerr << fg::red << "Critical error getting data: " << plugin->error()
       //      << fg::reset << endl;
       count_err++;
-      Mads::running = false;
+      agent.runtime()->stop();
       throw std::runtime_error(string("Critical error in getting data: ") + plugin->error());
       return 0ms;
     }
@@ -484,7 +484,7 @@ int main(int argc, char *argv[]) {
             << fg::reset << endl;
       err["error"]["load_data"] = plugin->error();
       agent.register_event(event_type::message, err);
-      Mads::running = false;
+      agent.runtime()->stop();
       return 0ms;
     }
     // processing data in the plugin
@@ -513,7 +513,7 @@ int main(int argc, char *argv[]) {
             << fg::reset << endl;
       err["error"]["process"] = plugin->error();
       agent.register_event(event_type::message, err);
-      Mads::running = false;
+      agent.runtime()->stop();
       return 0ms;
     }
     // publishing data
@@ -595,7 +595,7 @@ int main(int argc, char *argv[]) {
       json e_msg = {{"error", {"load_data", plugin->error()}}};
       agent.register_event(event_type::message, e_msg);
       count_err++;
-      Mads::running = false;
+      agent.runtime()->stop();
       return 0ms;
     }
 

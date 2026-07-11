@@ -259,8 +259,9 @@ public:
   /**
    * @brief Install a watch thread to ensure exit from loops
    * 
-   * This starts a low-frequency thread that forces and exit when 
-   * `Mads::running` remains false for more than 3 seconds
+   * This starts a low-frequency thread that forces an exit when the agent
+   * keeps looping for more than 3 seconds after it was asked to stop (its
+   * Runtime was stopped or shutdown/disconnect was requested)
    */
   void install_loop_watchdog(uint8_t max_count = 3);
 
@@ -777,6 +778,30 @@ public:
    */
   bool restart();
 
+  /**
+   * @brief The Runtime that owns this agent's run state.
+   *
+   * loop(), the delivery drain thread, and the threaded remote control all
+   * keep going while runtime()->running() is true and the agent has not been
+   * individually stopped (shutdown()/disconnect()). Stopping the Runtime
+   * stops every agent that shares it.
+   *
+   * @return The agent's Runtime (never null).
+   */
+  std::shared_ptr<Mads::Runtime> runtime() const { return _runtime; }
+
+  /**
+   * @brief Attach the agent to a different Runtime.
+   *
+   * Each agent owns its own Runtime by default; attach several agents to a
+   * shared Runtime (e.g. another agent's runtime()) to stop them together
+   * without affecting the rest of the process.
+   *
+   * @param runtime The Runtime to attach to.
+   * @throws AgentError if runtime is null or the agent is connected.
+   */
+  void set_runtime(std::shared_ptr<Mads::Runtime> runtime);
+
 
   /**
    * @brief Returns the path to the attachment file.
@@ -920,6 +945,16 @@ public:
 
 protected:
   /**
+   * @brief True while this agent's loops should keep going.
+   *
+   * Combines the Runtime state (group + process level) with the per-agent
+   * stop request raised by shutdown()/disconnect().
+   */
+  bool keep_running() const {
+    return _runtime->running() && !_stopping.load();
+  }
+
+  /**
    * @brief Connects the agent to the publish endpoint.
    *
    * @param delay The delay in milliseconds after connecting.
@@ -971,6 +1006,11 @@ protected:
   int _settings_timeout = 0;
   bool _init_done = false;
   bool _restart = false;
+  std::shared_ptr<Mads::Runtime> _runtime = std::make_shared<Mads::Runtime>();
+  // Per-agent stop request: set by shutdown()/disconnect(), cleared by
+  // connect(). Keeps an individual agent's teardown from stopping the other
+  // agents that share its Runtime.
+  std::atomic<bool> _stopping{false};
   bool _remote_controlled = false;
   std::chrono::nanoseconds _time_step = std::chrono::nanoseconds(0);
   bool _high_res_loop = false;

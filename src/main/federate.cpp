@@ -127,8 +127,7 @@ int main(int argc, char *argv[]) {
   try {
     // No CURVE/watchdog on the relay's two legs: each side is a plain agent
     // connection, and a per-leg watchdog force-exiting the process would
-    // fight over the single process-wide Mads::running flag with the other
-    // leg (see Mads::Agent's loop()/shutdown() implementation).
+    // force-exit the whole relay because of a single slow leg.
     side_a.init(/*crypto=*/false, /*install_watchdog=*/false);
     side_b.init(/*crypto=*/false, /*install_watchdog=*/false);
   } catch (const std::exception &e) {
@@ -140,8 +139,8 @@ int main(int argc, char *argv[]) {
   side_a.connect();
   side_b.connect();
 
-  signal(SIGINT, [](int) { Mads::running = false; });
-  signal(SIGTERM, [](int) { Mads::running = false; });
+  signal(SIGINT, [](int) { Mads::Runtime::stop_process(); });
+  signal(SIGTERM, [](int) { Mads::Runtime::stop_process(); });
 
   cerr << style::bold << "mads-federate" << style::reset
        << " relaying between two networks:" << endl;
@@ -151,7 +150,7 @@ int main(int argc, char *argv[]) {
        << endl;
   cerr << fg::green << "Federation started" << fg::reset << endl;
 
-  while (Mads::running) {
+  while (Mads::Runtime::process_running()) {
     bool busy = false;
     if (relay_one(side_a, side_b, relay_id)) {
       count_a_to_b++;
