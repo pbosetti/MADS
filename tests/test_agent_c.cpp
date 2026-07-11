@@ -387,16 +387,11 @@ TEST_CASE("agent_set_client_public_key/secret_key/server_public_key succeed "
   zmqpp::curve::keypair client_kp = zmqpp::curve::generate_keypair();
   zmqpp::curve::keypair server_kp = zmqpp::curve::generate_keypair();
 
-  // NOTE (source bug, not fixed per work-package scope): the "before
-  // agent_setup_crypto" guard in agent_set_client_public_key/secret_key/
-  // server_public_key (src/agent_c.cpp:117-145) checks `if (!ag->curve_auth())`,
-  // but Agent::curve_auth() returns `&_curve_auth` (the address of a member
-  // variable), which is never null -- the check should instead test whether
-  // the pointed-to unique_ptr itself is empty (`!*ag->curve_auth()` or
-  // `!ag->curve_auth()->get()`). As written, calling any of these three
-  // setters before agent_setup_crypto() dereferences a null CurveAuth* and
-  // segfaults instead of returning -1. Exercising that path is therefore
-  // skipped here; only the documented post-setup_crypto usage is covered.
+  // Before agent_setup_crypto() the CurveAuth is not initialized yet, so the
+  // key setters must fail cleanly with -1 and report an error.
+  REQUIRE(agent_set_client_public_key(a, client_kp.public_key.c_str()) == -1);
+  REQUIRE(agent_set_client_secret_key(a, client_kp.secret_key.c_str()) == -1);
+  REQUIRE(agent_set_server_public_key(a, server_kp.public_key.c_str()) == -1);
 
   REQUIRE(agent_setup_crypto(a, false) == 0);
 

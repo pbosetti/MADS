@@ -116,7 +116,7 @@ void agent_set_auth_verbose(agent_t agent, bool verbose) {
 
 int agent_set_client_public_key(agent_t agent, const char *key) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
-  if (!ag->curve_auth()) {
+  if (!*ag->curve_auth()) {
     snprintf(_err_msg, ERR_MSG_SIZE, "Error setting client public key: CurveAuth not initialized");
     return -1;
   }
@@ -126,7 +126,7 @@ int agent_set_client_public_key(agent_t agent, const char *key) {
 
 int agent_set_client_secret_key(agent_t agent, const char *key) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
-  if (!ag->curve_auth()) {
+  if (!*ag->curve_auth()) {
     snprintf(_err_msg, ERR_MSG_SIZE, "Error setting client secret key: CurveAuth not initialized");
     return -1;
   }
@@ -136,7 +136,7 @@ int agent_set_client_secret_key(agent_t agent, const char *key) {
 
 int agent_set_server_public_key(agent_t agent, const char *key) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
-  if (!ag->curve_auth()) {
+  if (!*ag->curve_auth()) {
     snprintf(_err_msg, ERR_MSG_SIZE, "Error setting server public key: CurveAuth not initialized");
     return -1;
   }
