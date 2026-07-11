@@ -21,8 +21,10 @@ TEST_CASE("check_version matches on identical minor version", "[mads_core]") {
   // The library's own version always matches its own check.
   REQUIRE(Mads::check_version(Mads::version()));
   // Same major.minor, different patch also matches, since only the part
-  // before the last dot is compared.
-  REQUIRE(Mads::check_version("v0.0.999"));
+  // before the last dot is compared. Derive the string from the library's
+  // own version, which depends on the git tags visible at configure time.
+  std::string v = Mads::version();
+  REQUIRE(Mads::check_version(v.substr(0, v.find_last_of('.')) + ".999"));
 }
 
 TEST_CASE("check_version rejects a non-matching minor version",

@@ -1,0 +1,9 @@
+# Fixture for test_agent_settings.cpp: sub_topic given as a single string
+# instead of an array (Agent::init() supports both, src/agent.cpp:403-413).
+
+[agents]
+timecode_fps = 25
+
+[strsub]
+pub_topic = "strsub_pub"
+sub_topic = "onlytopic"

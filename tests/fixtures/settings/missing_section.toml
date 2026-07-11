@@ -1,0 +1,10 @@
+# Fixture for test_agent_settings.cpp: valid TOML, but with no table matching
+# the agent name that will be requested ("missingsection") -> Agent::init()
+# must throw AgentError("Invalid settings file: missing '...' section")
+# (src/agent.cpp:387-389).
+
+[agents]
+timecode_fps = 25
+
+[othername]
+pub_topic = "other"
