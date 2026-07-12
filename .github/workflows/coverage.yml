@@ -54,6 +54,12 @@ jobs:
           gcovr --config gcovr.cfg --object-directory build-cov \
             --gcov-executable "llvm-cov gcov"
 
+      - name: Strip branch coverage before Codecov upload
+        # Codecov scores a line as "hit" only when its branches are fully
+        # covered, unlike gcovr's plain line-rate; see the script for why
+        # this keeps the uploaded percentage matching our own line coverage.
+        run: python3 .github/scripts/strip_branch_coverage.py coverage.xml
+
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5
         with:
