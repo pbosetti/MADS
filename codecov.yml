@@ -30,6 +30,5 @@ ignore:
   - "src/dummy.hpp"
   - "src/logger.hpp"
   - "src/TerminalLogoRenderer.hpp"
-  - "src/agent_app.hpp"
   - "src/main/*.cpp"
   - "src/plugin/**"

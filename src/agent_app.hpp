@@ -66,6 +66,8 @@ namespace Mads {
  *
  *   std::chrono::milliseconds time{100};
  *   agent.loop([&]() -> std::chrono::milliseconds {
+ *     // Stop this agent programmatically when done:
+ *     if (work_finished) agent.runtime()->stop();
  *     return 0ms;
  *   }, time);
  *
@@ -74,6 +76,13 @@ namespace Mads {
  *   return 0;
  * }
  * @endcode
+ *
+ * Run state follows the Mads::Runtime model (see RUNTIME.md): the loop ends
+ * when the agent's own Runtime is stopped (`agent.runtime()->stop()`), on a
+ * process-wide stop (SIGINT/SIGTERM, remote shutdown/restart commands, or
+ * Mads::Runtime::stop_process()), or when the agent itself is disconnected.
+ * Other agents hosted in the same process are unaffected unless they share
+ * this agent's Runtime via Agent::set_runtime().
  *
  * Existing Agent subclasses can be wrapped without changing the subclass:
  *
