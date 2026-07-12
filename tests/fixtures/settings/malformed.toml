@@ -1,0 +1,10 @@
+# Fixture for test_agent_settings.cpp: intentionally malformed TOML (an
+# unterminated string value) to exercise the toml::parse_error path in
+# toml::parse_file() (src/agent.cpp:374).
+
+[agents]
+timecode_fps = 25
+
+[badcfg]
+pub_topic = "no closing quote
+sub_topic = ["a", "b"]

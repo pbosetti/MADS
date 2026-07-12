@@ -956,7 +956,7 @@ void ServiceDiscovery::advertising_loop() {
     std::chrono::milliseconds interval{0};
     {
       std::scoped_lock lock(_mutex);
-      if (_stop_requested || !Mads::running) {
+      if (_stop_requested || !Mads::Runtime::process_running()) {
         _advertising = false;
         break;
       }
@@ -973,8 +973,8 @@ void ServiceDiscovery::advertising_loop() {
 
     std::unique_lock lock(_mutex);
     _cv.wait_for(lock, interval,
-                 [this]() { return _stop_requested || !Mads::running; });
-    if (_stop_requested || !Mads::running) {
+                 [this]() { return _stop_requested || !Mads::Runtime::process_running(); });
+    if (_stop_requested || !Mads::Runtime::process_running()) {
       _advertising = false;
       break;
     }

@@ -64,7 +64,7 @@ public:
     json j;
     while (getline(cin, payload)) {
       if (payload == "exit") {
-        Mads::running = false;
+        Mads::Runtime::stop_process();
         break;
       }
       if (regex_search(payload, match, re) && match.size() > 1) {

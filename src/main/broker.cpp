@@ -214,13 +214,13 @@ void proxy(zmqpp::socket &frontend, zmqpp::socket &backend,
   zmqpp::proxy_steerable(frontend, backend, ctrl);
 }
 
-// Install SIGINT/SIGTERM handlers that request a clean shutdown by clearing
-// Mads::running. Used in daemon mode so a `kill`/`systemctl stop` (or CTRL-C)
+// Install SIGINT/SIGTERM handlers that request a clean shutdown by stopping
+// the process-wide run flag. Used in daemon mode so a `kill`/`systemctl stop` (or CTRL-C)
 // unwinds the proxy and stops advertising instead of killing the process
 // abruptly. Only async-signal-safe work is done here (a store to an atomic).
 void install_signal_handlers() {
-  std::signal(SIGINT, [](int) { Mads::running = false; });
-  std::signal(SIGTERM, [](int) { Mads::running = false; });
+  std::signal(SIGINT, [](int) { Mads::Runtime::stop_process(); });
+  std::signal(SIGTERM, [](int) { Mads::Runtime::stop_process(); });
 }
 
 std::string &read_settings_file(std::string const &settings_path) {
@@ -543,14 +543,14 @@ int main(int argc, char **argv) {
            << discovery_retry_interval.count() << "s in the background"
            << style::reset << fg::reset << endl;
       discovery_retry_thread = thread([&, discovery_retry_interval]() {
-        while (Mads::running && !discovery_service.is_advertising()) {
+        while (Mads::Runtime::process_running() && !discovery_service.is_advertising()) {
           // Interruptible sleep so shutdown is not delayed by up to 5s.
           for (auto waited = std::chrono::milliseconds::zero();
-               waited < discovery_retry_interval && Mads::running;
+               waited < discovery_retry_interval && Mads::Runtime::process_running();
                waited += std::chrono::milliseconds(100)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
           }
-          if (!Mads::running) {
+          if (!Mads::Runtime::process_running()) {
             break;
           }
           if (try_start_discovery(true)) {
@@ -603,7 +603,7 @@ int main(int argc, char **argv) {
          << fg::reset << endl;
 
     // Graceful shutdown: run the proxy in steerable mode so that SIGINT/SIGTERM
-    // (clearing Mads::running, see install_signal_handlers above) can unwind it
+    // (stopping the process-wide run flag, see install_signal_handlers above) can unwind it
     // cleanly. The blocking zmqpp::proxy() cannot be interrupted by a signal, so
     // we drive a steerable proxy from a control socket and send TERMINATE once a
     // shutdown is requested.
@@ -614,7 +614,7 @@ int main(int argc, char **argv) {
 
     thread proxy_thread(proxy, ref(frontend), ref(backend), ref(controlled));
 
-    while (Mads::running) {
+    while (Mads::Runtime::process_running()) {
       this_thread::sleep_for(200ms);
     }
 

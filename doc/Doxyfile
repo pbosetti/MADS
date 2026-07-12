@@ -31,6 +31,7 @@ INPUT                  = README.md \
                          CHANGES.md \
                          COMPILE.md \
                          CRYPTO.md \
+                         RUNTIME.md \
                          src \
                          rust/README.md
 RECURSIVE              = YES

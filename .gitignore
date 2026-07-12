@@ -32,7 +32,15 @@ TODO.md
 !mads.ini
 !rust/**/Cargo.toml
 !share/templates/rust_Cargo.toml
+!tests/fixtures/**
 
 _*.md
 
 /*.json
+# Coverage artifacts
+coverage.xml
+coverage_html/
+*.gcda
+*.gcno
+*.gcov
+*.profraw

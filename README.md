@@ -8,7 +8,7 @@
 
 [Documentation](https://mads-net.github.io) · [Compiling](COMPILE.md) · [Changelog](CHANGES.md) · [License](#license)
 
-![C++20](https://img.shields.io/badge/C%2B%2B-20-blue) ![ZeroMQ](https://img.shields.io/badge/transport-ZeroMQ-orange) [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202-green)](http://www.apache.org/licenses/LICENSE-2.0)
+![C++20](https://img.shields.io/badge/C%2B%2B-20-blue) ![ZeroMQ](https://img.shields.io/badge/transport-ZeroMQ-orange) [![codecov](https://codecov.io/gh/pbosetti/MADS/graph/badge.svg)](https://codecov.io/gh/pbosetti/MADS) [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202-green)](http://www.apache.org/licenses/LICENSE-2.0)
 
 </div>
 

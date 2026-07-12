@@ -82,6 +82,8 @@ include(GNUInstallDirs)
 option(MADS_ENABLE_MONGOCXX "Enable MongoDB C++ driver dependency" ON)
 option(MADS_BUILD_APPS "Build executables" ${PROJECT_IS_TOP_LEVEL})
 option(MADS_DIRECTOR "Also build the director app (requires graphical interface)" ON)
+option(MADS_BUILD_TESTS "Build unit tests (Catch2)" OFF)
+option(MADS_COVERAGE "Instrument MadsCore and tests for coverage analysis" OFF)
 
 set(APP_NAME ${LIB_NAME})
 set(PREFIX "mads")
@@ -221,6 +223,12 @@ else()
   list(REMOVE_ITEM LIB_SOURCES ${SOURCE_DIR}/https_client_macos.mm)
 endif()
 
+# mongo_fetch.cpp unconditionally includes <mongocxx/...>, so it can only be
+# part of the library when the MongoDB driver is actually vendored in.
+if(NOT MADS_ENABLE_MONGOCXX)
+  list(REMOVE_ITEM LIB_SOURCES ${SOURCE_DIR}/mongo_fetch.cpp)
+endif()
+
 add_library(
   ${LIB_NAME}
   SHARED
@@ -288,6 +296,18 @@ if(APPLE)
   endif()
 endif()
 
+if(MADS_COVERAGE)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    # Instrument only MadsCore (PRIVATE flags): vendored dependencies stay out
+    # of the report and build fast. Atomic profile updates are required because
+    # Agent spawns drain/remote-control/watchdog threads.
+    target_compile_options(${LIB_NAME} PRIVATE -O0 -g --coverage -fprofile-update=atomic)
+    target_link_options(${LIB_NAME} PRIVATE --coverage)
+  else()
+    message(WARNING "MADS_COVERAGE requires GCC or Clang; coverage flags not applied")
+  endif()
+endif()
+
 add_library(MadsMainDeps INTERFACE)
 if(WIN32)
   target_compile_definitions(${LIB_NAME} PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN _HAS_STD_BYTE=0)
@@ -328,6 +348,44 @@ if(DEFINED _zmqpp_binary_dir AND _zmqpp_binary_dir)
     INTERFACE
       "${_zmqpp_binary_dir}"
   )
+endif()
+
+#
+#  _____         _
+# |_   _|__  ___| |_ ___
+#   | |/ _ \/ __| __/ __|
+#   | |  __/\__ \ |_\__ \
+#   |_|\___||___/\__|___/
+#
+# Note: enable_testing() is used directly (not include(CTest)) because
+# vendors/CMakeLists.txt forces BUILD_TESTING OFF in the cache to keep
+# third-party test suites out of the build.
+if(MADS_BUILD_TESTS)
+  enable_testing()
+  add_subdirectory(tests)
+endif()
+
+if(MADS_COVERAGE)
+  find_program(GCOVR_EXECUTABLE gcovr)
+  if(GCOVR_EXECUTABLE)
+    # clang emits gcov-compatible data but needs its own reader tool.
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+      set(MADS_GCOV_TOOL --gcov-executable "llvm-cov gcov")
+    else()
+      set(MADS_GCOV_TOOL)
+    endif()
+    add_custom_target(coverage
+      COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR} --output-on-failure
+      COMMAND ${GCOVR_EXECUTABLE} --config ${CMAKE_SOURCE_DIR}/gcovr.cfg
+              --object-directory ${CMAKE_BINARY_DIR} ${MADS_GCOV_TOOL}
+              --html-details ${CMAKE_BINARY_DIR}/coverage_html/index.html
+      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+      COMMENT "Running tests and generating coverage report"
+      VERBATIM
+    )
+  else()
+    message(WARNING "gcovr not found: the 'coverage' target will not be available")
+  endif()
 endif()
 
 if(MADS_BUILD_APPS)

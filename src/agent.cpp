@@ -231,6 +231,10 @@ Agent::query_broker(string uri, string name, int timeout) {
   // Single REQ socket reused for both the settings and timecode round-trips.
   zmqpp::socket socket(_context, zmqpp::socket_type::req);
   setup_curve_on(socket);
+  // Drop any undelivered request on close: with the default infinite linger,
+  // a request queued toward an unreachable broker keeps the context alive and
+  // context termination (Agent shutdown) blocks forever.
+  socket.set(zmqpp::socket_option::linger, 0);
   if (timeout > 0) {
     socket.set(zmqpp::socket_option::receive_timeout, timeout);
     socket.set(zmqpp::socket_option::send_timeout, timeout);
@@ -480,13 +484,14 @@ void Agent::shutdown() {
   if (_shutdown_done) return;
   _shutdown_done = true;
 
-  // 0. Stop the watchdog first so that setting Mads::running=false below does
+  // 0. Stop the watchdog first so that raising the stop request below does
   //    not trip its force-exit countdown during an orderly shutdown.
   _watchdog_stop = true;
   if (_watchdog_thread.joinable()) _watchdog_thread.join();
 
-  // 1. Signal all threads to stop
-  Mads::running = false;
+  // 1. Signal this agent's threads to stop (other agents sharing the
+  //    Runtime are unaffected)
+  _stopping = true;
 
   // 2. Unblock any cv.wait() in receive_raw() LKV mode
   {
@@ -520,8 +525,9 @@ void Agent::shutdown() {
 }
 
 void Agent::install_loop_watchdog(uint8_t max_count) {
-  // Cooperative failsafe (REFACTOR.md §1.5): when Mads::running goes false the
-  // main thread is expected to leave loop() and run shutdown(), which sets
+  // Cooperative failsafe (REFACTOR.md §1.5): when the agent is asked to stop
+  // (Runtime stopped or shutdown requested) the main thread is expected to
+  // leave loop() and run shutdown(), which sets
   // _watchdog_stop and joins this thread promptly. Only if the orderly path
   // does NOT complete within the bounded grace period do we force-exit, and we
   // use quick_exit() to skip static destructors that might themselves hang.
@@ -531,7 +537,7 @@ void Agent::install_loop_watchdog(uint8_t max_count) {
     bool counting = false;
     steady_clock::time_point deadline{};
     while (!_watchdog_stop) {
-      if (!Mads::running) {
+      if (!keep_running()) {
         if (!counting) {
           counting = true;
           std::signal(SIGINT, SIG_DFL);
@@ -626,6 +632,9 @@ void Agent::info(ostream &out) {
 void Agent::connect(chrono::milliseconds delay) {
   if (!_init_done)
     throw AgentError("Agent not initialized");
+  // A previous disconnect()/shutdown() must not keep a reconnected agent's
+  // loops from running (a process-wide stop still does).
+  _stopping = false;
   if (_connected) {
     try {
       _publisher.disconnect(_pub_endpoint);
@@ -650,7 +659,8 @@ void Agent::disconnect() {
   if (!_connected)
     return;
 
-  Mads::running = false;
+  // Stop only this agent; other agents sharing the Runtime are unaffected.
+  _stopping = true;
 
   // Unblock LKV cv.wait()
   {
@@ -832,7 +842,7 @@ inline bool Agent::receive_raw(message &message, bool dont_block) {
     //   return true;
     // });
     _latest_message.cv.wait(lock, [&] {
-       return _latest_message.value.has_value() || !Mads::running || dont_block;
+       return _latest_message.value.has_value() || !keep_running() || dont_block;
     });
     if (_latest_message.value.has_value()) {
       message = _latest_message.value.value().copy();
@@ -960,11 +970,11 @@ void Agent::install_signal_handlers() {
   std::call_once(g_signal_once, []() {
     std::signal(SIGINT, [](int signum) {
       UNUSED(signum);
-      Mads::running = false;
+      Mads::Runtime::stop_process();
     });
     std::signal(SIGTERM, [](int signum) {
       UNUSED(signum);
-      Mads::running = false;
+      Mads::Runtime::stop_process();
     });
   });
 }
@@ -998,13 +1008,13 @@ void Agent::loop(loop_fun_t const &lambda, chrono::nanoseconds duration) {
     throw AgentError("Agent not initialized");
   install_signal_handlers();
   chrono::nanoseconds nld(0); // next loop duration
-  while (Mads::running) {
+  while (keep_running()) {
     if (duration > 0ns || nld > 0ns) {
       thread t([&]() { this_thread::sleep_for(nld == 0ns ? duration : nld); });
       try {
         nld = lambda();
       } catch (...) {
-        Mads::running = false;
+        _stopping = true;
       }
       t.join();
     } else {
@@ -1012,7 +1022,7 @@ void Agent::loop(loop_fun_t const &lambda, chrono::nanoseconds duration) {
         nld = lambda();
       } catch (std::exception &e) {
         cerr << "Exception in loop: " << e.what() << endl;
-        Mads::running = false;
+        _stopping = true;
       }
     }
   }
@@ -1023,14 +1033,14 @@ void Agent::loop(loop_fun_t const &lambda, chrono::nanoseconds duration) {
     throw AgentError("Agent not initialized");
   install_signal_handlers();
   chrono::nanoseconds nld(0); // next loop duration
-  while (Mads::running) {
+  while (keep_running()) {
     chrono::nanoseconds sleep_duration = nld == 0ns ? duration : nld;
     auto start = chrono::steady_clock::now();
     try {
       nld = lambda();
     } catch (std::exception &e) {
       cerr << "Exception in loop: " << e.what() << endl;
-      Mads::running = false;
+      _stopping = true;
     }
     if (sleep_duration > 0ns) {
       wait_until(start + sleep_duration, _high_res_loop, _spin_margin);
@@ -1065,7 +1075,7 @@ void Agent::enable_remote_control(bool threaded) {
     _rc_thread = thread([this]() {
       _subscriber.set(zmqpp::socket_option::receive_timeout, 500);
       message msg;
-      while (Mads::running) {
+      while (keep_running()) {
         if (!_subscriber.receive(msg, false))
           continue;
         const size_t parts = msg.parts();
@@ -1109,9 +1119,9 @@ void Agent::remote_control(string payload_str) {
   command = payload["cmd"];
   if (command == "restart") {
     _restart = true;
-    Mads::running = false;
+    Mads::Runtime::stop_process();
   } else if (command == "shutdown") {
-    Mads::running = false;
+    Mads::Runtime::stop_process();
   } else if (command == "info") {
     nlohmann::json response = get_settings();
     response["agent"] = _name;
@@ -1162,7 +1172,7 @@ void Agent::connect_sub() {
   if (_last_value_only) {
     _drain_thread = thread([this]() {
       zmqpp::message_t msg;
-      while(Mads::running && _connected) {
+      while(keep_running() && _connected) {
         try {
           if (!_subscriber.receive(msg, false)) continue;
           std::lock_guard<std::mutex> lock(_latest_message.mtx);
@@ -1260,6 +1270,14 @@ void Agent::set_receive_timeout(std::chrono::milliseconds to) {
 }
 
 bool Agent::restart() { return _restart; }
+
+void Agent::set_runtime(std::shared_ptr<Mads::Runtime> runtime) {
+  if (!runtime)
+    throw AgentError("Runtime cannot be null");
+  if (_connected)
+    throw AgentError("Cannot change the runtime of a connected agent");
+  _runtime = std::move(runtime);
+}
 
 filesystem::path Agent::attachment_path() {
   return _attachment_path;

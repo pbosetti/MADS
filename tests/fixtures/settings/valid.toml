@@ -1,0 +1,20 @@
+# Fixture for test_agent_settings.cpp: a full settings file mirroring the
+# shape of the repo-root mads.ini, with a fleet-wide [agents] section and one
+# agent section ("settingstest") that exercises string/array/scalar types.
+
+[agents]
+frontend_address = "tcp://localhost:42210"
+backend_address = "tcp://localhost:42211"
+timecode_fps = 25
+wire_format = "json"
+compression = "auto"
+
+[settingstest]
+pub_topic = "settingstest_pub"
+sub_topic = ["topicA", "topicB"]
+time_step = 100
+queue_size = 5
+custom_string = "custom_value"
+custom_int = 42
+custom_bool = true
+custom_double = 3.14

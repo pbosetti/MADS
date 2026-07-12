@@ -19,7 +19,7 @@ namespace {
 
 void stop_demo(int) {
   // keep_running = false;
-  Mads::running = false;
+  Mads::Runtime::stop_process();
 }
 
 pair<string, uint16_t> parse_service_argument(const string &value) {
@@ -119,7 +119,7 @@ int main(int argc, char **argv) {
       }
       cout << "Press Ctrl-C to stop." << endl;
 
-      while (Mads::running) {
+      while (Mads::Runtime::process_running()) {
         this_thread::sleep_for(200ms);
       }
 

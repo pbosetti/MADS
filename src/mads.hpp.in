@@ -24,6 +24,7 @@ Author(s): Paolo Bosetti
 #include <sstream>
 #include <string>
 #include <atomic>
+#include <memory>
 
 
 /*
@@ -187,10 +188,65 @@ inline bool check_version(const std::string &version) {
 }
 
 /**
+ * @brief Run-state owner for agent loops.
+ *
+ * A Runtime holds the "keep going" state consulted by Agent::loop(), the
+ * delivery drain thread, and similar long-running constructs. Every Agent
+ * owns its own Runtime by default, so stopping or destroying one agent never
+ * affects the others hosted in the same process; agents that should stop
+ * together can be grouped by sharing one Runtime (Agent::set_runtime()), and
+ * the whole group is then stopped with a single Runtime::stop().
+ *
+ * Two levels of stopping exist:
+ * - Runtime::stop() stops the agents attached to that Runtime only;
+ * - Runtime::stop_process() (used by signal handlers and the remote
+ *   "shutdown"/"restart" commands) stops every Runtime in the process.
+ *
+ * running() reports true only if neither level has been stopped.
+ *
+ * @see \ref md_RUNTIME "Run state and agent lifecycle" (RUNTIME.md) for the
+ * full model, usage patterns, and the migration table from the deprecated
+ * Mads::running flag.
+ */
+class Runtime {
+public:
+  /// True until this Runtime is stopped or a process-wide stop occurred.
+  bool running() const noexcept {
+    return _running.load() && process_running().load();
+  }
+  /// Stop the loops of the agents attached to this Runtime.
+  void stop() noexcept { _running.store(false); }
+  /// Re-arm this Runtime (does not undo a process-wide stop).
+  void reset() noexcept { _running.store(true); }
+
+  /// Process-wide run flag, shared by all Runtimes (async-signal-safe).
+  static std::atomic<bool> &process_running() noexcept {
+    static std::atomic<bool> flag{true};
+    return flag;
+  }
+  /// Request a process-wide stop: every Runtime's running() becomes false.
+  static void stop_process() noexcept { process_running().store(false); }
+
+private:
+  std::atomic<bool> _running{true};
+};
+
+/**
  * @brief Global flag for stopping the main loop in Mads agents.
  *
+ * @deprecated Superseded by Mads::Runtime. This remains a working alias of
+ * the process-wide run flag: writing false still stops every agent in the
+ * process, and reading it reports the process-wide state. Prefer
+ * agent.runtime()->stop() to stop a single agent, or
+ * Mads::Runtime::stop_process() for a process-wide stop.
+ *
+ * @see \ref md_RUNTIME "Run state and agent lifecycle" (RUNTIME.md) for the
+ * migration table.
  */
-inline std::atomic<bool> running{true};
+[[deprecated("use Mads::Runtime (agent.runtime()->stop() or "
+             "Mads::Runtime::stop_process()) instead of the process-global "
+             "Mads::running flag")]]
+inline std::atomic<bool> &running = Runtime::process_running();
 
 /**
  * @brief Enumeration of event types for agents.

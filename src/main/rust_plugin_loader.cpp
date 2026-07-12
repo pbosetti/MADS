@@ -394,7 +394,7 @@ int main(int argc, char *argv[]) {
       break;
     case return_type::critical:
       count_err++;
-      Mads::running = false;
+      agent.runtime()->stop();
       throw runtime_error("Critical error in get_output: " + plugin.error());
     }
     if (!silent)
@@ -448,7 +448,7 @@ int main(int argc, char *argv[]) {
     case return_type::critical:
       err["error"]["load_data"] = plugin.error();
       agent.register_event(event_type::message, err);
-      Mads::running = false;
+      agent.runtime()->stop();
       return 0ms;
     }
   process_output:
@@ -472,7 +472,7 @@ int main(int argc, char *argv[]) {
     case return_type::critical:
       err["error"]["process"] = plugin.error();
       agent.register_event(event_type::message, err);
-      Mads::running = false;
+      agent.runtime()->stop();
       return 0ms;
     }
     if (!blob.empty()) {
@@ -533,7 +533,7 @@ int main(int argc, char *argv[]) {
     case return_type::critical:
       err = {{"error", {{"load_data", plugin.error()}}}};
       agent.register_event(event_type::message, err);
-      Mads::running = false;
+      agent.runtime()->stop();
       return 0ms;
     }
     if (!silent)

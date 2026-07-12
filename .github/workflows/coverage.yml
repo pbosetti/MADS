@@ -1,0 +1,62 @@
+name: Coverage
+
+on:
+  push:
+    branches:
+      - v2
+      - code_coverage
+  pull_request:
+    branches:
+      - v2
+  workflow_dispatch:
+
+jobs:
+  coverage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # git describe needs the full tag history
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ninja-build gcovr clang llvm libclang-rt-dev libssl-dev
+
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v4
+        with:
+          path: build-cov/_deps
+          key: deps-coverage-${{ hashFiles('vendors/CMakeLists.txt', 'tests/CMakeLists.txt') }}
+          restore-keys: deps-coverage-
+
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -B build-cov -GNinja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DMADS_BUILD_TESTS=ON \
+            -DMADS_COVERAGE=ON \
+            -DMADS_BUILD_APPS=OFF \
+            -DMADS_DIRECTOR=OFF \
+            -DMADS_ENABLE_MONGOCXX=OFF
+
+      - name: Build
+        run: cmake --build build-cov -j$(nproc)
+
+      - name: Test
+        run: ctest --test-dir build-cov --output-on-failure
+
+      - name: Coverage report
+        run: |
+          gcovr --config gcovr.cfg --object-directory build-cov \
+            --gcov-executable "llvm-cov gcov"
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true

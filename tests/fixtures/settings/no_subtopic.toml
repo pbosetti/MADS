@@ -1,0 +1,8 @@
+# Fixture for test_agent_settings.cpp: no sub_topic key at all -> the agent's
+# _sub_topic vector must stay empty (src/agent.cpp:408-410).
+
+[agents]
+timecode_fps = 25
+
+[nosub]
+pub_topic = "nosub_pub"

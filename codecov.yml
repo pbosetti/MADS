@@ -1,0 +1,35 @@
+coverage:
+  precision: 1
+  round: down
+  range: "60...85"
+  status:
+    project:
+      default:
+        target: 80%
+        threshold: 2%
+        informational: false
+    patch:
+      default:
+        target: 70%
+        informational: true
+
+# Curated coverage denominator: keep in lockstep with the excludes in gcovr.cfg
+ignore:
+  - "vendors/**"
+  - "tests/**"
+  - "smoke_test/**"
+  - "tools/**"
+  - "rust/**"
+  - "src/stb_image.h"
+  - "src/service_discovery.cpp"
+  - "src/https_client*"
+  - "src/mongo_fetch.*"
+  - "src/metadata.hpp"
+  - "src/keypress.hpp"
+  - "src/image.hpp"
+  - "src/dummy.hpp"
+  - "src/logger.hpp"
+  - "src/TerminalLogoRenderer.hpp"
+  - "src/agent_app.hpp"
+  - "src/main/*.cpp"
+  - "src/plugin/**"
