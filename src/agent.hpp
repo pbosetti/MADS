@@ -791,6 +791,17 @@ public:
   std::shared_ptr<Mads::Runtime> runtime() const { return _runtime; }
 
   /**
+   * @brief True while this agent's loops should keep going.
+   *
+   * Combines the Runtime state (group and process level) with the per-agent
+   * stop request raised by shutdown()/disconnect(). This is the condition
+   * loop() checks between iterations, exposed for application main loops.
+   *
+   * @return Whether the agent should keep running.
+   */
+  bool running() const { return keep_running(); }
+
+  /**
    * @brief Attach the agent to a different Runtime.
    *
    * Each agent owns its own Runtime by default; attach several agents to a

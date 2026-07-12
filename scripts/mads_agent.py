@@ -134,6 +134,18 @@ lib.agent_register_event.restype = c_int
 lib.agent_disconnect.argtypes = [c_void_p]
 lib.agent_disconnect.restype = c_int
 
+lib.agent_stop.argtypes = [c_void_p]
+lib.agent_stop.restype = c_int
+
+lib.agent_running.argtypes = [c_void_p]
+lib.agent_running.restype = c_bool
+
+lib.mads_stop_process.argtypes = []
+lib.mads_stop_process.restype = None
+
+lib.mads_process_running.argtypes = []
+lib.mads_process_running.restype = c_bool
+
 lib.agent_set_receive_timeout.argtypes = [c_void_p, c_int]
 lib.agent_set_receive_timeout.restype = None
 
@@ -304,6 +316,24 @@ class Agent:
         if not self._agent:
             return 0
         return lib.agent_disconnect(self._agent)
+
+    def stop(self) -> int:
+        """Request this agent's loops to stop (other agents keep running)."""
+        if not self._agent:
+            return 0
+        return lib.agent_stop(self._agent)
+
+    @property
+    def running(self) -> bool:
+        """True while this agent's loops should keep going.
+
+        Becomes False after stop(), disconnect(), a remote shutdown/restart
+        command, or a process-wide stop (stop_process(), SIGINT/SIGTERM).
+        Typical receive loop: `while agent.running: agent.receive()`.
+        """
+        if not self._agent:
+            return False
+        return lib.agent_running(self._agent)
     
     def set_receive_timeout(self, timeout: int):
         """Set the receive timeout in milliseconds."""
@@ -497,3 +527,13 @@ def mads_default_settings_uri() -> str:
     """Get the default settings URI."""
     result = lib.mads_default_settings_uri()
     return result.decode('utf-8') if result else None
+
+
+def stop_process():
+    """Request a process-wide stop: every agent's `running` becomes False."""
+    lib.mads_stop_process()
+
+
+def process_running() -> bool:
+    """True until a process-wide stop is requested (stop_process, signals)."""
+    return lib.mads_process_running()

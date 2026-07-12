@@ -294,6 +294,47 @@ MADS_EXPORT int agent_register_event(agent_t agent, event_type_t event,
 MADS_EXPORT int agent_disconnect(agent_t agent);
 
 /**
+ * @brief Requests this agent's loops to stop.
+ *
+ * Stops the agent's Mads::Runtime; other agents in the same process keep
+ * running unless they share the same Runtime. Use this to end a receive
+ * loop driven by agent_running().
+ *
+ * @param agent Agent handle.
+ * @return `0` on success, `-1` on error (NULL handle).
+ */
+MADS_EXPORT int agent_stop(agent_t agent);
+
+/**
+ * @brief Whether this agent's loops should keep going.
+ *
+ * False after agent_stop(), agent_disconnect(), a remote shutdown/restart
+ * command, or a process-wide stop (mads_stop_process(), SIGINT/SIGTERM).
+ * Reconnecting with agent_connect() re-arms a stop raised by
+ * agent_disconnect().
+ *
+ * @param agent Agent handle.
+ * @return `true` while the agent should keep running; `false` otherwise
+ *         (including for a NULL handle).
+ */
+MADS_EXPORT bool agent_running(agent_t agent);
+
+/**
+ * @brief Requests a process-wide stop.
+ *
+ * Every agent's agent_running() becomes false, as with SIGINT/SIGTERM.
+ */
+MADS_EXPORT void mads_stop_process(void);
+
+/**
+ * @brief Whether a process-wide stop has been requested.
+ *
+ * @return `true` until mads_stop_process() (or a signal handler) stops the
+ *         process-wide run flag.
+ */
+MADS_EXPORT bool mads_process_running(void);
+
+/**
  * @brief Sets the receive timeout in milliseconds.
  *
  * @param agent Agent handle.
