@@ -60,3 +60,10 @@ jobs:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
+          # We already produce a curated coverage.xml via gcovr.cfg (which
+          # excludes network/DB/hardware-bound sources from the denominator).
+          # Without this, the Codecov CLI's default gcov plugin re-scans the
+          # whole build tree for *.gcno and uploads an extra, unfiltered
+          # report alongside ours, dragging the dashboard number down with
+          # files we deliberately exclude.
+          plugins: noop
