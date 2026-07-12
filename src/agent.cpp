@@ -493,6 +493,12 @@ void Agent::shutdown() {
   //    Runtime are unaffected)
   _stopping = true;
 
+  // 1b. Wake and join the delayed startup-event publisher while the sockets
+  //     are still open, so it can never touch a dead agent.
+  _event_cv.notify_all();
+  if (_startup_event_thread.joinable())
+    _startup_event_thread.join();
+
   // 2. Unblock any cv.wait() in receive_raw() LKV mode
   {
     std::lock_guard<std::mutex> lock(_latest_message.mtx);
@@ -668,7 +674,11 @@ void Agent::disconnect() {
     _latest_message.cv.notify_all();
   }
 
-  // Join background threads before touching sockets
+  // Join background threads before touching sockets. The startup-event
+  // publisher is woken early (it waits on _event_cv with _stopping as the
+  // predicate) so the join is prompt.
+  _event_cv.notify_all();
+  if (_startup_event_thread.joinable()) _startup_event_thread.join();
   if (_drain_thread.joinable()) _drain_thread.join();
   if (_rc_thread.joinable()) _rc_thread.join();
 
@@ -716,9 +726,16 @@ void Agent::register_event(const event_type event, const nlohmann::json &info,
     return;
   }
 
-  thread t([info, info_name, event, settings, this]() {
-    if (event == event_type::startup)
-      this_thread::sleep_for(chrono::milliseconds(STARTUP_SHUTDOWN_DELAY_MS));
+  auto event_body = [info, info_name, event, settings, this]() {
+    if (event == event_type::startup) {
+      // Delay the startup event, but stay wakeable: shutdown() raises
+      // _stopping and notifies _event_cv, so the publish happens (early)
+      // while the sockets are still open instead of on a dead agent.
+      unique_lock<mutex> lock(_event_mtx);
+      _event_cv.wait_for(lock,
+                         chrono::milliseconds(STARTUP_SHUTDOWN_DELAY_MS),
+                         [this]() { return _stopping.load(); });
+    }
     nlohmann::json payload;
     payload["name"] = _name;
     payload["version"] = LIB_VERSION;
@@ -733,13 +750,19 @@ void Agent::register_event(const event_type event, const nlohmann::json &info,
       payload[info_name] = info;
     }
     publish(payload, METADATA_TOPIC);
-  });
+  };
   if (event == event_type::shutdown) {
+    thread t(event_body);
     // wait for the thread to publish the message
     this_thread::sleep_for(chrono::milliseconds(STARTUP_SHUTDOWN_DELAY_MS));
     t.join();
   } else {
-    t.detach();
+    // The startup publisher is owned by the agent and joined in shutdown();
+    // detaching it here was a use-after-free for agents destroyed within
+    // the delay window.
+    if (_startup_event_thread.joinable())
+      _startup_event_thread.join();
+    _startup_event_thread = thread(event_body);
   }
 }
 
@@ -786,7 +809,10 @@ void Agent::publish(nlohmann::json payload, string topic) {
   } else {
     message << topic << out; // [topic][snappy(json)]
   }
-  _publisher.send(message);
+  {
+    std::lock_guard<std::mutex> lock(_publish_mutex);
+    _publisher.send(message);
+  }
 }
 
 void Agent::publish(const char *payload, size_t len,
@@ -815,7 +841,10 @@ void Agent::publish(const char *payload, size_t len,
     message << topic << meta.dump();
   }
   message.add_raw(payload, len);
-  _publisher.send(message);
+  {
+    std::lock_guard<std::mutex> lock(_publish_mutex);
+    _publisher.send(message);
+  }
 }
 
 void Agent::publish(const vector<unsigned char> &payload,

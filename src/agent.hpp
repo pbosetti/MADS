@@ -1027,6 +1027,14 @@ protected:
   std::thread _drain_thread;
   std::thread _rc_thread;
   std::thread _watchdog_thread;
+  // Delayed startup-event publisher: owned (not detached) so shutdown() can
+  // wake it via _event_cv and join it before the sockets close.
+  std::thread _startup_event_thread;
+  std::mutex _event_mtx;
+  std::condition_variable _event_cv;
+  // ZMQ sockets are not thread-safe; the event thread publishes concurrently
+  // with the owner thread, so sends on _publisher are serialized.
+  std::mutex _publish_mutex;
   std::atomic<bool> _watchdog_stop{false};
   bool _rc_owns_socket = false;
   WireFormat _wire_format = WireFormat::Json;
