@@ -1,0 +1,20 @@
+# Fixture settings for the AgentApp unit tests. Section names must match the
+# agent names derived from the fake argv[0] values used in test_agent_app.cpp
+# (Agent drops the "mads-" style prefix before the last '-').
+
+[agents]
+timecode_fps = 25
+frontend_address = "tcp://localhost:42490"
+backend_address = "tcp://localhost:42491"
+
+[appx]
+pub_topic = "appx_pub"
+sub_topic = ["in1", "in2"]
+receive_timeout = 350
+queue_size = 42
+
+[renamed]
+pub_topic = "renamed_pub"
+
+[appevents]
+pub_topic = "appevents_pub"

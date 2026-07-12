@@ -78,6 +78,22 @@ Ctrl-C):
 Mads::Runtime::stop_process();
 ```
 
+An application main loop can poll `agent.running()` — the exact condition
+`Agent::loop()` checks between iterations (Runtime state plus the per-agent
+stop raised by `shutdown()`/`disconnect()`).
+
+## C and Python agents
+
+The C API exposes the same model: `agent_stop()` stops one agent,
+`agent_running()` drives a receive loop (`while (agent_running(a)) ...`),
+and `mads_stop_process()`/`mads_process_running()` handle the process level.
+The Python wrapper mirrors these as `Agent.stop()`, the `Agent.running`
+property, and module-level `stop_process()`/`process_running()`.
+
+`Mads::Watcher` participates too: `watch()` now returns after `stop()` is
+called or when a process-wide stop is requested, so watcher threads can be
+joined cleanly instead of leaked.
+
 ## Migrating from `Mads::running`
 
 `Mads::running` still exists as a **deprecated alias of the process-wide run

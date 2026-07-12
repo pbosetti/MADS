@@ -216,6 +216,28 @@ int agent_disconnect(agent_t agent) {
   return 0;
 }
 
+int agent_stop(agent_t agent) {
+  Agent *ag = reinterpret_cast<Agent *>(agent);
+  if (!ag) {
+    snprintf(_err_msg, ERR_MSG_SIZE, "Error stopping agent: NULL agent");
+    return -1;
+  }
+  ag->runtime()->stop();
+  return 0;
+}
+
+bool agent_running(agent_t agent) {
+  Agent *ag = reinterpret_cast<Agent *>(agent);
+  if (!ag) return false;
+  return ag->running();
+}
+
+void mads_stop_process(void) { Mads::Runtime::stop_process(); }
+
+bool mads_process_running(void) {
+  return Mads::Runtime::process_running().load();
+}
+
 // Settings
 const char *agent_get_settings(agent_t agent, int n) {
   Agent *ag = reinterpret_cast<Agent *>(agent);

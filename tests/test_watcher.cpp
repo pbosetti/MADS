@@ -45,16 +45,6 @@ TEST_CASE("Watcher can be constructed and destroyed without watching",
   SUCCEED("constructed and destroyed cleanly");
 }
 
-// NOTE: Watcher::watch() runs an unconditional `while (true)` loop with no
-// stop/cancel primitive in this header. To drive it at all we must run it on
-// a background thread and detach it (the process exits shortly after the
-// test binary finishes, which reclaims the thread). Because the thread
-// outlives the TEST_CASE scope, the Watcher and callback state below are
-// deliberately heap-allocated and intentionally never freed: destroying them
-// while the detached thread might still be reading from them would be a
-// use-after-free. This is a test-only leak, acceptable for a short-lived
-// test binary.
-
 TEST_CASE("Watcher invokes the callback when the watched file is modified",
           "[watcher]") {
   auto file_path = unique_temp_file("fire");
@@ -63,17 +53,16 @@ TEST_CASE("Watcher invokes the callback when the watched file is modified",
     ofs << "initial\n";
   }
 
-  auto *watcher = new Mads::Watcher(file_path.string());
-  auto *called = new std::atomic<bool>(false);
-  auto *received = new std::string();
+  Mads::Watcher watcher(file_path.string());
+  std::atomic<bool> called{false};
+  std::string received;
 
-  std::thread t([watcher, called, received]() {
-    watcher->watch([called, received](const std::string &fn) {
-      *received = fn;
-      called->store(true);
+  std::thread t([&]() {
+    watcher.watch([&](const std::string &fn) {
+      received = fn;
+      called = true;
     });
   });
-  t.detach();
 
   // Let the watch thread start and the OS-level watch (inotify/kqueue/etc.)
   // be armed before we mutate the file.
@@ -85,10 +74,12 @@ TEST_CASE("Watcher invokes the callback when the watched file is modified",
     ofs.flush();
   }
 
-  bool fired = mads_test::wait_for([called]() { return called->load(); },
+  bool fired = mads_test::wait_for([&]() { return called.load(); },
                                     std::chrono::milliseconds(2000));
+  watcher.stop();
+  t.join();
   REQUIRE(fired);
-  REQUIRE(*received == file_path.string());
+  REQUIRE(received == file_path.string());
 
   fs::remove(file_path);
 }
@@ -101,21 +92,76 @@ TEST_CASE("Watcher does not fire when the file is left untouched",
     ofs << "initial\n";
   }
 
-  auto *watcher = new Mads::Watcher(file_path.string());
-  auto *called = new std::atomic<bool>(false);
+  Mads::Watcher watcher(file_path.string());
+  std::atomic<bool> called{false};
 
-  std::thread t([watcher, called]() {
-    watcher->watch(
-        [called](const std::string &) { called->store(true); });
+  std::thread t([&]() {
+    watcher.watch([&](const std::string &) { called = true; });
   });
-  t.detach();
 
   std::this_thread::sleep_for(std::chrono::milliseconds(250));
 
   // No modification: the callback must not fire within a generous window.
-  bool fired = mads_test::wait_for([called]() { return called->load(); },
+  bool fired = mads_test::wait_for([&]() { return called.load(); },
                                     std::chrono::milliseconds(600));
+  watcher.stop();
+  t.join();
   REQUIRE_FALSE(fired);
+
+  fs::remove(file_path);
+}
+
+TEST_CASE("Watcher::stop() ends watch() promptly and the watcher is reusable",
+          "[watcher]") {
+  auto file_path = unique_temp_file("stop");
+  {
+    std::ofstream ofs(file_path);
+    ofs << "initial\n";
+  }
+
+  Mads::Watcher watcher(file_path.string());
+
+  for (int round = 0; round < 2; ++round) {
+    std::atomic<bool> returned{false};
+    std::thread t([&]() {
+      watcher.watch([](const std::string &) {});
+      returned = true;
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    auto t0 = std::chrono::steady_clock::now();
+    watcher.stop();
+    bool done = mads_test::wait_for([&]() { return returned.load(); },
+                                     std::chrono::milliseconds(3000));
+    t.join();
+    auto elapsed = std::chrono::steady_clock::now() - t0;
+    REQUIRE(done);
+    REQUIRE(elapsed < std::chrono::milliseconds(3000));
+  }
+
+  fs::remove(file_path);
+}
+
+TEST_CASE("a process-wide stop request also ends watch()", "[watcher]") {
+  mads_test::RunningGuard guard;
+  auto file_path = unique_temp_file("procstop");
+  {
+    std::ofstream ofs(file_path);
+    ofs << "initial\n";
+  }
+
+  Mads::Watcher watcher(file_path.string());
+  std::atomic<bool> returned{false};
+  std::thread t([&]() {
+    watcher.watch([](const std::string &) {});
+    returned = true;
+  });
+  std::this_thread::sleep_for(std::chrono::milliseconds(150));
+
+  Mads::Runtime::stop_process();
+  bool done = mads_test::wait_for([&]() { return returned.load(); },
+                                   std::chrono::milliseconds(3000));
+  t.join();
+  REQUIRE(done);
 
   fs::remove(file_path);
 }
