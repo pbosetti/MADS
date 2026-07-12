@@ -570,10 +570,10 @@ int main(int argc, char **argv) {
        << "tcp://127.0.0.1:" << port << style::reset << style::italic
        << " (loopback)" << style::reset << endl;
 
-  thread([&]() {
-    Mads::Watcher watcher(settings_path, 1s);
+  Mads::Watcher settings_watcher(settings_path, 1s);
+  thread settings_watcher_thread([&]() {
     string ini_tmp = "";
-    watcher.watch([&](const std::string &file_name) {
+    settings_watcher.watch([&](const std::string &file_name) {
       cout << goback(1, !daemon) << fg::yellow << timestamp()
            << "Reloading settings " << file_name << "... ";
       ini_tmp = read_settings_file(settings_path);
@@ -590,7 +590,7 @@ int main(int argc, char **argv) {
              << " - skipping changes" << fg::reset << endl;
       }
     });
-  }).detach();
+  });
 
   if (daemon) {
     cout << fg::yellow
@@ -633,6 +633,8 @@ int main(int argc, char **argv) {
     // blocking receive() would throw "Context was terminated".
     running = false;
     settings_thread.join();
+    settings_watcher.stop();
+    settings_watcher_thread.join();
     controller.close();
     controlled.close();
     frontend.close();
@@ -731,6 +733,8 @@ int main(int argc, char **argv) {
     cout << fg::green << "Closing sockets..." << fg::reset << endl;
     running = false;
     settings_thread.join();
+    settings_watcher.stop();
+    settings_watcher_thread.join();
     controller.close();
     controlled.close();
     if (crypto)
