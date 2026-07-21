@@ -70,7 +70,10 @@ FetchContent_Populate(plugin
   BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/_deps/plugin-build
 )
 
-include_directories(${plugin_SOURCE_DIR}/src)
+include_directories(BEFORE 
+  ${plugin_SOURCE_DIR}/src
+  ${json_SOURCE_DIR}/include
+)
 
 
 # MACROS #######################################################################

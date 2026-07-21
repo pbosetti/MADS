@@ -324,7 +324,7 @@ int main(int argc, char *argv[]) {
 
   cerr << style::bold << "Plugin settings:" << style::reset << endl
        << "  Plugin:           " << style::bold << plugin_file 
-       << " (loaded as " << agent_name  
+       << " (loaded as " << agent_name << "/" << plugin->kind()
        << " prot. v" << plugin->version << ")" << style::reset << endl;
   
   if (plugin->version < MADS_PLUGIN_MIN_PROTOCOL) {
