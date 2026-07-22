@@ -183,7 +183,7 @@ std::chrono::milliseconds extract_timestamp(const bsoncxx::document::view &docum
       return std::chrono::milliseconds{timestamp.get_int64().value};
     case bsoncxx::type::k_int32:
       return std::chrono::milliseconds{timestamp.get_int32().value};
-    case bsoncxx::type::k_utf8: {
+    case bsoncxx::type::k_string: {
       const auto parsed = parse_time_string(std::string{timestamp.get_string().value});
       if (!parsed) {
         throw std::runtime_error("Unsupported string format for `timestamp` field.");
@@ -230,7 +230,7 @@ ReplayRowData parse_replay_row(const bsoncxx::document::view &row) {
   if (!data || data.type() != bsoncxx::type::k_document) {
     throw std::runtime_error("Replay view row is missing the `data` document.");
   }
-  if (!source_collection || source_collection.type() != bsoncxx::type::k_utf8) {
+  if (!source_collection || source_collection.type() != bsoncxx::type::k_string) {
     throw std::runtime_error("Replay view row is missing the `collection_name` field.");
   }
 
@@ -556,7 +556,7 @@ void MongoFetch::validate_replay_view(
 
   const auto collection_info = *collection_it;
   const auto type = collection_info["type"];
-  if (!type || type.type() != bsoncxx::type::k_utf8 ||
+  if (!type || type.type() != bsoncxx::type::k_string ||
       std::string_view{type.get_string().value} != "view") {
     throw std::runtime_error("Replay source `" + view_name + "` is not a MongoDB view.");
   }
@@ -575,7 +575,7 @@ void MongoFetch::validate_replay_view(
   }
 
   const auto source_collection = row["collection_name"];
-  if (!source_collection || source_collection.type() != bsoncxx::type::k_utf8) {
+  if (!source_collection || source_collection.type() != bsoncxx::type::k_string) {
     throw std::runtime_error("Replay view row is missing the `collection_name` field.");
   }
 }

@@ -170,6 +170,18 @@ FetchContent_Declare(
 )
 
 if(MADS_ENABLE_MONGOCXX)
+  set(MADS_MONGO_C_DRIVER_VERSION "2.3.3")
+  set(MADS_MONGO_CXX_DRIVER_VERSION "4.4.0")
+
+  # mongo-cxx-driver derives its own version from BUILD_VERSION. Left at the
+  # default "0.0.0" it falls back to reading ${CMAKE_BINARY_DIR}/VERSION_CURRENT
+  # -- a file it writes itself into *our* build tree -- and otherwise shells out
+  # to a Python script. That makes the stamped version sticky across upgrades
+  # (a build dir configured against r3.11.1 keeps reporting 3.11.1 forever) and
+  # adds a Python dependency. Pin it to the tag we actually fetch.
+  set(BUILD_VERSION "${MADS_MONGO_CXX_DRIVER_VERSION}" CACHE STRING "" FORCE)
+  file(REMOVE "${CMAKE_BINARY_DIR}/VERSION_CURRENT")
+
   set(_mads_local_mongo_c_driver_src
       "${CMAKE_BINARY_DIR}/_deps/mongo-c-driver-src")
   if(EXISTS "${_mads_local_mongo_c_driver_src}/CMakeLists.txt")
@@ -181,7 +193,7 @@ if(MADS_ENABLE_MONGOCXX)
     FetchContent_Declare(
       mongo_c_driver
       GIT_REPOSITORY https://github.com/mongodb/mongo-c-driver.git
-      GIT_TAG 1.30.6
+      GIT_TAG ${MADS_MONGO_C_DRIVER_VERSION}
       GIT_SHALLOW TRUE
     )
   endif()
@@ -190,7 +202,7 @@ if(MADS_ENABLE_MONGOCXX)
   FetchContent_Declare(
     mongo_cxx_driver
     GIT_REPOSITORY https://github.com/mongodb/mongo-cxx-driver.git
-    GIT_TAG r3.11.1
+    GIT_TAG r${MADS_MONGO_CXX_DRIVER_VERSION}
     GIT_SHALLOW TRUE
   )
 endif()
