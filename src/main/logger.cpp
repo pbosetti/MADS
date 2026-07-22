@@ -11,61 +11,38 @@ instance.
 Author(s): Paolo Bosetti
 */
 #include "../logger.hpp"
-#include <cxxopts.hpp>
-#include <nlohmann/json.hpp>
+#include "../agent_app.hpp"
 
 using namespace std;
 using namespace Mads;
-using namespace cxxopts;
 using json = nlohmann::json;
 
 int main(int argc, char *argv[]) {
-  string settings_uri = SETTINGS_URI;
   bool echo = false;
-  bool crypto = false;
-  filesystem::path key_dir(Mads::exec_dir() + "/../etc");
-  string client_key_name = "client";
-  string server_key_name = "broker";
-  auth_verbose auth_verbose = auth_verbose::off;
 
   // CLI options
-  Options options(argv[0]);
-  options.add_options()
+  AgentAppFor<Logger> logger(argv[0], SETTINGS_URI);
+  logger.options()
     ("p,pause", "Start paused")
     ("e,echo", "Echo messages to stdout")
     ("n,no-mongo", "Do not log to MongoDB")
-    ("m,mongo", "MongoDB connection string (override)", value<string>())
-    ("f,file", "Log to file", value<string>())
+    ("m,mongo", "MongoDB connection string (override)", cxxopts::value<string>())
+    ("f,file", "Log to file", cxxopts::value<string>())
     ("a,array", "File log is an array of JSON objects (if not, one JSON per line)")
     ("x,cross", "Crossconnect sockets (no broker)");
-  SETUP_OPTIONS(options, Logger);
+  // Also brings in --room, so the broker can be located by service discovery.
+  logger.add_common_options();
+
+  auto options_parsed = logger.parse_options(argc, argv);
+  if (int rc = AgentApp::handle_standard_exit_options<AgentAppFor<Logger>>(
+          options_parsed, logger.raw_options(), argv);
+      rc >= 0) {
+    return rc;
+  }
 
   // Core stuff
-  if (options_parsed.count("crypto") != 0) {
-    crypto = true;
-    if (options_parsed.count("keys_dir") != 0) {
-      key_dir = options_parsed["keys_dir"].as<string>();
-    }
-    if (options_parsed.count("key_broker") != 0) {
-      server_key_name = options_parsed["key_broker"].as<string>();
-    }
-    if (options_parsed.count("key_client") != 0) {
-      client_key_name = options_parsed["key_client"].as<string>();
-    }
-    if (options_parsed.count("auth_verbose") != 0) {
-      auth_verbose = auth_verbose::on;
-    }
-  }
-
-  Logger logger(argv[0], settings_uri);
-  if (crypto) {
-    logger.set_key_dir(key_dir);
-    logger.client_key_name = client_key_name;
-    logger.server_key_name = server_key_name;
-    logger.auth_verbose = auth_verbose;
-  }
   try {
-    logger.init(crypto);
+    logger.init(options_parsed);
   } catch (const std::exception &e) {
     std::cout << fg::red << "Error initializing agent: " << e.what()
               << fg::reset << endl;
@@ -98,20 +75,23 @@ int main(int argc, char *argv[]) {
     logger.set_cross(true);
   }
   logger.enable_remote_control();
+  // Registers startup on connect() and shutdown on disconnect().
+  logger.enable_events();
 
-  json params = logger.get_settings();
-
-  // deprecated queue size option:
-  if (!params["high_watermark"].is_null()) {
+  // Deprecated queue size option. Agent::init() already applies `queue_size`
+  // from the settings, so only the superseded key is handled here.
+  const auto &params = logger.settings_json();
+  const bool uses_deprecated_watermark =
+      params.contains("high_watermark") && !params["high_watermark"].is_null();
+  if (uses_deprecated_watermark) {
     logger.set_high_watermark(params.value("high_watermark", 1000));
   }
 
   logger.connect();
-  logger.register_event(Mads::event_type::startup);
   logger.info();
-  if (!params["high_watermark"].is_null()) {
-    cerr << fg::yellow 
-         << "Warning: high_watermark setting is deprecated, use queue_size" 
+  if (uses_deprecated_watermark) {
+    cerr << fg::yellow
+         << "Warning: high_watermark setting is deprecated, use queue_size"
          << fg::reset << endl;
   }
 
@@ -129,7 +109,7 @@ int main(int argc, char *argv[]) {
 
   // Main loop
   cout << fg::green << "Logger process started" << fg::reset << endl;
-  if (logger.paused) 
+  if (logger.paused)
     cout << fg::yellow << "Logging is paused" << fg::reset << endl;
   logger.loop([&]() -> chrono::milliseconds {
     message_type type = logger.receive();
@@ -142,13 +122,13 @@ int main(int argc, char *argv[]) {
         j = json::parse(get<1>(msg));
       } catch (json::parse_error &e) {
         cerr << fg::red << e.what() << endl
-             <<"Error parsing message content:" << fg::reset 
+             <<"Error parsing message content:" << fg::reset
              << endl << get<1>(msg) << endl;
         type = message_type::error;
       }
       if (!j["pause"].is_null()) {
         logger.paused = j["pause"].get<bool>();
-        if (logger.paused) 
+        if (logger.paused)
           cout << fg::yellow << "Logging is paused" << fg::reset << endl;
         else
           cout << fg::green << "Logging is resumed" << fg::reset << endl;
@@ -168,7 +148,7 @@ int main(int argc, char *argv[]) {
               << style::bold << get<0>(logger.last_blob()) << ": "
               << style::reset << get<1>(logger.last_blob()) << "("
               << get<2>(logger.last_blob()).size() << " bytes)" << endl;
-      } else if (type == message_type::error) { 
+      } else if (type == message_type::error) {
         cerr << fg::red << "Error parsing message content:" << fg::reset << endl;
         cerr << get<1>(msg) << endl;
       }
@@ -186,15 +166,11 @@ int main(int argc, char *argv[]) {
   cout << fg::green << "Logger process stopped" << fg::reset << endl;
 
   // Cleanup
-
   logger_status_thread.join();
-  logger.register_event(Mads::event_type::shutdown);
-  logger.disconnect(); // Not necessary, called by destructor
-  logger.close_db();      // Not necessary, called by destructor
-  if (logger.restart()) {
-    auto cmd = string(MADS_PREFIX) + argv[0];
-    cout << "Restarting " << cmd << "..." << endl;
-    execvp(cmd.c_str(), argv);
-  }
+  // Explicit: disconnect() is what registers the shutdown event, and the
+  // database must stay open until it has been written.
+  logger.disconnect();
+  logger.close_db();
+  logger.restart_if_requested(argv);
   return 0;
 }
