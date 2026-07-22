@@ -172,7 +172,74 @@ int main(int argc, char *argv[]) {
   if (options_parsed.count("silent") != 0) {
     silent = true;
   }
-  // Core stuff
+
+  // Loading plugin
+  if (options_parsed.count("plugin") != 0) {
+    if (!fs::exists(plugin_file)) {
+      cerr << style::italic 
+           << "  Searching for installed plugin in the default location "
+           << style::reset;
+#ifdef _WIN32
+      cerr << Mads::exec_dir("../bin/") << endl;
+      plugin_file = Mads::exec_dir("../bin/" + plugin_file);
+#else
+      cerr << Mads::exec_dir("../lib/") << endl;
+      plugin_file = Mads::exec_dir("../lib/" + plugin_file);
+#endif
+    }
+    if (!fs::exists(plugin_file)) {
+      cerr << fg::red << "Error: cannot find plugin file " << plugin_file
+           << " (extension .plugin is required!)" << fg::reset << endl;
+      exit(1);
+    }
+  } else if (!agent.attachment_path().empty()) {
+    plugin_file = agent.attachment_path().string();
+  }
+  plugin_name = fs::path(plugin_file).stem().string();
+
+  pugg::Kernel kernel;
+  kernel.add_server<PLUGIN_CLASS<>>();
+  if (!kernel.load_plugin(plugin_file)) {
+    cerr << fg::red << "Error: cannot load plugin file " << plugin_file 
+         << fg::reset << endl;
+    exit(1);
+  }
+  PluginDriver *plugin_driver =
+      kernel.get_driver<PluginDriver>(Plugin::server_name(), plugin_name);
+  if (plugin_driver == nullptr) {
+    cerr << fg::red << "Error: cannot find plugin driver " << plugin_name
+         << " in plugin at " << plugin_file << fg::reset << endl;
+    auto drivers = kernel.get_all_drivers<PluginDriver>(Plugin::server_name());
+    cerr << "Available drivers (run `mads inspect_plugin <path>` for more):" 
+         << endl;
+    for (auto &d : drivers) {
+      cerr << "- " << d->name() << endl;
+    }
+    exit(1);
+  }
+  // Create the class from the plugin:
+  auto plugin = std::unique_ptr<Plugin>(plugin_driver->create());
+
+  cerr << style::bold << "Plugin settings:" << style::reset << endl
+       << "  Plugin:           " << style::bold << plugin_file 
+       << " (loaded as " << agent_name << "/" << plugin->kind()
+       << " prot. v" << plugin->version << ")" << style::reset << endl;
+  
+  if (plugin->version < MADS_PLUGIN_MIN_PROTOCOL) {
+    cerr << style::bold << fg::red 
+         << "Fatal error: unsupported plugin protocol version. Minimum is "
+         << plugin->version << ", loaded plugin protocol is version "
+         << MADS_PLUGIN_MIN_PROTOCOL << ".\n"
+         << "Recompile the plugin (see https://github.com/pbosetti/mads_plugin)"
+         << fg::reset << style::reset << endl;
+    return EXIT_FAILURE;
+  }
+
+  // Core stuff. The settings section is selected by the plugin's kind(),
+  // unless the user forces a specific name with -n/--name, which always wins.
+  if (options_parsed.count("name") == 0) {
+    agent_name = plugin->kind();
+  }
   agent.set_agent_name(agent_name);
   try {
     agent.init(options_parsed);
@@ -275,67 +342,6 @@ int main(int argc, char *argv[]) {
   }
 
 #endif
-
-  if (options_parsed.count("plugin") != 0) {
-    if (!fs::exists(plugin_file)) {
-      cerr << style::italic 
-           << "  Searching for installed plugin in the default location "
-           << style::reset;
-#ifdef _WIN32
-      cerr << Mads::exec_dir("../bin/") << endl;
-      plugin_file = Mads::exec_dir("../bin/" + plugin_file);
-#else
-      cerr << Mads::exec_dir("../lib/") << endl;
-      plugin_file = Mads::exec_dir("../lib/" + plugin_file);
-#endif
-    }
-    if (!fs::exists(plugin_file)) {
-      cerr << fg::red << "Error: cannot find plugin file " << plugin_file
-           << " (extension .plugin is required!)" << fg::reset << endl;
-      exit(1);
-    }
-  } else if (!agent.attachment_path().empty()) {
-    plugin_file = agent.attachment_path().string();
-  }
-  plugin_name = fs::path(plugin_file).stem().string();
-
-  // Loading plugin
-  pugg::Kernel kernel;
-  kernel.add_server<PLUGIN_CLASS<>>();
-  if (!kernel.load_plugin(plugin_file)) {
-    cerr << fg::red << "Error: cannot load plugin file " << plugin_file 
-         << fg::reset << endl;
-    exit(1);
-  }
-  PluginDriver *plugin_driver =
-      kernel.get_driver<PluginDriver>(Plugin::server_name(), plugin_name);
-  if (plugin_driver == nullptr) {
-    cerr << fg::red << "Error: cannot find plugin driver " << plugin_name
-         << " in plugin at " << plugin_file << fg::reset << endl;
-    auto drivers = kernel.get_all_drivers<PluginDriver>(Plugin::server_name());
-    cerr << "Available drivers:" << endl;
-    for (auto &d : drivers) {
-      cerr << "- " << d->name() << endl;
-    }
-    exit(1);
-  }
-  // Create the class from the plugin:
-  auto plugin = std::unique_ptr<Plugin>(plugin_driver->create());
-
-  cerr << style::bold << "Plugin settings:" << style::reset << endl
-       << "  Plugin:           " << style::bold << plugin_file 
-       << " (loaded as " << agent_name << "/" << plugin->kind()
-       << " prot. v" << plugin->version << ")" << style::reset << endl;
-  
-  if (plugin->version < MADS_PLUGIN_MIN_PROTOCOL) {
-    cerr << style::bold << fg::red 
-         << "Fatal error: unsupported plugin protocol version. Minimum is "
-         << plugin->version << ", loaded plugin protocol is version "
-         << MADS_PLUGIN_MIN_PROTOCOL << ".\n"
-         << "Recompile the plugin (see https://github.com/pbosetti/mads_plugin)"
-         << fg::reset << style::reset << endl;
-    return EXIT_FAILURE;
-  }
 
   plugin->set_params(settings);
   for (auto &[k, v] : plugin->info()) {

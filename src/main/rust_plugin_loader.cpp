@@ -236,6 +236,53 @@ int main(int argc, char *argv[]) {
   if (opts.count("delay")) delay       = opts["delay"].as<size_t>();
   if (opts.count("silent")) silent     = true;
 
+  /* ── resolve plugin path ─────────────────────────────────────────────── */
+  if (opts.count("plugin")) {
+    if (!fs::exists(plugin_file)) {
+      cerr << style::italic << "  Searching installed plugins in " << style::reset;
+#ifdef _WIN32
+      cerr << Mads::exec_dir("../bin/") << endl;
+      plugin_file = Mads::exec_dir("../bin/" + plugin_file);
+#else
+      cerr << Mads::exec_dir("../lib/") << endl;
+      plugin_file = Mads::exec_dir("../lib/" + plugin_file);
+#endif
+    }
+    if (!fs::exists(plugin_file)) {
+      cerr << fg::red << "Error: cannot find plugin file " << plugin_file
+           << fg::reset << endl;
+      return EXIT_FAILURE;
+    }
+  } else if (!agent.attachment_path().empty()) {
+    plugin_file = agent.attachment_path().string();
+  }
+
+  /* ── load plugin ─────────────────────────────────────────────────────── */
+  /* Load before init so the agent name — and therefore the settings section
+     the agent reads — comes from the plugin's self-reported identity rather
+     than the file name. The Rust ABI's `name` field is the analogue of the
+     C++ plugin's kind(). */
+  RustPlugin plugin;
+  {
+    string load_err;
+    if (!plugin.load(plugin_file, load_err)) {
+      cerr << fg::red << "Error loading Rust plugin '" << plugin_file
+           << "': " << load_err << fg::reset << endl;
+      return EXIT_FAILURE;
+    }
+  }
+
+  cerr << style::bold << "Rust plugin settings:" << style::reset << endl
+       << "  Plugin:   " << style::bold << plugin_file
+       << " (name=" << plugin.fns->name
+       << ", kind=" << plugin.fns->kind
+       << ", abi=" << plugin.fns->version << ")" << style::reset << endl;
+
+  // The settings section is selected by the plugin's identity (the Rust ABI's
+  // `name`, analogue of the C++ kind()), unless the user forces a specific name
+  // with -n/--name, which always wins.
+  if (!opts.count("name"))
+    agent_name = plugin.fns->name;
   agent.set_agent_name(agent_name);
   try {
     agent.init(opts);
@@ -295,44 +342,7 @@ int main(int argc, char *argv[]) {
   if (opts.count("dont-block")) dont_block = true;
 #endif
 
-  /* ── resolve plugin path ─────────────────────────────────────────────── */
-  if (opts.count("plugin")) {
-    if (!fs::exists(plugin_file)) {
-      cerr << style::italic << "  Searching installed plugins in " << style::reset;
-#ifdef _WIN32
-      cerr << Mads::exec_dir("../bin/") << endl;
-      plugin_file = Mads::exec_dir("../bin/" + plugin_file);
-#else
-      cerr << Mads::exec_dir("../lib/") << endl;
-      plugin_file = Mads::exec_dir("../lib/" + plugin_file);
-#endif
-    }
-    if (!fs::exists(plugin_file)) {
-      cerr << fg::red << "Error: cannot find plugin file " << plugin_file
-           << fg::reset << endl;
-      return EXIT_FAILURE;
-    }
-  } else if (!agent.attachment_path().empty()) {
-    plugin_file = agent.attachment_path().string();
-  }
-
-  /* ── load plugin ─────────────────────────────────────────────────────── */
-  RustPlugin plugin;
-  {
-    string load_err;
-    if (!plugin.load(plugin_file, load_err)) {
-      cerr << fg::red << "Error loading Rust plugin '" << plugin_file
-           << "': " << load_err << fg::reset << endl;
-      return EXIT_FAILURE;
-    }
-  }
   plugin.set_params(settings);
-
-  cerr << style::bold << "Rust plugin settings:" << style::reset << endl
-       << "  Plugin:   " << style::bold << plugin_file
-       << " (name=" << plugin.fns->name
-       << ", kind=" << plugin.fns->kind
-       << ", abi=" << plugin.fns->version << ")" << style::reset << endl;
 
   json info_obj = plugin.get_info();
   for (auto &[k, v] : info_obj.items()) {

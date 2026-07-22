@@ -133,7 +133,12 @@
 			"**/third_party": true,
 			"**/external": true,
 			"**/vendor": true
-		}
+		},
+		"python.analysis.exclude": [
+			"packages/**",
+			"products/**",
+			".*/**"
+		]
 	},
 	"extensions": {
 		"recommendations": [

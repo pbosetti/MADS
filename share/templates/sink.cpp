@@ -38,7 +38,9 @@ public:
   // instead of the constructor.
   using {{parent}}::{{parent}}; // inherit constructors
 
-  // Typically, no need to change this
+  // Typically, no need to change this.
+  // On multi-driver plugins, the kind() is used to select the settings section 
+  // in the agent's configuration file.
   string kind() override { return PLUGIN_NAME; }
 
   // Implement the actual functionality here
