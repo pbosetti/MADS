@@ -22,6 +22,19 @@ jobs:
         with:
           fetch-depth: 0   # git describe --tags needs full history
 
+      # The macos-latest runner image bumped its preinstalled CMake to a
+      # version that breaks compilation of some FetchContent dependencies
+      # (mongodb). Pin a known-good CMake and put it first on PATH.
+      - name: Install CMake 4.2.1
+        run: |
+          curl -fsSL -o /tmp/cmake.tar.gz \
+            https://github.com/Kitware/CMake/releases/download/v4.2.1/cmake-4.2.1-macos-universal.tar.gz
+          tar -xzf /tmp/cmake.tar.gz -C /tmp
+          echo "/tmp/cmake-4.2.1-macos-universal/CMake.app/Contents/bin" >> "$GITHUB_PATH"
+
+      - name: Verify CMake version
+        run: cmake --version
+
       - name: Install build tools
         run: brew install ninja openssl@3
 
