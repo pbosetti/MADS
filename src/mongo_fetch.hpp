@@ -1,31 +1,33 @@
 /*
-  __  __                         _____    _       _     
- |  \/  | ___  _ __   __ _  ___ |  ___|__| |_ ___| |__  
- | |\/| |/ _ \| '_ \ / _` |/ _ \| |_ / _ \ __/ __| '_ \ 
+  __  __                         _____    _       _
+ |  \/  | ___  _ __   __ _  ___ |  ___|__| |_ ___| |__
+ | |\/| |/ _ \| '_ \ / _` |/ _ \| |_ / _ \ __/ __| '_ \
  | |  | | (_) | | | | (_| | (_) |  _|  __/ || (__| | | |
  |_|  |_|\___/|_| |_|\__, |\___/|_|  \___|\__\___|_| |_|
-                     |___/                              
+                     |___/
 Paolo Bosetti, 2026
-Fetches data from multiple MongoDB collections and prepare for replay by 
-merging them into a single view sorted by timestamp, also providing the time 
+Fetches data from multiple MongoDB collections and prepare for replay by
+merging them into a single view sorted by timestamp, also providing the time
 difference between records.
 */
 #pragma once
 
 #include <chrono>
-#include <optional>
+#include <memory>
 #include <string>
 #include <vector>
 
-#include <bsoncxx/document/value.hpp>
-#include <mongocxx/client.hpp>
-#include <mongocxx/database.hpp>
-#include <mongocxx/uri.hpp>
-#include <mongocxx/cursor.hpp>
 #include <nlohmann/json.hpp>
 
 namespace Mads {
 
+/**
+ * @brief Replay reader over one or more MongoDB collections.
+ *
+ * @note The MongoDB driver types this class is built on are hidden behind a
+ * pointer to implementation, so this header pulls in no bsoncxx/mongocxx
+ * headers and `sizeof(MongoFetch)` does not depend on the driver ABI.
+ */
 class MongoFetch {
 public:
   /**
@@ -41,6 +43,11 @@ public:
    * owned temporary replay view.
    */
   ~MongoFetch();
+
+  MongoFetch(const MongoFetch &) = delete;
+  MongoFetch &operator=(const MongoFetch &) = delete;
+  MongoFetch(MongoFetch &&) noexcept;
+  MongoFetch &operator=(MongoFetch &&) noexcept;
 
   /**
    * @brief Open the connection to the MongoDB server.
@@ -142,7 +149,7 @@ public:
    * @brief Set whether replay restarts from the beginning after the last record.
    * @param repeat If `true`, `load_next()` loops over the replay view; otherwise it stops at the end.
    */
-  void set_repeat(bool repeat) { _repeat = repeat; }
+  void set_repeat(bool repeat);
 
   /**
    * @brief Load the next record from the replay view.
@@ -158,42 +165,14 @@ public:
 
   /**
    * @brief Set whether to unwrap the original document.
-   * @param unwrap If `true`, the original document is unwrapped; otherwise, 
+   * @param unwrap If `true`, the original document is unwrapped; otherwise,
    * it is kept as a nested object.
    */
-
-  void set_unwrap_original(bool unwrap) { _unwrap_original = unwrap; }
-
+  void set_unwrap_original(bool unwrap);
 
 private:
-  struct ReplayRow {
-    std::chrono::milliseconds timestamp{0};
-    std::string collection_name;
-    nlohmann::json data;
-  };
-
-  std::size_t activate_view(const std::string &view_name, bool owns_view);
-  void reset_replay_stream();
-  void validate_replay_view(mongocxx::database &database, const std::string &view_name) const;
-  void drop_owned_view() noexcept;
-
-  std::string _uri_string;
-  mongocxx::uri _uri;
-  std::optional<mongocxx::client> _client;
-  std::string _database_name;
-  std::vector<std::string> _collections;
-  std::optional<std::chrono::milliseconds> _start_time;
-  std::optional<std::chrono::milliseconds> _end_time;
-  std::string _view_name;
-  bool _owns_view{false};
-  std::size_t _view_size{0};
-  std::size_t _next_index{0};
-  bool _repeat{false};
-  std::optional<mongocxx::cursor> _cursor;
-  std::optional<mongocxx::cursor::iterator> _cursor_it;
-  std::optional<ReplayRow> _next_row;
-
-  bool _unwrap_original{false};
+  struct Impl;
+  std::unique_ptr<Impl> _impl;
 };
 
 }  // namespace Mads

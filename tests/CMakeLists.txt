@@ -47,5 +47,11 @@ foreach(test_src IN LISTS MADS_TEST_SOURCES)
     MADS_TEST_FIXTURES_DIR="${CMAKE_CURRENT_LIST_DIR}/fixtures"
     MADS_PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
   )
+  # Same guard MadsCore uses, so suites can compile out cases that name types
+  # only present in a MongoDB-enabled build (e.g. Mads::MongoFetch). Prefer the
+  # runtime Mads::Logger::has_mongo_support() for behavioural assertions.
+  if(MADS_ENABLE_MONGOCXX)
+    target_compile_definitions(${test_name} PRIVATE MADS_HAS_MONGOCXX)
+  endif()
   catch_discover_tests(${test_name} PROPERTIES TIMEOUT 120)
 endforeach()

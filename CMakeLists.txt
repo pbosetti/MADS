@@ -225,6 +225,8 @@ endif()
 
 # mongo_fetch.cpp unconditionally includes <mongocxx/...>, so it can only be
 # part of the library when the MongoDB driver is actually vendored in.
+# (logger.cpp guards its driver use with MADS_HAS_MONGOCXX and still builds as a
+# file-only logger, so it stays in the library either way.)
 if(NOT MADS_ENABLE_MONGOCXX)
   list(REMOVE_ITEM LIB_SOURCES ${SOURCE_DIR}/mongo_fetch.cpp)
 endif()
@@ -276,6 +278,10 @@ endif()
 link_first_available(${LIB_NAME} CANDIDATES inja::inja inja)
 link_first_available(${LIB_NAME} CANDIDATES Snappy::snappy snappy)
 if(MADS_ENABLE_MONGOCXX)
+  # Guards the driver-dependent code paths in logger.cpp. PRIVATE on purpose:
+  # no installed header depends on it, so SDK consumers never need it. Use
+  # Mads::Logger::has_mongo_support() to query the build at runtime instead.
+  target_compile_definitions(${LIB_NAME} PRIVATE MADS_HAS_MONGOCXX)
   link_first_available(
     ${LIB_NAME}
     CANDIDATES
@@ -303,6 +309,19 @@ if(MADS_COVERAGE)
     # Agent spawns drain/remote-control/watchdog threads.
     target_compile_options(${LIB_NAME} PRIVATE -O0 -g --coverage -fprofile-update=atomic)
     target_link_options(${LIB_NAME} PRIVATE --coverage)
+    # Counters recorded against the previous build of this library no longer
+    # match its arc layout, so drop them whenever it is rebuilt. Without this,
+    # editing an instrumented source floods every later run with
+    # "cannot merge previous GCDA file: corrupt arc tag" (one line per arc) and
+    # leaves the report mixing counts from two different builds.
+    add_custom_command(
+      TARGET ${LIB_NAME} POST_BUILD
+      COMMAND ${CMAKE_COMMAND}
+              -D MADS_COVERAGE_DIR=${CMAKE_BINARY_DIR}
+              -P ${CMAKE_CURRENT_LIST_DIR}/cmake/ResetCoverageData.cmake
+      COMMENT "Discarding coverage data from the previous build"
+      VERBATIM
+    )
   else()
     message(WARNING "MADS_COVERAGE requires GCC or Clang; coverage flags not applied")
   endif()
@@ -366,6 +385,16 @@ if(MADS_BUILD_TESTS)
 endif()
 
 if(MADS_COVERAGE)
+  # Manual reset, for when a run is abandoned part-way and the leftover counters
+  # should not feed the next report.
+  add_custom_target(coverage-reset
+    COMMAND ${CMAKE_COMMAND}
+            -D MADS_COVERAGE_DIR=${CMAKE_BINARY_DIR}
+            -P ${CMAKE_CURRENT_LIST_DIR}/cmake/ResetCoverageData.cmake
+    COMMENT "Discarding accumulated coverage data"
+    VERBATIM
+  )
+
   find_program(GCOVR_EXECUTABLE gcovr)
   if(GCOVR_EXECUTABLE)
     # clang emits gcov-compatible data but needs its own reader tool.
@@ -375,6 +404,12 @@ if(MADS_COVERAGE)
       set(MADS_GCOV_TOOL)
     endif()
     add_custom_target(coverage
+      # Start from a clean slate so the report reflects this test run only, and
+      # not the incidental execution from catch_discover_tests enumerating each
+      # test binary at build time.
+      COMMAND ${CMAKE_COMMAND}
+              -D MADS_COVERAGE_DIR=${CMAKE_BINARY_DIR}
+              -P ${CMAKE_CURRENT_LIST_DIR}/cmake/ResetCoverageData.cmake
       COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR} --output-on-failure
       COMMAND ${GCOVR_EXECUTABLE} --config ${CMAKE_SOURCE_DIR}/gcovr.cfg
               --object-directory ${CMAKE_BINARY_DIR} ${MADS_GCOV_TOOL}
@@ -446,7 +481,14 @@ install(
   COMPONENT MadsCore
 )
 
+# Note: this glob is deliberately non-recursive, so internal headers under
+# src/detail/ are not part of the installed SDK.
 file(GLOB LIB_HEADERS ${SOURCE_DIR}/*.hpp ${SOURCE_DIR}/*.h)
+# MongoFetch is only compiled into the library when the driver is vendored in;
+# shipping its header otherwise would just hand consumers link errors.
+if(NOT MADS_ENABLE_MONGOCXX)
+  list(REMOVE_ITEM LIB_HEADERS ${SOURCE_DIR}/mongo_fetch.hpp)
+endif()
 install(
   FILES ${LIB_HEADERS}
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}

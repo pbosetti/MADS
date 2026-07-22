@@ -24,22 +24,24 @@
 #include <bsoncxx/builder/basic/array.hpp>
 #include <bsoncxx/builder/basic/document.hpp>
 #include <bsoncxx/builder/basic/kvp.hpp>
+#include <bsoncxx/document/value.hpp>
 #include <bsoncxx/document/view.hpp>
 #include <bsoncxx/json.hpp>
 #include <bsoncxx/types.hpp>
-#include <mongocxx/instance.hpp>
+#include <mongocxx/client.hpp>
+#include <mongocxx/cursor.hpp>
+#include <mongocxx/database.hpp>
 #include <mongocxx/options/find.hpp>
+#include <mongocxx/uri.hpp>
+
+#include "detail/mongo_instance.hpp"
 
 using bsoncxx::builder::basic::kvp;
 using bsoncxx::builder::basic::make_array;
 using bsoncxx::builder::basic::make_document;
+using Mads::detail::mongo_instance;
 
 namespace {
-
-mongocxx::instance &mongo_instance() {
-  static mongocxx::instance instance{};
-  return instance;
-}
 
 bool is_integer_string(std::string_view value) {
   if (value.empty()) {
@@ -319,25 +321,104 @@ bsoncxx::array::value make_view_pipeline(
   return pipeline_builder.extract();
 }
 
+void validate_replay_view(
+  mongocxx::database &database,
+  const std::string &view_name
+) {
+  auto collections = database.list_collections(make_document(kvp("name", view_name)));
+  auto collection_it = collections.begin();
+  if (collection_it == collections.end()) {
+    throw std::runtime_error("Replay view `" + view_name + "` does not exist.");
+  }
+
+  const auto collection_info = *collection_it;
+  const auto type = collection_info["type"];
+  if (!type || type.type() != bsoncxx::type::k_string ||
+      std::string_view{type.get_string().value} != "view") {
+    throw std::runtime_error("Replay source `" + view_name + "` is not a MongoDB view.");
+  }
+
+  auto sample = database[view_name].find_one({});
+  if (!sample) {
+    return;
+  }
+
+  const auto row = sample->view();
+  extract_timestamp(row);
+
+  const auto data = row["data"];
+  if (!data || data.type() != bsoncxx::type::k_document) {
+    throw std::runtime_error("Replay view row is missing the `data` document.");
+  }
+
+  const auto source_collection = row["collection_name"];
+  if (!source_collection || source_collection.type() != bsoncxx::type::k_string) {
+    throw std::runtime_error("Replay view row is missing the `collection_name` field.");
+  }
+}
+
 }  // namespace
 
 namespace Mads {
 
+// All MongoDB driver state lives here so that mongo_fetch.hpp stays free of
+// bsoncxx/mongocxx includes and MongoFetch's layout is independent of the
+// driver ABI.
+struct MongoFetch::Impl {
+  explicit Impl(const std::string &uri) : _uri_string(uri), _uri(uri) {}
+
+  struct ReplayRow {
+    std::chrono::milliseconds timestamp{0};
+    std::string collection_name;
+    nlohmann::json data;
+  };
+
+  void disconnect();
+  std::size_t fetch_data(std::string &view_name);
+  std::size_t fetch_data_from(const std::string &view_name);
+  std::chrono::milliseconds load_next(nlohmann::json &out, std::string &collection_name);
+  std::size_t activate_view(const std::string &view_name, bool owns_view);
+  void reset_replay_stream();
+  void drop_owned_view() noexcept;
+
+  std::string _uri_string;
+  mongocxx::uri _uri;
+  std::optional<mongocxx::client> _client;
+  std::string _database_name;
+  std::vector<std::string> _collections;
+  std::optional<std::chrono::milliseconds> _start_time;
+  std::optional<std::chrono::milliseconds> _end_time;
+  std::string _view_name;
+  bool _owns_view{false};
+  std::size_t _view_size{0};
+  std::size_t _next_index{0};
+  bool _repeat{false};
+  std::optional<mongocxx::cursor> _cursor;
+  std::optional<mongocxx::cursor::iterator> _cursor_it;
+  std::optional<ReplayRow> _next_row;
+  bool _unwrap_original{false};
+};
+
 MongoFetch::MongoFetch(const std::string &uri)
-    : _uri_string(uri), _uri(uri) {}
+    : _impl(std::make_unique<Impl>(uri)) {}
 
 MongoFetch::~MongoFetch() {
-  if (_client) {
-    disconnect();
+  if (_impl && _impl->_client) {
+    _impl->disconnect();
   }
 }
 
+MongoFetch::MongoFetch(MongoFetch &&) noexcept = default;
+MongoFetch &MongoFetch::operator=(MongoFetch &&) noexcept = default;
+
 void MongoFetch::connect() {
   mongo_instance();
-  _client.emplace(_uri);
+  _impl->_client.emplace(_impl->_uri);
 }
 
-void MongoFetch::disconnect() {
+void MongoFetch::disconnect() { _impl->disconnect(); }
+
+void MongoFetch::Impl::disconnect() {
   _cursor.reset();
   _cursor_it.reset();
   _next_row.reset();
@@ -350,24 +431,28 @@ void MongoFetch::disconnect() {
 }
 
 void MongoFetch::select_database(const std::string &db_name) {
-  _database_name = db_name;
+  _impl->_database_name = db_name;
 }
 
 void MongoFetch::select_collections(const std::vector<std::string> &collections) {
-  _collections = collections;
+  _impl->_collections = collections;
 }
 
-void MongoFetch::select_time_range(const std::string &start, const std::string &end) {
-  _start_time = parse_time_string(start);
-  _end_time = parse_time_string(end);
+void MongoFetch::set_repeat(bool repeat) { _impl->_repeat = repeat; }
 
-  if (!start.empty() && !_start_time) {
+void MongoFetch::set_unwrap_original(bool unwrap) { _impl->_unwrap_original = unwrap; }
+
+void MongoFetch::select_time_range(const std::string &start, const std::string &end) {
+  _impl->_start_time = parse_time_string(start);
+  _impl->_end_time = parse_time_string(end);
+
+  if (!start.empty() && !_impl->_start_time) {
     throw std::runtime_error("Unable to parse start time: " + start);
   }
-  if (!end.empty() && !_end_time) {
+  if (!end.empty() && !_impl->_end_time) {
     throw std::runtime_error("Unable to parse end time: " + end);
   }
-  if (_start_time && _end_time && *_start_time > *_end_time) {
+  if (_impl->_start_time && _impl->_end_time && *_impl->_start_time > *_impl->_end_time) {
     throw std::runtime_error("Start time must be less than or equal to end time.");
   }
 }
@@ -390,6 +475,21 @@ std::size_t MongoFetch::fetch_data(const std::string &view_name) {
 }
 
 std::size_t MongoFetch::fetch_data(std::string &view_name) {
+  return _impl->fetch_data(view_name);
+}
+
+std::size_t MongoFetch::fetch_data_from(const std::string &view_name) {
+  return _impl->fetch_data_from(view_name);
+}
+
+std::chrono::milliseconds MongoFetch::load_next(
+  nlohmann::json &out,
+  std::string &collection_name
+) {
+  return _impl->load_next(out, collection_name);
+}
+
+std::size_t MongoFetch::Impl::fetch_data(std::string &view_name) {
   if (!_client) {
     throw std::runtime_error("MongoDB client is not connected.");
   }
@@ -424,7 +524,7 @@ std::size_t MongoFetch::fetch_data(std::string &view_name) {
   return activate_view(view_name, owns_view);
 }
 
-std::size_t MongoFetch::fetch_data_from(const std::string &view_name) {
+std::size_t MongoFetch::Impl::fetch_data_from(const std::string &view_name) {
   if (!_client) {
     throw std::runtime_error("MongoDB client is not connected.");
   }
@@ -442,7 +542,7 @@ std::size_t MongoFetch::fetch_data_from(const std::string &view_name) {
   return activate_view(view_name, false);
 }
 
-std::chrono::milliseconds MongoFetch::load_next(
+std::chrono::milliseconds MongoFetch::Impl::load_next(
   nlohmann::json &out,
   std::string &collection_name
 ) {
@@ -504,7 +604,7 @@ std::chrono::milliseconds MongoFetch::load_next(
   return std::chrono::milliseconds{-1};
 }
 
-std::size_t MongoFetch::activate_view(const std::string &view_name, bool owns_view) {
+std::size_t MongoFetch::Impl::activate_view(const std::string &view_name, bool owns_view) {
   _view_name = view_name;
   _owns_view = owns_view;
   _next_index = 0;
@@ -513,7 +613,7 @@ std::size_t MongoFetch::activate_view(const std::string &view_name, bool owns_vi
   return _view_size;
 }
 
-void MongoFetch::reset_replay_stream() {
+void MongoFetch::Impl::reset_replay_stream() {
   _cursor.reset();
   _cursor_it.reset();
   _next_row.reset();
@@ -544,43 +644,7 @@ void MongoFetch::reset_replay_stream() {
   _cursor_it = std::move(cursor_it);
 }
 
-void MongoFetch::validate_replay_view(
-  mongocxx::database &database,
-  const std::string &view_name
-) const {
-  auto collections = database.list_collections(make_document(kvp("name", view_name)));
-  auto collection_it = collections.begin();
-  if (collection_it == collections.end()) {
-    throw std::runtime_error("Replay view `" + view_name + "` does not exist.");
-  }
-
-  const auto collection_info = *collection_it;
-  const auto type = collection_info["type"];
-  if (!type || type.type() != bsoncxx::type::k_string ||
-      std::string_view{type.get_string().value} != "view") {
-    throw std::runtime_error("Replay source `" + view_name + "` is not a MongoDB view.");
-  }
-
-  auto sample = database[view_name].find_one({});
-  if (!sample) {
-    return;
-  }
-
-  const auto row = sample->view();
-  extract_timestamp(row);
-
-  const auto data = row["data"];
-  if (!data || data.type() != bsoncxx::type::k_document) {
-    throw std::runtime_error("Replay view row is missing the `data` document.");
-  }
-
-  const auto source_collection = row["collection_name"];
-  if (!source_collection || source_collection.type() != bsoncxx::type::k_string) {
-    throw std::runtime_error("Replay view row is missing the `collection_name` field.");
-  }
-}
-
-void MongoFetch::drop_owned_view() noexcept {
+void MongoFetch::Impl::drop_owned_view() noexcept {
   _cursor.reset();
   _cursor_it.reset();
   _next_row.reset();
