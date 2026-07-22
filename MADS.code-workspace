@@ -108,17 +108,32 @@
 			"scoped_allocator": "cpp",
 			"execution": "cpp"
 		},
-		"C_Cpp.default.includePath": [
-			"build/_deps/**",
-			"products/include/**"
-		],
+		"C_Cpp.default.compileCommands":
+	    "${workspaceFolder}/build/compile_commands.json",
 		"C_Cpp.default.defines": [
 			"HAVE_GPIOD=1",
 			"PLUGIN_LOADER_FILTER=1",
 			"PLUGIN_LOADER_SOURCE=1",
 			"PLUGIN_LOADER_SINK=1"
 		],
-		"C_Cpp.default.cppStandard": "c++20"
+		"C_Cpp.default.cppStandard": "c++20",
+
+		// Reduce background indexing aggressiveness.
+		"C_Cpp.workspaceParsingPriority": "low",
+
+		// Do not index generated/build/dependency trees.
+		"C_Cpp.files.exclude": {
+			"**/.git": true,
+			"**/build": true,
+			"**/build-*": true,
+			"**/_build": true,
+			"**/.cache": true,
+			"**/.pio": true,
+			"**/node_modules": true,
+			"**/third_party": true,
+			"**/external": true,
+			"**/vendor": true
+		}
 	},
 	"extensions": {
 		"recommendations": [

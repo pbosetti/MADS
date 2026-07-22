@@ -21,6 +21,9 @@
 
 #include <pugg/Driver.h>
 #include <pugg/Kernel.h>
+#include <source.hpp>
+#include <filter.hpp>
+#include <sink.hpp>
 
 
 using json = nlohmann::json;
@@ -38,8 +41,8 @@ enum class PluginType {
 
 struct DriverInfo {
   PluginType type = PluginType::unknown;
-  std::string name;
   int version = 0;
+  std::string kind; ///< value returned by the plugin class's kind() method
 };
 
 struct ProbeResult {
@@ -203,11 +206,13 @@ void print_drivers(const std::vector<DriverInfo> &drivers) {
 
   std::cout << "drivers:" << std::endl;
   for (const auto &driver : drivers) {
-    std::cout << "  - name: " << style::bold << driver.name << style::reset
-              << ", type: " << style::bold << type_to_string(driver.type) 
+    std::cout << "  - type: " << style::bold << type_to_string(driver.type)
               << style::reset
-              << ", protocol_version: " << style::bold 
-              << driver.version << style::reset << std::endl;
+              << ", protocol_version: " << style::bold
+              << driver.version << style::reset
+              << ", kind: " << style::bold
+              << (driver.kind.empty() ? "unknown" : driver.kind)
+              << style::reset << std::endl;
   }
 }
 
@@ -245,12 +250,22 @@ std::string native_load_error(const std::string &plugin_path) {
 #endif
 }
 
+// TDriver must be the concrete driver type (e.g. SourceDriver<json>) so that
+// create() is available to instantiate the plugin class and read its kind().
 template <typename TDriver>
 void collect_drivers(pugg::Kernel &kernel, const char *server_name,
                      PluginType type, std::vector<DriverInfo> &out) {
   auto drivers = kernel.get_all_drivers<TDriver>(server_name);
   for (auto *driver : drivers) {
-    out.push_back({type, driver->name(), driver->version()});
+    std::string kind;
+    try {
+      if (auto plugin = driver->create()) {
+        kind = plugin->kind();
+      }
+    } catch (...) {
+      // leave kind empty; reported as "unknown" to the user
+    }
+    out.push_back({type, driver->version(), kind});
   }
 }
 
@@ -264,12 +279,12 @@ ProbeResult inspect_plugin(const std::string &plugin_path) {
   result.load_error = native_load_error(plugin_path);
   result.json_version = detect_plugin_json_version(plugin_path);
   result.library_loaded = kernel.load_plugin(plugin_path);
-  collect_drivers<pugg::Driver>(kernel, kSourceServerName, PluginType::source,
-                                result.drivers);
-  collect_drivers<pugg::Driver>(kernel, kFilterServerName, PluginType::filter,
-                                result.drivers);
-  collect_drivers<pugg::Driver>(kernel, kSinkServerName, PluginType::sink,
-                                result.drivers);
+  collect_drivers<SourceDriver<json>>(kernel, kSourceServerName,
+                                      PluginType::source, result.drivers);
+  collect_drivers<FilterDriver<json, json>>(kernel, kFilterServerName,
+                                            PluginType::filter, result.drivers);
+  collect_drivers<SinkDriver<json>>(kernel, kSinkServerName, PluginType::sink,
+                                    result.drivers);
   kernel.clear_drivers();
   return result;
 }
@@ -335,9 +350,9 @@ int main(int argc, char *argv[]) {
     output["drivers"] = json::array();
     for (const auto &driver : all_drivers) {
       json driver_json;
-      driver_json["name"] = driver.name;
       driver_json["type"] = type_to_string(driver.type);
       driver_json["protocol_version"] = driver.version;
+      driver_json["kind"] = driver.kind.empty() ? "unknown" : driver.kind;
       output["drivers"].push_back(driver_json);
     }
     output["protocol_current"] = protocol_current;
