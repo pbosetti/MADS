@@ -11,7 +11,6 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
-#include <zmqpp/zmqpp.hpp>
 
 #include "agent.hpp"
 #include "mads_test_helpers.hpp"
@@ -149,15 +148,17 @@ TEST_CASE("Compression::Auto round-trips identically below and above the "
                       Mads::Compression::Auto);
   auto sub = make_sub("subAuto", port);
 
-  nlohmann::json small = {{"tag", "small"}, {"n", 1}};
-  REQUIRE(small.dump().size() < Mads::COMPRESSION_AUTO_THRESHOLD);
+  // Not named "small"/"big": <rpcndr.h> (pulled in transitively on Windows)
+  // #defines "small" to "char", silently mangling a variable with that name.
+  nlohmann::json small_payload = {{"tag", "small"}, {"n", 1}};
+  REQUIRE(small_payload.dump().size() < Mads::COMPRESSION_AUTO_THRESHOLD);
 
   std::string filler(400, 'x');
-  nlohmann::json big = {{"tag", "big"}, {"filler", filler}};
-  REQUIRE(big.dump().size() >= Mads::COMPRESSION_AUTO_THRESHOLD);
+  nlohmann::json big_payload = {{"tag", "big"}, {"filler", filler}};
+  REQUIRE(big_payload.dump().size() >= Mads::COMPRESSION_AUTO_THRESHOLD);
 
   bool got_small = retry_until(
-      [&] { pub->publish(small, "s"); },
+      [&] { pub->publish(small_payload, "s"); },
       [&] { return sub->receive(true) == Mads::message_type::json; });
   REQUIRE(got_small);
   auto [t1, d1] = sub->last_json();
@@ -165,7 +166,7 @@ TEST_CASE("Compression::Auto round-trips identically below and above the "
   REQUIRE(d1.at("n") == 1);
 
   bool got_big = retry_until(
-      [&] { pub->publish(big, "b"); },
+      [&] { pub->publish(big_payload, "b"); },
       [&] { return sub->receive(true) == Mads::message_type::json; });
   REQUIRE(got_big);
   auto [t2, d2] = sub->last_json();

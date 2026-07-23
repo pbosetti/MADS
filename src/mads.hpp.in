@@ -220,10 +220,15 @@ public:
   void reset() noexcept { _running.store(true); }
 
   /// Process-wide run flag, shared by all Runtimes (async-signal-safe).
-  static std::atomic<bool> &process_running() noexcept {
-    static std::atomic<bool> flag{true};
-    return flag;
-  }
+  ///
+  /// Defined out-of-line in mads.cpp (compiled once, into MadsCore) rather
+  /// than inline here: an inline function-local static, on Windows, gets a
+  /// separate instance in every DLL/EXE that includes this header, since
+  /// nothing forces callers outside the DLL to bind to MadsCore's copy (no
+  /// automatic weak-symbol merging across separate PE images, unlike ELF).
+  /// A caller-side stop_process() would then silently target a disconnected
+  /// flag that Agent::loop() (compiled inside the DLL) never observes.
+  static std::atomic<bool> &process_running() noexcept;
   /// Request a process-wide stop: every Runtime's running() becomes false.
   static void stop_process() noexcept { process_running().store(false); }
 

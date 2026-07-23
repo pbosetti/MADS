@@ -5,8 +5,13 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
-#include <unistd.h>
 #include <vector>
+
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 #include "main/plugin_migrate.hpp"
 
@@ -20,10 +25,18 @@ using namespace Mads::PluginMigrate;
 // ---------------------------------------------------------------------------
 namespace {
 
+int current_pid() {
+#if defined(_WIN32)
+  return _getpid();
+#else
+  return ::getpid();
+#endif
+}
+
 fs::path unique_temp_path(const std::string &tag) {
   static std::atomic<int> counter{0};
   return fs::temp_directory_path() /
-         ("mads_ptm_" + tag + "_" + std::to_string(::getpid()) + "_" +
+         ("mads_ptm_" + tag + "_" + std::to_string(current_pid()) + "_" +
           std::to_string(counter++));
 }
 
@@ -116,7 +129,17 @@ TEST_CASE("run_command captures output and a zero exit code",
 TEST_CASE("run_command captures stderr too (2>&1 redirection)",
           "[plugin_migrate][helpers]") {
   std::string out;
+  // Wrapped in an explicit nested shell (rather than relying on the outer
+  // "2>&1" run_command() itself appends) so the inner "1>&2" and the outer
+  // "2>&1" apply in separate redirection scopes -- chaining both directly on
+  // one command cancels out and sends the output to the original stderr
+  // instead of into the captured pipe. "sh" isn't on PATH by default on
+  // Windows, so cmd's redirection syntax (identical here) stands in for it.
+#if defined(_WIN32)
+  int rc = run_command("cmd /c \"echo err-marker 1>&2\"", out);
+#else
   int rc = run_command("sh -c \"echo err-marker 1>&2\"", out);
+#endif
   REQUIRE(rc == 0);
   REQUIRE(out.find("err-marker") != std::string::npos);
 }

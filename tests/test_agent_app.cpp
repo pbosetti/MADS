@@ -20,7 +20,6 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
-#include <zmqpp/zmqpp.hpp>
 
 #include "agent_app.hpp"
 #include "mads_test_helpers.hpp"
@@ -212,6 +211,7 @@ TEST_CASE("the save-settings option writes broker-served settings to a file",
   std::ifstream ifs(out_path);
   std::stringstream saved;
   saved << ifs.rdbuf();
+  ifs.close(); // Windows locks open files against remove() below
   REQUIRE(saved.str() == body);
   std::filesystem::remove(out_path);
 }

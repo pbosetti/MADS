@@ -11,7 +11,8 @@ TEST_CASE("exec_path returns an existing file named after the test binary",
   fs::path p = Mads::exec_path();
   REQUIRE(fs::exists(p));
   REQUIRE(p.is_absolute());
-  REQUIRE(p.filename() == "test_exec_path");
+  // stem() rather than filename(): Windows binaries carry a ".exe" suffix.
+  REQUIRE(p.stem() == "test_exec_path");
 }
 
 TEST_CASE("exec_dir with no argument returns the binary's parent directory",

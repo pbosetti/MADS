@@ -286,7 +286,7 @@ TEST_CASE("agent_init fails when the agent is already connected",
 // connect / disconnect / register_event guarded states
 // ---------------------------------------------------------------------------
 
-TEST_CASE("agent_connect fails on double-connect; agent_disconnect is "
+TEST_CASE("agent_connect fails on double-connect, agent_disconnect is "
           "idempotent",
           "[agent_c]") {
   mads_test::RunningGuard guard;

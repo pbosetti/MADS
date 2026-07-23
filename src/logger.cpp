@@ -393,7 +393,11 @@ void Logger::connect_to_db() {
 void Logger::open_log_file(string filename, bool array) {
   _impl->_log_filename = filename;
   _impl->_log_array = array;
-  _impl->_log_file.open(_impl->_log_filename);
+  // Binary mode: close_log_file()'s seekp(-2, end) assumes each written "\n"
+  // is exactly one byte on disk. In text mode, Windows silently translates
+  // "\n" to "\r\n", which throws that fixed-size rewind off by one byte per
+  // line and corrupts the array-mode trailing-comma/opening-bracket fixup.
+  _impl->_log_file.open(_impl->_log_filename, ios_base::out | ios_base::binary);
   if (_impl->_log_array) {
     _impl->_log_file << "[" << endl;
   }

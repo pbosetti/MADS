@@ -29,16 +29,22 @@ if(UNIX AND NOT APPLE)
   set(MADS_TEST_SSL_LIBS ssl crypto)
 endif()
 
+if(WIN32)
+  find_program(MADS_POWERSHELL_EXECUTABLE NAMES pwsh powershell REQUIRED)
+endif()
+
 # One test executable per test_*.cpp file: new suites are added by dropping a
-# file in this directory, with no CMake edits required.
+# file in this directory, with no CMake edits required. test_main.cpp is the
+# shared entry point linked into every one of them below, not a suite itself.
 file(GLOB MADS_TEST_SOURCES ${CMAKE_CURRENT_LIST_DIR}/test_*.cpp)
+list(REMOVE_ITEM MADS_TEST_SOURCES ${CMAKE_CURRENT_LIST_DIR}/test_main.cpp)
 foreach(test_src IN LISTS MADS_TEST_SOURCES)
   get_filename_component(test_name ${test_src} NAME_WE)
-  add_executable(${test_name} ${test_src})
+  add_executable(${test_name} ${test_src} ${CMAKE_CURRENT_LIST_DIR}/test_main.cpp)
   target_link_libraries(${test_name} PRIVATE
     Mads::Mads
     MadsMainDeps
-    Catch2::Catch2WithMain
+    Catch2::Catch2
     mads_test_flags
     ${MADS_TEST_SSL_LIBS}
   )
@@ -52,6 +58,17 @@ foreach(test_src IN LISTS MADS_TEST_SOURCES)
   # runtime Mads::Logger::has_mongo_support() for behavioural assertions.
   if(MADS_ENABLE_MONGOCXX)
     target_compile_definitions(${test_name} PRIVATE MADS_HAS_MONGOCXX)
+  endif()
+  if(WIN32)
+    # See win_test_wrapper.ps1: works around a system-wide MADS install
+    # shadowing the freshly built MadsCore.dll on PATH, which otherwise
+    # breaks every test binary with STATUS_ENTRYPOINT_NOT_FOUND. Repurposes
+    # CROSSCOMPILING_EMULATOR (not for actual cross-compiling) since it's the
+    # one hook Catch2 honors for both test discovery and the real test run.
+    set_target_properties(${test_name} PROPERTIES
+      CROSSCOMPILING_EMULATOR
+      "${MADS_POWERSHELL_EXECUTABLE};-NoProfile;-ExecutionPolicy;Bypass;-File;${CMAKE_CURRENT_LIST_DIR}/win_test_wrapper.ps1;$<TARGET_FILE_DIR:Mads::Mads>"
+    )
   endif()
   catch_discover_tests(${test_name} PROPERTIES TIMEOUT 120)
 endforeach()

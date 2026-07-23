@@ -17,9 +17,6 @@
 #include <string>
 #include <thread>
 
-#include <zmqpp/zmqpp.hpp>
-#include <zmqpp/curve.hpp>
-
 #include "curve.hpp"
 #include "mads_test_helpers.hpp"
 

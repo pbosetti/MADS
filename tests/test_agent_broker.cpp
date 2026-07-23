@@ -32,7 +32,6 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
-#include <zmqpp/zmqpp.hpp>
 
 #include "agent.hpp"
 #include "mads_test_helpers.hpp"
@@ -218,6 +217,7 @@ TEST_CASE("save_settings() writes the exact raw settings text served by the "
   REQUIRE(in.good());
   std::ostringstream contents;
   contents << in.rdbuf();
+  in.close(); // Windows locks open files against remove() below
   REQUIRE(contents.str() == broker.settings_body);
   std::filesystem::remove(tmp);
 }

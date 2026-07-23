@@ -4,8 +4,11 @@
 #include <chrono>
 #include <cmath>
 #include <regex>
-#include <sys/time.h>
 #include <vector>
+
+#ifndef _WIN32
+#include <sys/time.h>
+#endif
 
 #include "mads_test_helpers.hpp"
 
