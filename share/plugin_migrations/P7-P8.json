@@ -6,7 +6,14 @@
 
   "cmake": {
     "plugin_git_tag": "v2.4-P8",
-    "pugg_git_tag": "1.2.0"
+    "pugg_git_tag": "1.2.0",
+    "replacements": [
+      {
+        "description": "Modernize the nlohmann/json fetch to the release tarball form",
+        "regex": "FetchContent_Declare\\s*\\(\\s*json[\\s\\S]*?GIT_REPOSITORY\\s+https://github\\.com/nlohmann/json\\.git[\\s\\S]*?GIT_TAG\\s+v3\\.11\\.3[\\s\\S]*?\\)",
+        "replacement": "FetchContent_Declare(json\n  URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz\n  DOWNLOAD_EXTRACT_TIMESTAMP TRUE\n)"
+      }
+    ]
   },
 
   "source": [
