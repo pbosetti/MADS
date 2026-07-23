@@ -637,6 +637,14 @@ TEST_CASE("run() migrates P6 -> P8 end to end with the compile check disabled",
   // The nlohmann/json FetchContent block was modernized to the tarball form.
   REQUIRE(cmake_after.find("json.tar.xz") != std::string::npos);
   REQUIRE(cmake_after.find("GIT_TAG        v3.11.3") == std::string::npos);
+  // ...and carried all the way to the P7->P8 json version. P6->P7 rewrites the
+  // block to the tarball form at v3.11.3, so the P7->P8 rule matching the
+  // legacy GIT_TAG form can never fire here; a second rule bumps the tarball
+  // URL itself. Without it the migration silently stops at v3.11.3, leaving a
+  // migrated plugin older than one `mads plugin` scaffolds from
+  // share/plugin_deps.json.
+  REQUIRE(cmake_after.find("v3.12.0") != std::string::npos);
+  REQUIRE(cmake_after.find("v3.11.3") == std::string::npos);
 
   std::string src_after;
   REQUIRE(read_file(project / "src" / "p6demo.cpp", src_after));

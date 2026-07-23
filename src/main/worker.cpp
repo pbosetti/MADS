@@ -1,19 +1,16 @@
 /*
- __        __         _                                      _   
- \ \      / /__  _ __| | _____ _ __    __ _  __ _  ___ _ __ | |_ 
+ __        __         _                                      _
+ \ \      / /__  _ __| | _____ _ __    __ _  __ _  ___ _ __ | |_
   \ \ /\ / / _ \| '__| |/ / _ \ '__|  / _` |/ _` |/ _ \ '_ \| __|
-   \ V  V / (_) | |  |   <  __/ |    | (_| | (_| |  __/ | | | |_ 
+   \ V  V / (_) | |  |   <  __/ |    | (_| | (_| |  __/ | | | |_
     \_/\_/ \___/|_|  |_|\_\___|_|     \__,_|\__, |\___|_| |_|\__|
-                                            |___/                
+                                            |___/
 This is a plugin-based general purpose worker for the Mads framework.
 Actual work is done by the plugins, this executable is just a wrapper.
 Author(s): Paolo Bosetti
 */
-#include "../agent.hpp"
-#include "../mads.hpp"
 #include "../worker.hpp"
-#include "../exec_path.hpp"
-#include <cxxopts.hpp>
+#include "../agent_app.hpp"
 #include <filesystem>
 #include <pugg/Kernel.h>
 #include <filter.hpp>
@@ -22,7 +19,6 @@ Author(s): Paolo Bosetti
 #define AGENT_NAME_DEFAULT "bridge"
 
 using namespace std;
-using namespace cxxopts;
 using namespace Mads;
 using json = nlohmann::json;
 namespace fs = std::filesystem;
@@ -31,30 +27,33 @@ using FilterJ = Filter<json, json>;
 using FilterDriverJ = FilterDriver<json, json>;
 
 int main(int argc, char *argv[]) {
-  string settings_uri = SETTINGS_URI;
   string plugin_name, plugin_file = PLUGIN_DEFAULT, agent_name = AGENT_NAME_DEFAULT;
   size_t count = 0, count_err = 0;
-  bool crypto = false;
-  filesystem::path key_dir(Mads::exec_dir() + "/../etc");
-  string client_key_name = "client";
-  string server_key_name = "broker";
-  auth_verbose auth_verbose = auth_verbose::off;
 
   // CLI options
-  Options options(argv[0]);
+  AgentAppFor<Worker> agent(argv[0], SETTINGS_URI);
   // clang-format off
-  options.add_options()
-    ("plugin", "Plugin to load (must be a filter!)", value<string>())
-    ("n,name", "Agent name (default to plugin name)", value<string>())
-    ("i,agent-id", "Agent ID to be added to JSON frames", value<string>());
-  options.parse_positional({"plugin"});
-  options.positional_help("<Plugin to load (must be a filter!)>");
+  agent.options()
+    ("plugin", "Plugin to load (must be a filter!)", cxxopts::value<string>())
+    ("n,name", "Agent name (default to plugin name)", cxxopts::value<string>())
+    ("i,agent-id", "Agent ID to be added to JSON frames", cxxopts::value<string>());
+  agent.raw_options().parse_positional({"plugin"});
+  agent.raw_options().positional_help("<Plugin to load (must be a filter!)>");
   // clang-format on
-  SETUP_OPTIONS(options, Agent);
+  // Also brings in --room, so the broker can be located by service discovery.
+  agent.add_common_options();
+
+  auto options_parsed = agent.parse_options(argc, argv);
+  if (int rc = AgentApp::handle_standard_exit_options<AgentAppFor<Worker>>(
+          options_parsed, agent.raw_options(), argv);
+      rc >= 0) {
+    return rc;
+  }
+
   if (options_parsed.count("plugin") != 0) {
     plugin_file = options_parsed["plugin"].as<string>();
     agent_name = fs::path(plugin_file).stem().string();
-  } 
+  }
   if (!fs::exists(plugin_file)) {
     plugin_file = Mads::exec_dir("../lib/" + plugin_file);
   }
@@ -64,47 +63,29 @@ int main(int argc, char *argv[]) {
   } else {
     agent_name = plugin_name;
   }
+  // Settings are looked up by agent name, so it has to be set before init().
+  // init() re-applies --name on top, which keeps its precedence.
+  agent.set_agent_name(agent_name);
 
-  if (options_parsed.count("crypto") != 0) {
-    crypto = true;
-    if (options_parsed.count("keys_dir") != 0) {
-      key_dir = options_parsed["keys_dir"].as<string>();
-    }
-    if (options_parsed.count("key_broker") != 0) {
-      server_key_name = options_parsed["key_broker"].as<string>();
-    }
-    if (options_parsed.count("key_client") != 0) {
-      client_key_name = options_parsed["key_client"].as<string>();
-    }
-    if (options_parsed.count("auth_verbose") != 0) {
-      auth_verbose = auth_verbose::on;
-    }
-  }
-  
   // Core stuff
-  Worker agent(agent_name, settings_uri);
-  if (crypto) {
-    agent.set_key_dir(key_dir);
-    agent.client_key_name = client_key_name;
-    agent.server_key_name = server_key_name;
-    agent.auth_verbose = auth_verbose;
-  }
   try {
-    agent.init(crypto);
+    agent.init(options_parsed);
   } catch (const std::exception &e) {
     std::cout << fg::red << "Error initializing agent: " << e.what()
               << fg::reset << endl;
     exit(EXIT_FAILURE);
   }
   agent.enable_remote_control();
-  agent.connect();
- 
+  // Worker::connect() wires up the PULL socket and defaults to no settle delay;
+  // pass it explicitly, since AgentApp's own default is 250 ms.
+  agent.connect(0ms);
 
-  // Copy agent settings as plugin parameters
-  json settings = agent.get_settings();
+
+  // Copy agent settings as plugin parameters (--agent-id is already applied to
+  // the agent itself by init()).
+  json settings = agent.settings_json();
   if (options_parsed.count("agent-id")) {
     settings["agent_id"] = options_parsed["agent-id"].as<string>();
-    agent.set_agent_id(options_parsed["agent-id"].as<string>());
   }
 
   if (options_parsed.count("plugin") != 0) {
@@ -136,7 +117,7 @@ int main(int argc, char *argv[]) {
   pugg::Kernel kernel;
   kernel.add_server<Filter<>>();
   if (!kernel.load_plugin(plugin_file)) {
-    cerr << fg::red << "Error: cannot load plugin file " << plugin_file 
+    cerr << fg::red << "Error: cannot load plugin file " << plugin_file
          << fg::reset << endl;
     exit(1);
   }
@@ -152,12 +133,12 @@ int main(int argc, char *argv[]) {
     }
     exit(1);
   }
-  
+
   // Create the class from the plugin (P8: create() returns a unique_ptr):
   auto filter = filter_driver->create();
   filter->set_params(settings);
   for (auto &[k, v] : filter->info()) {
-    cout << "  " << left << setw(18) << k << style::bold << v << style::reset 
+    cout << "  " << left << setw(18) << k << style::bold << v << style::reset
          << endl;
   }
 
@@ -165,6 +146,9 @@ int main(int argc, char *argv[]) {
        << agent_name << ")" << style::reset << endl;
 
   // Main loop
+  // Startup is registered here rather than via enable_events(): the plugin
+  // checks above exit(1) on failure, and an agent that never loaded its plugin
+  // should not report itself as started.
   agent.register_event(event_type::startup);
   cout << fg::green << "Filter plugin process started" << fg::reset << endl;
   agent.loop([&]() -> chrono::milliseconds {
@@ -202,10 +186,6 @@ int main(int argc, char *argv[]) {
   filter.reset();
   kernel.clear_drivers();
 
-  if (agent.restart()) {
-    auto cmd = string(MADS_PREFIX) + argv[0];
-    cout << "Restarting " << cmd << "..." << endl;
-    execvp(cmd.c_str(), argv);
-  }
+  agent.restart_if_requested(argv);
   return 0;
 }

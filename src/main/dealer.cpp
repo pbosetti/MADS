@@ -8,67 +8,49 @@
 */
 
 #include "../dealer.hpp"
-#include <cxxopts.hpp>
+#include "../agent_app.hpp"
 
 using namespace std;
 using namespace Mads;
-using namespace cxxopts;
 
 int main(int argc, char *argv[]) {
-  string settings_uri = SETTINGS_URI;
-  string agent_name = argv[0];
   size_t count = 0, count_err = 0;
-  bool crypto = false;
-  filesystem::path key_dir(Mads::exec_dir() + "/../etc");
-  string client_key_name = "client";
-  string server_key_name = "broker";
-  auth_verbose auth_verbose = auth_verbose::off;
 
-  Options options(argv[0]);
+  // CLI options
+  AgentAppFor<Dealer> dealer(argv[0], SETTINGS_URI);
   // clang-format off
-  options.add_options()
-    ("n,name", "Agent name (default to" + agent_name + ")", value<string>())
-    ("i,agent-id", "Agent ID to be added to JSON frames", value<string>());
+  dealer.options()
+    ("n,name", "Agent name (default to the executable name)",
+     cxxopts::value<string>())
+    ("i,agent-id", "Agent ID to be added to JSON frames",
+     cxxopts::value<string>());
   // clang-format on
-  SETUP_OPTIONS(options, Dealer);
+  // Also brings in --room, so the broker can be located by service discovery.
+  dealer.add_common_options();
 
-  if (options_parsed.count("name") != 0) {
-    agent_name = options_parsed["name"].as<string>();
-  } 
-
-  if (options_parsed.count("crypto") != 0) {
-    crypto = true;
-    if (options_parsed.count("keys_dir") != 0) {
-      key_dir = options_parsed["keys_dir"].as<string>();
-    }
-    if (options_parsed.count("key_broker") != 0) {
-      server_key_name = options_parsed["key_broker"].as<string>();
-    }
-    if (options_parsed.count("key_client") != 0) {
-      client_key_name = options_parsed["key_client"].as<string>();
-    }
-    if (options_parsed.count("auth_verbose") != 0) {
-      auth_verbose = auth_verbose::on;
-    }
+  auto options_parsed = dealer.parse_options(argc, argv);
+  if (int rc = AgentApp::handle_standard_exit_options<AgentAppFor<Dealer>>(
+          options_parsed, dealer.raw_options(), argv);
+      rc >= 0) {
+    return rc;
   }
 
-  Dealer dealer(agent_name, settings_uri);
-  if (crypto) {
-    dealer.set_key_dir(key_dir);
-    dealer.client_key_name = client_key_name;
-    dealer.server_key_name = server_key_name;
-    dealer.auth_verbose = auth_verbose;
+  // Core stuff
+  try {
+    dealer.init(options_parsed);
+  } catch (const std::exception &e) {
+    std::cout << fg::red << "Error initializing agent: " << e.what()
+              << fg::reset << endl;
+    exit(EXIT_FAILURE);
   }
-  dealer.init(crypto);
   dealer.enable_remote_control();
-  dealer.connect();
-
-  if (options_parsed.count("agent-id")) {
-    dealer.set_agent_id(options_parsed["agent-id"].as<string>());
-  }
+  // Registers startup on connect() and shutdown on disconnect().
+  dealer.enable_events();
+  // Dealer::connect() binds the PUSH socket and defaults to no settle delay;
+  // pass it explicitly, since AgentApp's own default is 250 ms.
+  dealer.connect(0ms);
 
   dealer.info(cerr);
-  dealer.register_event(event_type::startup);
   dealer.loop([&]() -> chrono::milliseconds {
     json j;
     message_type type = dealer.receive();
@@ -99,13 +81,8 @@ int main(int argc, char *argv[]) {
     return 0ms;
   });
 
-  dealer.register_event(event_type::shutdown);
   dealer.disconnect();
-  if (dealer.restart()) {
-    auto cmd = string(MADS_PREFIX) + argv[0];
-    cout << "Restarting " << cmd << "..." << endl;
-    execvp(cmd.c_str(), argv);
-  }
+  dealer.restart_if_requested(argv);
   cout << "Dealer terminated" << endl;
   return 0;
 }

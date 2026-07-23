@@ -213,10 +213,12 @@ int main(int argc, char **argv) {
 
   // Dependency pins for the generated CMakeLists.txt come from the shared
   // manifest (share/plugin_deps.json) — the single source of truth kept in sync
-  // with the newest migration step. Fall back to sane defaults if it is missing.
-  data["plugin_git_tag"] = "v2.3-P7";
-  data["pugg_git_tag"] = "1.1.0";
-  data["json_version"] = "v3.11.3";
+  // with the newest migration step. Fall back to sane defaults if it is missing;
+  // keep these mirroring the manifest, or an install with a missing manifest
+  // silently scaffolds plugins one protocol behind.
+  data["plugin_git_tag"] = "v2.4-P8";
+  data["pugg_git_tag"] = "1.2.0";
+  data["json_version"] = "v3.12.0";
   {
     ifstream mf(Mads::exec_dir("../share/plugin_deps.json"));
     if (mf) {
