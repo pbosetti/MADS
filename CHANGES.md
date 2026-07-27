@@ -10,6 +10,21 @@ These changes summarize what was added or updated since `v2.3.1`.
 
 ## New features
 
+- **`mads up` headless `director.toml` executor.** New `mads-up` command that runs the same
+  `director.toml` process plan used by `mads_director`'s interactive GUI, unattended -- develop an agent
+  set in the Director GUI, commit the resulting `director.toml`, then run it in CI, on an edge box, or
+  under `systemd Type=simple` with `mads up`. It parses/validates/expands the file itself (no GLFW/GUI
+  dependency), honouring Director's own `scale` expansion, `${PWD}`/`${ID}` templating and `after`
+  dependency ordering (a forest, with cycles rejected), plus a new additive, GUI-ignorable `ready = "broker"
+  | "port:<n>" | "log:<regex>" | "delay:<duration>"` key that gates starting a process's dependents on an
+  actual readiness signal instead of a fixed sleep. Processes are spawned via the vendored `reproc` library
+  in their own process group (POSIX: `setpgid`/`killpg`; Windows: `CREATE_NEW_PROCESS_GROUP`/
+  `CTRL_BREAK_EVENT`), so descendants are torn down too, not just the immediate child; `relaunch = true`
+  processes restart with exponential backoff (100ms-30s, capped further by `--max-restarts`).
+  `--until-exit <name>` runs until a named process exits and propagates its exit code (the CI primitive:
+  bring up broker + pipeline, run a test agent, exit); `--timeout`, `--grace`, `--no-shell` and `--dry-run`
+  (print the fully expanded plan without spawning anything) round out the flags. Foreground-only by design:
+  no daemonization, no PID file, no `mads down`. See [share/man/mads-up.md](share/man/mads-up.md).
 - **`mads-federate` agent.** New agent that relays selected topics between two independent MADS networks, each with its own broker. It owns two ordinary agent connections ("side A" and "side B"), each configured via a normal `[name]` section in that network's own broker settings; whatever a side subscribes to via its `sub_topic` is forwarded to the other network. Only JSON messages are relayed (no blobs), and the `control`/`agent_event` topics are never forwarded, so remote-control commands and lifecycle events stay local. Relayed messages are tagged with the relay's id in a `mads_relay_path` field to prevent A→B→A loops. See [share/man/mads-federate.md](share/man/mads-federate.md).
 - **High-resolution loop pacing.** `Agent::loop()` now paces its internal timing in nanoseconds instead of milliseconds (existing millisecond-based code keeps compiling and behaving as before). Agents can set a `time_step_us` key in their settings section (wins over `time_step`) for microsecond-granularity periods, and opt into `enable_high_res_loop()` (or the `high_res_loop`/`spin_margin_us` settings keys) to busy-spin the tail of each interval instead of sleeping through it, trading CPU time for microsecond-accurate wake-up timing.
 - **`mads plugin --update` migration command.** C++ plugins can now be migrated in place to the current plugin protocol version instead of being rewritten by hand. It detects the plugin's current protocol from its `CMakeLists.txt`, chains the migration steps recorded in `share/plugin_migrations` up to the current protocol, bumps the pinned `GIT_TAG`, and rewrites affected method signatures (located structurally, so reformatted/multi-line declarations migrate correctly). Each modified file is saved as `*.bak`, and a change report plus manual follow-up checklist is printed; unless `--no-check`, the migrated plugin is then compiled so the compiler flags anything the rewrite could not handle. `--dry-run`, `--from`, and `--to` are also available. Rust plugins are unaffected (they track the `mads-plugin` crate version in `Cargo.toml`). See [share/man/mads-plugin.md](share/man/mads-plugin.md).
