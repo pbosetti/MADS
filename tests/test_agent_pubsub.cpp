@@ -207,6 +207,75 @@ TEST_CASE("a subscriber subscribed to one topic never receives a different "
 }
 
 // ---------------------------------------------------------------------------
+// P2: MQTT-style wildcard topic filtering (src/topic_match.hpp/.cpp wired
+// into src/agent.cpp's subscribe path). literal_prefix("sensors/+/x") ==
+// "sensors/", so the raw ZMQ SUBSCRIBE is broader than the pattern: this
+// proves the two-stage filtering -- not just ZMQ's own byte-prefix match --
+// actually runs end to end over a real loopback socket.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("a wildcard ('+') sub_topic passes matching topics through and "
+          "silently suppresses non-matching ones under the same ZMQ prefix",
+          "[agent_pubsub][topic_match]") {
+  mads_test::RunningGuard guard;
+  const uint16_t port = 42110;
+  auto pub = make_pub("pubH", port);
+  auto sub = make_sub("subH", port, {"sensors/+/x"});
+
+  // Matching: single wildcard level, last level "x" matches literally.
+  bool got = retry_until(
+      [&] { pub->publish(nlohmann::json{{"v", 1}}, "sensors/acc/x"); },
+      [&] { return sub->receive(true) == Mads::message_type::json; });
+  REQUIRE(got);
+  REQUIRE(std::get<0>(sub->last_message()) == "sensors/acc/x");
+
+  // Drain any leftover queued matches from the retry warm-up above.
+  while (sub->receive(true) == Mads::message_type::json) {
+  }
+
+  // Non-matching: same ZMQ-level prefix ("sensors/"), different last level,
+  // so ZMQ itself would deliver it -- it must be dropped by topic_match().
+  pub->publish(nlohmann::json{{"v", 2}}, "sensors/acc/y");
+  std::this_thread::sleep_for(300ms); // allow time for an (unwanted) delivery
+  REQUIRE(sub->receive(true) == Mads::message_type::none);
+  REQUIRE(std::get<0>(sub->last_message()) ==
+          "sensors/acc/x"); // unchanged by the suppressed message
+
+  // Matching again, with a different value at the wildcard level.
+  bool got2 = retry_until(
+      [&] { pub->publish(nlohmann::json{{"v", 3}}, "sensors/gyro/x"); },
+      [&] { return sub->receive(true) == Mads::message_type::json; });
+  REQUIRE(got2);
+  REQUIRE(std::get<0>(sub->last_message()) == "sensors/gyro/x");
+}
+
+TEST_CASE("a wildcard ('#') sub_topic matches the parent level itself and "
+          "every level below it",
+          "[agent_pubsub][topic_match]") {
+  mads_test::RunningGuard guard;
+  const uint16_t port = 42111;
+  auto pub = make_pub("pubI", port);
+  auto sub = make_sub("subI", port, {"sensors/#"});
+
+  // "#" matches the bare parent topic "sensors" itself (MQTT quirk).
+  bool got_parent = retry_until(
+      [&] { pub->publish(nlohmann::json{{"v", 1}}, "sensors"); },
+      [&] { return sub->receive(true) == Mads::message_type::json; });
+  REQUIRE(got_parent);
+  REQUIRE(std::get<0>(sub->last_message()) == "sensors");
+
+  while (sub->receive(true) == Mads::message_type::json) {
+  }
+
+  // ...and everything nested below it, at any depth.
+  bool got_deep = retry_until(
+      [&] { pub->publish(nlohmann::json{{"v", 2}}, "sensors/acc/x/y"); },
+      [&] { return sub->receive(true) == Mads::message_type::json; });
+  REQUIRE(got_deep);
+  REQUIRE(std::get<0>(sub->last_message()) == "sensors/acc/x/y");
+}
+
+// ---------------------------------------------------------------------------
 // Accessors
 // ---------------------------------------------------------------------------
 
