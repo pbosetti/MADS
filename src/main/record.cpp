@@ -41,6 +41,7 @@ int main(int argc, char *argv[]) {
     ("x,cross", "Cross-connect sockets (no broker)");
   // clang-format on
   recorder.add_common_options();
+  recorder.add_agent_identity_options();
 
   auto options_parsed = recorder.parse_options(argc, argv);
   if (int rc = AgentApp::handle_standard_exit_options<AgentApp>(

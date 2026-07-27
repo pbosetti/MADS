@@ -61,7 +61,12 @@ int main(int argc, char *argv[]) {
     ("rate", "Pace replay using recorded gaps, scaled by this factor "
              "(default: no pacing, replay as fast as possible)",
      cxxopts::value<double>())
-    ("x,cross", "Cross-connect sockets (no broker)");
+    ("x,cross", "Cross-connect sockets (no broker)")
+    // Not add_agent_identity_options(): its "-i,agent-id" collides with
+    // "-i,input" above, and --input is the more central flag for this tool.
+    ("n,name", "Agent/section name", cxxopts::value<string>())
+    ("agent-id", "Agent ID (no short flag here: -i is --input)",
+     cxxopts::value<string>());
   // clang-format on
   player.add_common_options();
 
