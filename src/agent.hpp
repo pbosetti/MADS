@@ -448,6 +448,53 @@ public:
    */
   message_type receive(bool dont_block = false);
 
+  /**
+   * @brief Receives a message without any JSON/blob (de)serialization (P3).
+   *
+   * Exposes the wire frame exactly as received: the topic (part 0) and every
+   * subsequent part verbatim as bytes (embedded NUL bytes included), with no
+   * frame-header parsing, no decompression, and no JSON decode -- whatever
+   * was published (JSON text, a MsgPack frame, or a blob's meta+bytes parts)
+   * comes back unchanged. Intended for mads-record, so a bag file gets
+   * exactly what was on the wire without round-tripping through
+   * nlohmann::json or re-copying blob bytes.
+   *
+   * Goes through the same receive_raw() path as receive() (wildcard
+   * sub_topic filtering (P2) and Last-Known-Value delivery both still
+   * apply); this is purely a difference in how the received frame is
+   * exposed to the caller, not in what gets delivered.
+   *
+   * @param topic Out param: the topic frame.
+   * @param parts Out param: every frame after the topic, in wire order.
+   *   Cleared and repopulated on a successful receive; left untouched if
+   *   nothing was received.
+   * @param dont_block Whether to return immediately if no message is pending.
+   * @return true if a message was received, false if nothing arrived
+   *   (dont_block, or the receive timeout elapsed).
+   * @throws AgentError if not initialized, or while threaded remote control
+   *   owns the subscriber socket.
+   */
+  bool receive_raw_message(std::string &topic, std::vector<std::string> &parts,
+                           bool dont_block = false);
+
+  /**
+   * @brief Publishes a raw multi-part message with no JSON encoding, no
+   * automatic field-stamping (agent_id/hostname/timestamp/...), no
+   * compression, and no frame header (P3).
+   *
+   * Sends `topic` followed by `parts`, byte for byte, exactly as given.
+   * Intended for mads-play, to republish a recorded frame unchanged --
+   * pairs with receive_raw_message() and the parts BagReader hands back, so
+   * a JSON message or a blob's meta+bytes parts are never re-parsed,
+   * re-dumped, or re-copied through the JSON path.
+   *
+   * @param topic The topic frame.
+   * @param parts The frames to send after the topic, in order.
+   * @throws AgentError if not initialized.
+   */
+  void publish_raw_message(const std::string &topic,
+                           const std::vector<std::string> &parts);
+
 
   /*
     _                      

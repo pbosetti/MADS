@@ -1004,6 +1004,44 @@ message_type Agent::receive(bool dont_block) {
   }
 }
 
+bool Agent::receive_raw_message(string &topic, vector<string> &parts,
+                                bool dont_block) {
+  if (!_init_done)
+    throw AgentError("Agent not initialized");
+  // Same concurrency guard as receive() (REFACTOR.md §1.7): threaded remote
+  // control owns the subscriber socket exclusively.
+  if (_rc_owns_socket)
+    throw AgentError("receive_raw_message() cannot be used while threaded "
+                     "remote control owns the subscriber socket");
+  message message;
+  if (!receive_raw(message, dont_block))
+    return false;
+
+  const size_t n = message.parts();
+  if (n == 0)
+    return false;
+
+  topic = message.get(0);
+  parts.clear();
+  parts.reserve(n - 1);
+  for (size_t i = 1; i < n; ++i)
+    parts.push_back(message.get(i));
+  return true;
+}
+
+void Agent::publish_raw_message(const string &topic, const vector<string> &parts) {
+  if (!_init_done)
+    throw AgentError("Agent not initialized");
+  message message;
+  message.add_raw(topic.data(), topic.size());
+  for (auto const &part : parts)
+    message.add_raw(part.data(), part.size());
+  {
+    std::lock_guard<std::mutex> lock(_publish_mutex);
+    _publisher.send(message);
+  }
+}
+
 void Agent::install_signal_handlers() {
   // Idempotent and process-global (REFACTOR.md §1.6): handlers are installed
   // once, so repeated loop() calls or multiple agents in one process do not
