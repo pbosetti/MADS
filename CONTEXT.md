@@ -34,6 +34,15 @@
 - Frequent keys:
   - `pub_topic` (single topic string)
   - `sub_topic` (array of topics; `[""]` means subscribe to all)
+- `sub_topic` entries support MQTT-style wildcards (`Mads::topic_match()` /
+  `Mads::literal_prefix()` in `src/topic_match.hpp`): `+` matches exactly one
+  topic level and `#` matches this level and everything below it (including
+  the level it replaces, e.g. `sensors/#` also matches the bare topic
+  `sensors`), and is only legal as the final token. A plain entry with
+  neither character keeps subscribing exactly as before (unchanged ZMQ
+  `SUBSCRIBE` frame); only entries containing `+`/`#` pay for the extra
+  in-process match, applied after the (broader) ZMQ-level subscribe and
+  before the message reaches `receive()`/callbacks.
 
 ## Custom monolithic agent workflow
 1. Add agent class in `src/<agent>.hpp` deriving from `Mads::Agent`.
