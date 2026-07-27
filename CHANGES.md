@@ -10,6 +10,19 @@ These changes summarize what was added or updated since `v2.3.1`.
 
 ## New features
 
+- **`mads echo` / `mads top`.** Two new, purely read-only CLI subcommands for peeking at live traffic
+  without writing an agent or touching `mads.ini` -- the MADS analogue of `ros2 topic echo`/`rostopic echo`
+  and `htop`. `mads echo [topic ...]` subscribes as an ephemeral sink agent and pretty-prints each message
+  (topic, timestamp, size, rang-colored JSON, or a one-line blob summary), with `--raw` (exact bytes,
+  base64, for blobs), `--count N` (exit after N messages) and `--jsonl` (one compact JSON line per message,
+  for piping into `jq`). `mads top [topic ...]` is a live, redrawn-in-place table of active topics
+  (msg/s, bytes/s, last-seen age, last-payload sample), aggregated over a sliding window (`--window`,
+  default 5s) and redrawn every `--sample-rate` seconds (default 1s); press `q` or Ctrl-C to quit. Both
+  work with zero `mads.ini` setup by default (`--broker` points directly at the broker's subscribe
+  endpoint) or via the normal `-s/--settings` section-based path other `mads-*` executables use, and both
+  accept MQTT-style topic filters (`sensors/+/x`, `sensors/#`) via the P2 wildcard matcher --
+  `Agent::set_sub_topic()` already applies it end to end, so neither command needed any filtering logic of
+  its own. See [share/man/mads-echo.md](share/man/mads-echo.md), [share/man/mads-top.md](share/man/mads-top.md).
 - **`mads-federate` agent.** New agent that relays selected topics between two independent MADS networks, each with its own broker. It owns two ordinary agent connections ("side A" and "side B"), each configured via a normal `[name]` section in that network's own broker settings; whatever a side subscribes to via its `sub_topic` is forwarded to the other network. Only JSON messages are relayed (no blobs), and the `control`/`agent_event` topics are never forwarded, so remote-control commands and lifecycle events stay local. Relayed messages are tagged with the relay's id in a `mads_relay_path` field to prevent A→B→A loops. See [share/man/mads-federate.md](share/man/mads-federate.md).
 - **High-resolution loop pacing.** `Agent::loop()` now paces its internal timing in nanoseconds instead of milliseconds (existing millisecond-based code keeps compiling and behaving as before). Agents can set a `time_step_us` key in their settings section (wins over `time_step`) for microsecond-granularity periods, and opt into `enable_high_res_loop()` (or the `high_res_loop`/`spin_margin_us` settings keys) to busy-spin the tail of each interval instead of sleeping through it, trading CPU time for microsecond-accurate wake-up timing.
 - **`mads plugin --update` migration command.** C++ plugins can now be migrated in place to the current plugin protocol version instead of being rewritten by hand. It detects the plugin's current protocol from its `CMakeLists.txt`, chains the migration steps recorded in `share/plugin_migrations` up to the current protocol, bumps the pinned `GIT_TAG`, and rewrites affected method signatures (located structurally, so reformatted/multi-line declarations migrate correctly). Each modified file is saved as `*.bak`, and a change report plus manual follow-up checklist is printed; unless `--no-check`, the migrated plugin is then compiled so the compiler flags anything the rewrite could not handle. `--dry-run`, `--from`, and `--to` are also available. Rust plugins are unaffected (they track the `mads-plugin` crate version in `Cargo.toml`). See [share/man/mads-plugin.md](share/man/mads-plugin.md).
