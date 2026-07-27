@@ -1,0 +1,12 @@
+# Exercises forward-compatibility: unknown keys anywhere (a top-level
+# [director] table, a process table) must be ignored with a warning, never
+# fatal -- the "be liberal in what we accept" half of NEW_FEATURES.md's P5
+# parser-ownership decision, so a director.toml exported by a newer Director
+# GUI still loads.
+[director]
+sample_rate = 1.0
+some_future_gui_only_key = "ignored"
+
+[sink]
+command = "mads sink"
+some_future_key = 42

@@ -1,0 +1,23 @@
+# Exercises the new, additive `ready` key (silently ignorable by Director's
+# own parser -- see NEW_FEATURES.md P5 and director_config.cpp's top comment)
+# alongside a normal `after` chain.
+[broker]
+command = "mads broker"
+relaunch = true
+ready = "broker"
+
+[logger]
+command = "mads logger"
+after = "broker"
+relaunch = true
+ready = "delay:500ms"
+
+[api]
+command = "./bin/api_server --port 8080"
+after = "broker"
+ready = "port:8080"
+
+[watcher]
+command = "./bin/watch.sh"
+after = "api"
+ready = "log:^ready$"

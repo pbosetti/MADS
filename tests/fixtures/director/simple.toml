@@ -1,0 +1,4 @@
+# A single, dependency-free process. Mirrors the smallest possible valid
+# director.toml: one process section, no [director] table at all.
+[worker]
+command = "mads worker -s tcp://localhost:9092"
