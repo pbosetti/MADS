@@ -33,9 +33,8 @@ Author(s): Paolo Bosetti
 #include "../agent_app.hpp"
 #include "../bag.hpp"
 #include "../topic_match.hpp"
+#include "play_restamp.hpp"
 #include <cxxopts.hpp>
-#include <nlohmann/json.hpp>
-#include <snappy.h>
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -45,58 +44,6 @@ Author(s): Paolo Bosetti
 
 using namespace std;
 using namespace Mads;
-using json = nlohmann::json;
-
-namespace {
-
-// Best-effort --restamp rewrite; see file header for exactly what it does
-// and does not touch. Returns true if `parts` was modified in place.
-bool try_restamp(vector<string> &parts) {
-  if (parts.size() != 1)
-    return false; // extended header or blob (meta+bytes): out of scope
-
-  string decompressed;
-  const string *json_text = &parts[0];
-  bool was_compressed = false;
-  if (snappy::Uncompress(parts[0].data(), parts[0].size(), &decompressed)) {
-    json_text = &decompressed;
-    was_compressed = true;
-  }
-
-  json payload;
-  try {
-    payload = json::parse(*json_text);
-  } catch (...) {
-    return false; // not JSON: leave untouched
-  }
-  if (!payload.is_object())
-    return false;
-
-  auto now = chrono::system_clock::now();
-  bool touched = false;
-  if (payload.contains("timestamp")) {
-    payload["timestamp"]["$date"] = get_ISODate_time(now);
-    touched = true;
-  }
-  if (payload.contains("timecode")) {
-    payload["timecode"] = timecode(now, MADS_FPS);
-    touched = true;
-  }
-  if (!touched)
-    return false;
-
-  string dumped = payload.dump();
-  if (was_compressed) {
-    string recompressed;
-    snappy::Compress(dumped.data(), dumped.size(), &recompressed);
-    parts[0] = std::move(recompressed);
-  } else {
-    parts[0] = std::move(dumped);
-  }
-  return true;
-}
-
-} // namespace
 
 int main(int argc, char *argv[]) {
   AgentApp player(argv[0], SETTINGS_URI);
@@ -203,7 +150,7 @@ int main(int argc, char *argv[]) {
     prev_ts = rec.timestamp_ns;
 
     if (restamp)
-      try_restamp(rec.parts);
+      Mads::Play::try_restamp(rec.parts);
 
     player.publish_raw_message(rec.topic, rec.parts);
     ++published;
