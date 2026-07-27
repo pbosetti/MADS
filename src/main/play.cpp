@@ -20,13 +20,18 @@ possible.
 
 --restamp is a narrow, opt-in convenience built on top of the raw
 publish_raw_message() primitive (it does not change that primitive, which
-stays a pure byte passthrough): for a record whose payload is the single,
-optionally snappy-compressed JSON part Agent::publish() emits by default
-(no self-describing/extended header, not a blob), the recorded
-"timestamp"/"timecode" fields are replaced with fresh ones before
-republishing. Every other field, and every other frame shape (an extended
-MsgPack/self-describing header, or a blob's meta+bytes parts), is
-republished byte-for-byte unchanged.
+stays a pure byte passthrough): for a record whose payload is the legacy,
+header-less [topic][snappy(json)] frame -- the shape Agent::publish() emits
+whenever the payload ends up Snappy-compressed, unconditionally under
+Compression::Snappy or above ~256 bytes under the default Compression::Auto
+-- the recorded "timestamp"/"timecode" fields are replaced with fresh ones
+before republishing. Every other field, and every other frame shape (an
+uncompressed small JSON payload, which carries a self-describing header;
+MsgPack; or a blob's meta+bytes parts), is republished byte-for-byte
+unchanged. This is intentionally conservative: parsing the self-describing
+header format here would mean duplicating Agent::publish()'s internal wire
+framing outside of agent.cpp, which is not worth the fragility for a
+best-effort convenience flag.
 
 Author(s): Paolo Bosetti
 */

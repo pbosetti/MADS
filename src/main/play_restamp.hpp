@@ -1,11 +1,13 @@
 /*
  mads-play's --restamp helper.
 
- Rewrites the "timestamp"/"timecode" fields of a plain, default-format JSON
- record part (a single, optionally snappy-compressed JSON object -- the
- shape Agent::publish() emits by default) to fresh values, leaving every
- other field, and every other frame shape (an extended/self-describing
- header, or a blob's meta+bytes parts), byte-for-byte unchanged.
+ Rewrites the "timestamp"/"timecode" fields of a legacy, header-less
+ [topic][snappy(json)] record part (a single Snappy-compressed JSON
+ object -- the shape Agent::publish() emits whenever the payload ends up
+ Snappy-compressed, see agent.cpp's WireHeader comment) to fresh values,
+ leaving every other field, and every other frame shape (an uncompressed
+ JSON payload carrying a self-describing header, MsgPack, or a blob's
+ meta+bytes parts), byte-for-byte unchanged.
 
  Header-only so it is directly unit-testable (tests/test_bag_roundtrip.cpp)
  without linking src/main/play.cpp's main(); mirrors the precedent of
