@@ -154,6 +154,23 @@ Benchmarks use the bundled `perf_assess` source and `feedback`/compute sinks thr
 
 ---
 
+## Record & replay
+
+`mads-record` and `mads-play` capture live traffic to a bag file and play it back later — for regression tests, offline analysis, or reproducing a bug without the original hardware.
+
+```sh
+mads-record -o session.bag          # subscribes per sub_topic, writes a bag file
+mads-play -i session.bag            # republishes it, byte-for-byte
+mads bag info -f session.bag        # O(1) summary: record count, time span, CRC/index status
+mads bag export -f session.bag --format jsonl > session.jsonl
+```
+
+A bag file is a small, bespoke binary format (`src/bag.hpp`) — not MCAP — that stores each message's exact multi-part wire frame (topic + parts), so **JSON and binary blobs both round-trip byte-identical**, with no re-parsing or re-copying on the way through. This is powered by two new, purely additive `Agent` methods, `receive_raw_message()`/`publish_raw_message()`, that expose the raw frame without any JSON (de)serialization. A trailing index gives `mads bag info` O(1) access; if the recording process is killed before that index is written, the reader falls back to a linear scan that recovers every complete record and reports the file as truncated instead of failing.
+
+`mads-play` supports `--topics 'sensors/#'` (the same MQTT-style filter `sub_topic` uses), `--rate 2.0` to pace replay relative to the recorded gaps between messages, and `--restamp` to refresh timestamps on replay. See [share/man/mads-record.md](share/man/mads-record.md), [share/man/mads-play.md](share/man/mads-play.md), and [share/man/mads-bag.md](share/man/mads-bag.md).
+
+---
+
 ## Extending MADS
 
 ### 1) Plugins — the fast path
