@@ -11,67 +11,139 @@ These changes summarize what was added or updated since `v2.4.0`.
 
 ## New features
 
-- **`mads up` headless `director.toml` executor.** New `mads-up` command that runs the same
-  `director.toml` process plan used by `mads_director`'s interactive GUI, unattended -- develop an agent
-  set in the Director GUI, commit the resulting `director.toml`, then run it in CI, on an edge box, or
-  under `systemd Type=simple` with `mads up`. It parses/validates/expands the file itself (no GLFW/GUI
-  dependency), honouring Director's own `scale` expansion, `${PWD}`/`${ID}` templating and `after`
-  dependency ordering (a forest, with cycles rejected), plus a new additive, GUI-ignorable `ready = "broker"
-  | "port:<n>" | "log:<regex>" | "delay:<duration>"` key that gates starting a process's dependents on an
-  actual readiness signal instead of a fixed sleep. Processes are spawned via the vendored `reproc` library
-  in their own process group (POSIX: `setpgid`/`killpg`; Windows: `CREATE_NEW_PROCESS_GROUP`/
-  `CTRL_BREAK_EVENT`), so descendants are torn down too, not just the immediate child; `relaunch = true`
-  processes restart with exponential backoff (100ms-30s, capped further by `--max-restarts`).
-  `--until-exit <name>` runs until a named process exits and propagates its exit code (the CI primitive:
-  bring up broker + pipeline, run a test agent, exit); `--timeout`, `--grace`, `--no-shell` and `--dry-run`
-  (print the fully expanded plan without spawning anything) round out the flags. Foreground-only by design:
-  no daemonization, no PID file, no `mads down`. See [share/man/mads-up.md](share/man/mads-up.md).
-- **`mads doctor` health check.** New `mads-doctor` command, MADS's answer to `ros2 doctor`/`brew
-  doctor`: a single command that checks the things most likely to trip up the first hour of a new
-  deployment and reports each as `[PASS]`/`[WARN]`/`[FAIL]` with a one-line fix hint. It checks that
-  the settings file is found and parses as valid TOML; that the broker's settings endpoint is
-  reachable (reusing the same `Mads::probe_broker()` helper `mads up` uses); that every plugin declared via an `attachment`
-  key (or given explicitly with `--plugin`) resolves and dry-run loads through the same `pugg::Kernel`
-  path `mads-source`/`-filter`/`-sink` use, without ever calling `process()`/`get_output()`/
-  `load_data()`; that a loaded plugin's protocol matches the version pinned in
-  `share/plugin_deps.json`; that CURVE key files (when `--crypto` is given) exist and decode as valid
-  Z85 keys; and that the broker's configured frontend/backend/settings ports are not already bound
-  locally, to catch an already-running broker early. `--plan <director.toml>` delegates to the same
-  `src/director_config.hpp` parse/validate/expand pipeline `mads up --dry-run` uses and prints the
-  same kind of expanded-plan report, so a whole deployment can be sanity-checked before it is launched
-  for real. `--fix` scaffolds a missing settings file from the same template `mads ini` renders, and
-  only ever creates a missing file -- it never deletes or overwrites one. `--graph [file.dot]` renders
-  the settings file's declared pub/sub topology as Graphviz DOT text (to the given path, or stdout) --
-  one record-shaped node per agent section listing its `sub_topic` entries, one edge per matching
-  `pub_topic`/`sub_topic` pair (via the same `Mads::topic_match()` matcher behind the MQTT-style wildcards below, so the graph is faithful to
-  `Agent::connect_sub()`'s exact runtime semantics), nodes colored by inferred role (source/filter/sink),
-  and a dashed contour on any agent with a dangling topic -- a `pub_topic` nobody subscribes to, or a
-  `sub_topic` nothing ever publishes to. No new dependency: `mads doctor` only ever writes DOT text,
+- **`mads up` headless `director.toml` executor.** New `mads-up` command that
+  runs the same `director.toml` process plan used by `mads_director`'s
+  interactive GUI, unattended -- develop an agent set in the Director GUI,
+  commit the resulting `director.toml`, then run it in CI, on an edge box, or
+  under `systemd Type=simple` with `mads up`. It parses/validates/expands the
+  file itself (no GLFW/GUI dependency), honouring Director's own `scale`
+  expansion, `${PWD}`/`${ID}` templating and `after` dependency ordering (a
+  forest, with cycles rejected), plus a new additive, GUI-ignorable `ready =
+  "broker" | "port:<n>" | "log:<regex>" | "delay:<duration>"` key that gates
+  starting a process's dependents on an actual readiness signal instead of a
+  fixed sleep. Processes are spawned via the vendored `reproc` library in their
+  own process group (POSIX: `setpgid`/`killpg`; Windows:
+  `CREATE_NEW_PROCESS_GROUP`/ `CTRL_BREAK_EVENT`), so descendants are torn down
+  too, not just the immediate child; `relaunch = true` processes restart with
+  exponential backoff (100ms-30s, capped further by `--max-restarts`).
+  `--until-exit <name>` runs until a named process exits and propagates its exit
+  code (the CI primitive: bring up broker + pipeline, run a test agent, exit);
+  `--timeout`, `--grace`, `--no-shell` and `--dry-run` (print the fully expanded
+  plan without spawning anything) round out the flags. Foreground-only by
+  design: no daemonization, no PID file, no `mads down`. See
+  [share/man/mads-up.md](share/man/mads-up.md).
+- **`mads doctor` health check.** New `mads-doctor` command, MADS's answer to
+  `ros2 doctor`/`brew doctor`: a single command that checks the things most
+  likely to trip up the first hour of a new deployment and reports each as
+  `[PASS]`/`[WARN]`/`[FAIL]` with a one-line fix hint. It checks that the
+  settings file is found and parses as valid TOML; that the broker's settings
+  endpoint is reachable (reusing the same `Mads::probe_broker()` helper `mads
+  up` uses); that every plugin declared via an `attachment` key (or given
+  explicitly with `--plugin`) resolves and dry-run loads through the same
+  `pugg::Kernel` path `mads-source`/`-filter`/`-sink` use, without ever calling
+  `process()`/`get_output()`/ `load_data()`; that a loaded plugin's protocol
+  matches the version pinned in `share/plugin_deps.json`; that CURVE key files
+  (when `--crypto` is given) exist and decode as valid Z85 keys; and that the
+  broker's configured frontend/backend/settings ports are not already bound
+  locally, to catch an already-running broker early. `--plan <director.toml>`
+  delegates to the same `src/director_config.hpp` parse/validate/expand pipeline
+  `mads up --dry-run` uses and prints the same kind of expanded-plan report, so
+  a whole deployment can be sanity-checked before it is launched for real.
+  `--fix` scaffolds a missing settings file from the same template `mads ini`
+  renders, and only ever creates a missing file -- it never deletes or
+  overwrites one. `--graph [file.dot]` renders the settings file's declared
+  pub/sub topology as Graphviz DOT text (to the given path, or stdout) -- one
+  record-shaped node per agent section listing its `sub_topic` entries, one edge
+  per matching `pub_topic`/`sub_topic` pair (via the same `Mads::topic_match()`
+  matcher behind the MQTT-style wildcards below, so the graph is faithful to
+  `Agent::connect_sub()`'s exact runtime semantics), nodes colored by inferred
+  role (source/filter/sink), and a dashed contour on any agent with a dangling
+  topic -- a `pub_topic` nobody subscribes to, or a `sub_topic` nothing ever
+  publishes to. No new dependency: `mads doctor` only ever writes DOT text,
   never shells out to `dot`. See
   [share/man/mads-doctor.md](share/man/mads-doctor.md).
-- **`mads echo` / `mads top`.** Two new, purely read-only CLI subcommands for peeking at live traffic
-  without writing an agent or touching `mads.ini` -- the MADS analogue of `ros2 topic echo`/`rostopic echo`
-  and `htop`. `mads echo [topic ...]` subscribes as an ephemeral sink agent and pretty-prints each message
-  (topic, timestamp, size, rang-colored JSON, or a one-line blob summary), with `--raw` (exact bytes,
-  base64, for blobs), `--count N` (exit after N messages) and `--jsonl` (one compact JSON line per message,
-  for piping into `jq`). `mads top [topic ...]` is a live, redrawn-in-place table of active topics
-  (msg/s, bytes/s, last-seen age, last-payload sample), aggregated over a sliding window (`--window`,
-  default 5s) and redrawn every `--sample-rate` seconds (default 1s); press `q` or Ctrl-C to quit. Both
-  work with zero `mads.ini` setup by default (`--broker` points directly at the broker's subscribe
-  endpoint) or via the normal `-s/--settings` section-based path other `mads-*` executables use, and both
-  accept MQTT-style topic filters (`sensors/+/x`, `sensors/#`) via the wildcard matcher below --
-  `Agent::set_sub_topic()` already applies it end to end, so neither command needed any filtering logic of
-  its own. See [share/man/mads-echo.md](share/man/mads-echo.md), [share/man/mads-top.md](share/man/mads-top.md).
-- **MQTT-style topic wildcards.** `sub_topic` entries can now use `+` (exactly one topic level) and `#` (this level and everything below it, including the level it replaces, e.g. `sensors/#` also matches the bare topic `sensors`; only legal as the final token) alongside plain literal topics. This is non-disruptive by construction: a `sub_topic` entry with no wildcard character subscribes exactly as before (identical ZMQ `SUBSCRIBE` frame, zero added overhead); only entries containing `+`/`#` take a two-stage path -- the broader literal prefix is subscribed at the ZMQ layer, then `Mads::topic_match()` filters each arriving message before it reaches `receive()`/callbacks, silently dropping non-matches. The matcher (`Mads::topic_match()`/`Mads::literal_prefix()`, `src/topic_match.hpp`) is a pure, dependency-free function, independently unit-tested. See the "Settings model" section of [CONTEXT.md](CONTEXT.md).
-- **`mads-record`/`mads-play`/`mads bag`: bag record & replay.** `mads-record` subscribes per `sub_topic` (MQTT-style filters) and writes every message to a bespoke binary bag file (`src/bag.hpp`) that stores the exact multi-part wire frame byte-for-byte, so JSON and binary blob messages both round-trip identically. A trailing index/footer gives O(1) `mads bag info` and fast seeking; if the writer is killed before it can write that footer, the reader falls back to a linear scan that recovers the complete valid prefix and reports it as truncated, rather than failing outright. Per-record CRC32 is on by default. `mads-play` reads a bag and republishes it via two new, purely additive `Agent` methods -- `receive_raw_message()`/`publish_raw_message()` -- that expose the raw topic+parts frame with no JSON (de)serialization, so replay never re-parses JSON or re-copies blob bytes; `--topics` filters the replayed subset via the same `Mads::topic_match()` matcher, `--rate` paces replay using the recorded gaps between timestamps, and `--restamp` optionally rewrites the timestamp/timecode fields of plain compressed JSON frames to "now". `mads bag info`/`mads bag export --format jsonl` inspect a bag file directly (`--format mcap` is deferred as a possible future export target, not implemented here). See [share/man/mads-record.md](share/man/mads-record.md), [share/man/mads-play.md](share/man/mads-play.md), [share/man/mads-bag.md](share/man/mads-bag.md).
+- **`mads echo` / `mads top`.** Two new, purely read-only CLI subcommands for
+  peeking at live traffic without writing an agent or touching `mads.ini` -- the
+  MADS analogue of `ros2 topic echo`/`rostopic echo` and `htop`. `mads echo
+  [topic ...]` subscribes as an ephemeral sink agent and pretty-prints each
+  message (topic, timestamp, size, rang-colored JSON, or a one-line blob
+  summary), with `--raw` (exact bytes, base64, for blobs), `--count N` (exit
+  after N messages) and `--jsonl` (one compact JSON line per message, for piping
+  into `jq`). `mads top [topic ...]` is a live, redrawn-in-place table of active
+  topics (msg/s, bytes/s, last-seen age, last-payload sample), aggregated over a
+  sliding window (`--window`, default 5s) and redrawn every `--sample-rate`
+  seconds (default 1s); press `q` or Ctrl-C to quit. Both work with zero
+  `mads.ini` setup by default (`--broker` points directly at the broker's
+  subscribe endpoint) or via the normal `-s/--settings` section-based path other
+  `mads-*` executables use, and both accept MQTT-style topic filters
+  (`sensors/+/x`, `sensors/#`) via the wildcard matcher below --
+  `Agent::set_sub_topic()` already applies it end to end, so neither command
+  needed any filtering logic of its own. See
+  [share/man/mads-echo.md](share/man/mads-echo.md),
+  [share/man/mads-top.md](share/man/mads-top.md).
+- **MQTT-style topic wildcards.** `sub_topic` entries can now use `+` (exactly
+  one topic level) and `#` (this level and everything below it, including the
+  level it replaces, e.g. `sensors/#` also matches the bare topic `sensors`;
+  only legal as the final token) alongside plain literal topics. This is
+  non-disruptive by construction: a `sub_topic` entry with no wildcard character
+  subscribes exactly as before (identical ZMQ `SUBSCRIBE` frame, zero added
+  overhead); only entries containing `+`/`#` take a two-stage path -- the
+  broader literal prefix is subscribed at the ZMQ layer, then
+  `Mads::topic_match()` filters each arriving message before it reaches
+  `receive()`/callbacks, silently dropping non-matches. The matcher
+  (`Mads::topic_match()`/`Mads::literal_prefix()`, `src/topic_match.hpp`) is a
+  pure, dependency-free function, independently unit-tested. See the "Settings
+  model" section of [CONTEXT.md](CONTEXT.md).
+- **`mads-record`/`mads-play`/`mads bag`: bag record & replay.** `mads-record`
+  subscribes per `sub_topic` (MQTT-style filters) and writes every message to a
+  bespoke binary bag file (`src/bag.hpp`) that stores the exact multi-part wire
+  frame byte-for-byte, so JSON and binary blob messages both round-trip
+  identically. A trailing index/footer gives O(1) `mads bag info` and fast
+  seeking; if the writer is killed before it can write that footer, the reader
+  falls back to a linear scan that recovers the complete valid prefix and
+  reports it as truncated, rather than failing outright. Per-record CRC32 is on
+  by default. `mads-play` reads a bag and republishes it via two new, purely
+  additive `Agent` methods -- `receive_raw_message()`/`publish_raw_message()` --
+  that expose the raw topic+parts frame with no JSON (de)serialization, so
+  replay never re-parses JSON or re-copies blob bytes; `--topics` filters the
+  replayed subset via the same `Mads::topic_match()` matcher, `--rate` paces
+  replay using the recorded gaps between timestamps, and `--restamp` optionally
+  rewrites the timestamp/timecode fields of plain compressed JSON frames to
+  "now". `mads bag info`/`mads bag export --format jsonl` inspect a bag file
+  directly (`--format mcap` is deferred as a possible future export target, not
+  implemented here). See [share/man/mads-record.md](share/man/mads-record.md),
+  [share/man/mads-play.md](share/man/mads-play.md),
+  [share/man/mads-bag.md](share/man/mads-bag.md).
 
 ## Bug fixes
 
-- **`Mads::Runtime::process_running()` was silently disconnected across DLL boundaries on Windows.** The process-wide run flag was a function-local `static` defined inline in `mads.hpp.in`; on Windows, an inline function-local static gets a separate instance in every DLL/EXE that includes the header (no automatic weak-symbol merging across PE images, the way ELF has). A caller-side `stop_process()` invoked from outside `MadsCore.dll` would then silently target a disconnected flag that `Agent::loop()` (compiled inside the DLL) never observed, so a process-wide stop never actually stopped anything on Windows. Fixed by defining it out-of-line, once, in the new `src/mads.cpp`, compiled into `MadsCore` itself. Also fixed as part of the same pass: a system-wide MADS install could leave a stale `MadsCore.dll` on `PATH` that the Windows loader picked up ahead of a freshly built one, failing test runs with `STATUS_ENTRYPOINT_NOT_FOUND` -- the test suite now prepends the freshly built DLL's directory to `PATH` for each child test process via a small wrapper script (`tests/win_test_wrapper.ps1`, hooked in through Catch2's `CROSSCOMPILING_EMULATOR`).
+- **`Mads::Runtime::process_running()` was silently disconnected across DLL
+  boundaries on Windows.** The process-wide run flag was a function-local
+  `static` defined inline in `mads.hpp.in`; on Windows, an inline function-local
+  static gets a separate instance in every DLL/EXE that includes the header (no
+  automatic weak-symbol merging across PE images, the way ELF has). A
+  caller-side `stop_process()` invoked from outside `MadsCore.dll` would then
+  silently target a disconnected flag that `Agent::loop()` (compiled inside the
+  DLL) never observed, so a process-wide stop never actually stopped anything on
+  Windows. Fixed by defining it out-of-line, once, in the new `src/mads.cpp`,
+  compiled into `MadsCore` itself. Also fixed as part of the same pass: a
+  system-wide MADS install could leave a stale `MadsCore.dll` on `PATH` that the
+  Windows loader picked up ahead of a freshly built one, failing test runs with
+  `STATUS_ENTRYPOINT_NOT_FOUND` --- the test suite now prepends the freshly built
+  DLL's directory to `PATH` for each child test process via a small wrapper
+  script (`tests/win_test_wrapper.ps1`, hooked in through Catch2's
+  `CROSSCOMPILING_EMULATOR`).
 
 ## Note
 
-- **The MQTT bridge agent proposed alongside these features is intentionally not part of this release.** A working, tested implementation exists on the `feat/P6` branch (gated behind a new, off-by-default `MADS_ENABLE_MQTT` CMake option), but it is being held back and evaluated for extraction into its own repository -- an agent linking against the installed `libMadsCore` SDK, the same way `mads_director` already lives outside this monorepo -- rather than growing MADS core's vendored footprint for an optional dependency. See `NEW_FEATURES.md` for the full rationale.
+- **The MQTT bridge agent currently on branch `feat/P6` is intentionally not
+  part of this release.** A working, tested implementation exists on the
+  `feat/P6` branch (gated behind a new, off-by-default `MADS_ENABLE_MQTT` CMake
+  option), but it is being held back and evaluated for extraction into its own
+  repository -- an agent linking against the installed `libMadsCore` SDK, the
+  same way `mads_director` already lives outside this monorepo -- rather than
+  growing MADS core's vendored footprint for an optional dependency. See
+  `NEW_FEATURES.md` for the full rationale.
 
 ---
 
@@ -87,26 +159,120 @@ These changes summarize what was added or updated since `v2.3.1`.
 
 ## New features
 
-- **`mads-federate` agent.** New agent that relays selected topics between two independent MADS networks, each with its own broker. It owns two ordinary agent connections ("side A" and "side B"), each configured via a normal `[name]` section in that network's own broker settings; whatever a side subscribes to via its `sub_topic` is forwarded to the other network. Only JSON messages are relayed (no blobs), and the `control`/`agent_event` topics are never forwarded, so remote-control commands and lifecycle events stay local. Relayed messages are tagged with the relay's id in a `mads_relay_path` field to prevent A→B→A loops. See [share/man/mads-federate.md](share/man/mads-federate.md).
-- **High-resolution loop pacing.** `Agent::loop()` now paces its internal timing in nanoseconds instead of milliseconds (existing millisecond-based code keeps compiling and behaving as before). Agents can set a `time_step_us` key in their settings section (wins over `time_step`) for microsecond-granularity periods, and opt into `enable_high_res_loop()` (or the `high_res_loop`/`spin_margin_us` settings keys) to busy-spin the tail of each interval instead of sleeping through it, trading CPU time for microsecond-accurate wake-up timing.
-- **`mads plugin --update` migration command.** C++ plugins can now be migrated in place to the current plugin protocol version instead of being rewritten by hand. It detects the plugin's current protocol from its `CMakeLists.txt`, chains the migration steps recorded in `share/plugin_migrations` up to the current protocol, bumps the pinned `GIT_TAG`, and rewrites affected method signatures (located structurally, so reformatted/multi-line declarations migrate correctly). Each modified file is saved as `*.bak`, and a change report plus manual follow-up checklist is printed; unless `--no-check`, the migrated plugin is then compiled so the compiler flags anything the rewrite could not handle. `--dry-run`, `--from`, and `--to` are also available. Rust plugins are unaffected (they track the `mads-plugin` crate version in `Cargo.toml`). See [share/man/mads-plugin.md](share/man/mads-plugin.md).
-- **`plugin_deps.json` dependency manifest.** Scaffolded C++ plugins now pin their dependency versions (plugin protocol, `mads_plugin`/`pugg` git tags, bundled `nlohmann::json` version) from a single `share/plugin_deps.json` file, which also supplies the default target protocol for `mads plugin --update`, instead of being hard-coded into the CMake template.
-- **Run-state control from C and Python.** The C API gained `agent_stop()`, `agent_running()`, `mads_stop_process()`, and `mads_process_running()`, backed by a new public `Agent::running()` accessor (the exact condition `Agent::loop()` checks). The Python wrapper mirrors them as `Agent.stop()`, the `Agent.running` property, and module-level `stop_process()`/`process_running()`, so C and Python agents can drive and end receive loops cleanly instead of relying on signals.
-- **Stoppable settings watcher.** `Mads::Watcher::watch()` can now be ended with `stop()` (or by a process-wide stop request) instead of looping forever; all platform waits are bounded so a stop is noticed within about a second. The broker now joins its settings-watcher thread on shutdown instead of leaking it.
-- **`Mads::Runtime`.** Agent run state (the "keep going" flag consulted by `Agent::loop()`, the last-known-value drain thread, and the threaded remote control) is now owned by a `Mads::Runtime` object instead of a single process-global flag. Each `Agent` gets its own `Runtime` by default, so stopping or destroying one agent no longer stops the loops of other agents hosted in the same process, and a disconnected agent can reconnect and loop again. Agents that should stop together can share a `Runtime` via `Agent::set_runtime()`; `Mads::Runtime::stop_process()` (used by the SIGINT/SIGTERM handlers and the remote `shutdown`/`restart` commands) still stops every agent in the process. The previous `Mads::running` flag remains available as a `[[deprecated]]` alias of the process-wide state, so existing code keeps compiling and behaving as before, with a compile-time warning pointing at the replacement API. See [RUNTIME.md](RUNTIME.md).
-- **Unit test suite and code coverage.** MADS gained an in-tree Catch2-based unit test suite (`tests/`, built with `-DMADS_BUILD_TESTS=ON`) covering the core library — settings loading, the broker request protocol, pub/sub and the wire codec over loopback ZeroMQ, the C ABI, CURVE key handling, and the plugin migration engine — with no external broker, database, or network access required. A `-DMADS_COVERAGE=ON` CMake option instruments the build for `gcovr`/lcov-style reports, and a new GitHub Actions workflow (`.github/workflows/coverage.yml`) runs the suite and uploads results to [codecov.io](https://codecov.io/gh/pbosetti/MADS) on every push.
+- **`mads-federate` agent.** New agent that relays selected topics between two
+  independent MADS networks, each with its own broker. It owns two ordinary
+  agent connections ("side A" and "side B"), each configured via a normal
+  `[name]` section in that network's own broker settings; whatever a side
+  subscribes to via its `sub_topic` is forwarded to the other network. Only JSON
+  messages are relayed (no blobs), and the `control`/`agent_event` topics are
+  never forwarded, so remote-control commands and lifecycle events stay local.
+  Relayed messages are tagged with the relay's id in a `mads_relay_path` field
+  to prevent A→B→A loops. See
+  [share/man/mads-federate.md](share/man/mads-federate.md).
+- **High-resolution loop pacing.** `Agent::loop()` now paces its internal timing
+  in nanoseconds instead of milliseconds (existing millisecond-based code keeps
+  compiling and behaving as before). Agents can set a `time_step_us` key in
+  their settings section (wins over `time_step`) for microsecond-granularity
+  periods, and opt into `enable_high_res_loop()` (or the
+  `high_res_loop`/`spin_margin_us` settings keys) to busy-spin the tail of each
+  interval instead of sleeping through it, trading CPU time for
+  microsecond-accurate wake-up timing.
+- **`mads plugin --update` migration command.** C++ plugins can now be migrated
+  in place to the current plugin protocol version instead of being rewritten by
+  hand. It detects the plugin's current protocol from its `CMakeLists.txt`,
+  chains the migration steps recorded in `share/plugin_migrations` up to the
+  current protocol, bumps the pinned `GIT_TAG`, and rewrites affected method
+  signatures (located structurally, so reformatted/multi-line declarations
+  migrate correctly). Each modified file is saved as `*.bak`, and a change
+  report plus manual follow-up checklist is printed; unless `--no-check`, the
+  migrated plugin is then compiled so the compiler flags anything the rewrite
+  could not handle. `--dry-run`, `--from`, and `--to` are also available. Rust
+  plugins are unaffected (they track the `mads-plugin` crate version in
+  `Cargo.toml`). See [share/man/mads-plugin.md](share/man/mads-plugin.md).
+- **`plugin_deps.json` dependency manifest.** Scaffolded C++ plugins now pin
+  their dependency versions (plugin protocol, `mads_plugin`/`pugg` git tags,
+  bundled `nlohmann::json` version) from a single `share/plugin_deps.json` file,
+  which also supplies the default target protocol for `mads plugin --update`,
+  instead of being hard-coded into the CMake template.
+- **Run-state control from C and Python.** The C API gained `agent_stop()`,
+  `agent_running()`, `mads_stop_process()`, and `mads_process_running()`, backed
+  by a new public `Agent::running()` accessor (the exact condition
+  `Agent::loop()` checks). The Python wrapper mirrors them as `Agent.stop()`,
+  the `Agent.running` property, and module-level
+  `stop_process()`/`process_running()`, so C and Python agents can drive and end
+  receive loops cleanly instead of relying on signals.
+- **Stoppable settings watcher.** `Mads::Watcher::watch()` can now be ended with
+  `stop()` (or by a process-wide stop request) instead of looping forever; all
+  platform waits are bounded so a stop is noticed within about a second. The
+  broker now joins its settings-watcher thread on shutdown instead of leaking
+  it.
+- **`Mads::Runtime`.** Agent run state (the "keep going" flag consulted by
+  `Agent::loop()`, the last-known-value drain thread, and the threaded remote
+  control) is now owned by a `Mads::Runtime` object instead of a single
+  process-global flag. Each `Agent` gets its own `Runtime` by default, so
+  stopping or destroying one agent no longer stops the loops of other agents
+  hosted in the same process, and a disconnected agent can reconnect and loop
+  again. Agents that should stop together can share a `Runtime` via
+  `Agent::set_runtime()`; `Mads::Runtime::stop_process()` (used by the
+  SIGINT/SIGTERM handlers and the remote `shutdown`/`restart` commands) still
+  stops every agent in the process. The previous `Mads::running` flag remains
+  available as a `[[deprecated]]` alias of the process-wide state, so existing
+  code keeps compiling and behaving as before, with a compile-time warning
+  pointing at the replacement API. See [RUNTIME.md](RUNTIME.md).
+- **Unit test suite and code coverage.** MADS gained an in-tree Catch2-based
+  unit test suite (`tests/`, built with `-DMADS_BUILD_TESTS=ON`) covering the
+  core library — settings loading, the broker request protocol, pub/sub and the
+  wire codec over loopback ZeroMQ, the C ABI, CURVE key handling, and the plugin
+  migration engine — with no external broker, database, or network access
+  required. A `-DMADS_COVERAGE=ON` CMake option instruments the build for
+  `gcovr`/lcov-style reports, and a new GitHub Actions workflow
+  (`.github/workflows/coverage.yml`) runs the suite and uploads results to
+  [codecov.io](https://codecov.io/gh/pbosetti/MADS) on every push.
 
 ## Improvements
 
-- **Updated to `mads_plugin` v2.4-P8 (protocol P8) and `pugg` 1.2.0.** Plugin registration is simplified: the per-type `INSTALL_SOURCE_DRIVER`/`INSTALL_FILTER_DRIVER`/`INSTALL_SINK_DRIVER` macros are replaced by a single type-deducing `MADS_REGISTER_PLUGINS(klass, ...)` macro that can register several plugins from one library. Plugin child-class method signatures (`kind`/`load_data`/`process`/`get_output`/`set_params`/`info`) are unchanged from P7. The generated driver's `create()` now returns a `std::unique_ptr` rather than a raw pointer. A migration step (`P7-P8.json`) is provided for `mads plugin --update`.
-- **More robust `GIT_TAG` rewriting during plugin migration.** The CMake `GIT_TAG` bump used by `mads plugin --update` no longer relies on a single fragile regex spanning the whole `FetchContent` block (which could match a tag mentioned in a comment, or mis-substitute a replacement value starting with a digit). It now locates the block header and then tokenizes it with a small CMake-aware scanner that honours `#` comments, quoted arguments, and nested parentheses, replacing exactly the `GIT_TAG` value token by position.
-- **gv2fsm updated to v2.0.0.** The bundled finite-state-machine generator is updated to its latest release.
+- **Updated to `mads_plugin` v2.4-P8 (protocol P8) and `pugg` 1.2.0.** Plugin
+  registration is simplified: the per-type
+  `INSTALL_SOURCE_DRIVER`/`INSTALL_FILTER_DRIVER`/`INSTALL_SINK_DRIVER` macros
+  are replaced by a single type-deducing `MADS_REGISTER_PLUGINS(klass, ...)`
+  macro that can register several plugins from one library. Plugin child-class
+  method signatures
+  (`kind`/`load_data`/`process`/`get_output`/`set_params`/`info`) are unchanged
+  from P7. The generated driver's `create()` now returns a `std::unique_ptr`
+  rather than a raw pointer. A migration step (`P7-P8.json`) is provided for
+  `mads plugin --update`.
+- **More robust `GIT_TAG` rewriting during plugin migration.** The CMake
+  `GIT_TAG` bump used by `mads plugin --update` no longer relies on a single
+  fragile regex spanning the whole `FetchContent` block (which could match a tag
+  mentioned in a comment, or mis-substitute a replacement value starting with a
+  digit). It now locates the block header and then tokenizes it with a small
+  CMake-aware scanner that honours `#` comments, quoted arguments, and nested
+  parentheses, replacing exactly the `GIT_TAG` value token by position.
+- **gv2fsm updated to v2.0.0.** The bundled finite-state-machine generator is
+  updated to its latest release.
 
 ## Bug fixes
 
-- **Startup events could crash short-lived agents.** `Agent::register_event(event_type::startup)` published from a detached thread that slept 500 ms while holding a raw pointer to the agent; destroying the agent within that window was a use-after-free (any events-enabled `AgentApp` that exits quickly). The thread is now owned by the agent, wakes early on shutdown/disconnect, and is joined while the sockets are still open. Sends on the publisher socket are also serialized with a mutex, closing a pre-existing data race between the delayed event thread and the owner thread (ZeroMQ sockets are not thread-safe).
-- **`Agent::query_broker()` could hang forever on shutdown.** The REQ socket used to fetch settings from a broker had no linger timeout; if the broker was unreachable, a queued but undelivered request kept the ZeroMQ context alive and `Agent::shutdown()` blocked indefinitely in context termination. The socket now sets `linger = 0`.
-- **C API CURVE key setters could crash instead of returning an error.** `agent_set_client_public_key`/`agent_set_client_secret_key`/`agent_set_server_public_key` guarded against being called before `agent_setup_crypto()` by checking the address of the internal `CurveAuth` pointer, which is never null; calling any of them too early dereferenced a null `CurveAuth` and crashed the process instead of returning `-1` as documented.
+- **Startup events could crash short-lived agents.**
+  `Agent::register_event(event_type::startup)` published from a detached thread
+  that slept 500 ms while holding a raw pointer to the agent; destroying the
+  agent within that window was a use-after-free (any events-enabled `AgentApp`
+  that exits quickly). The thread is now owned by the agent, wakes early on
+  shutdown/disconnect, and is joined while the sockets are still open. Sends on
+  the publisher socket are also serialized with a mutex, closing a pre-existing
+  data race between the delayed event thread and the owner thread (ZeroMQ
+  sockets are not thread-safe).
+- **`Agent::query_broker()` could hang forever on shutdown.** The REQ socket
+  used to fetch settings from a broker had no linger timeout; if the broker was
+  unreachable, a queued but undelivered request kept the ZeroMQ context alive
+  and `Agent::shutdown()` blocked indefinitely in context termination. The
+  socket now sets `linger = 0`.
+- **C API CURVE key setters could crash instead of returning an error.**
+  `agent_set_client_public_key`/`agent_set_client_secret_key`/`agent_set_server_public_key`
+  guarded against being called before `agent_setup_crypto()` by checking the
+  address of the internal `CurveAuth` pointer, which is never null; calling any
+  of them too early dereferenced a null `CurveAuth` and crashed the process
+  instead of returning `-1` as documented.
 
 ---
 
