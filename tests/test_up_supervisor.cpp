@@ -79,14 +79,30 @@ std::vector<std::string> read_lines(const fs::path &path) {
 // ---------------------------------------------------------------------------
 
 TEST_CASE("run() starts processes in after-order", "[up_supervisor]") {
+  // Absent an explicit `ready` key, `after`-order only guarantees *start*
+  // order, not *completion* order (see up_supervisor.cpp:593-594: wait_ready()
+  // is only invoked when a process configures `ready`). Since these are
+  // trivial, near-instant commands, asserting completion order via the shared
+  // trace file needs `a`/`b` to actually gate their dependent's start -- a
+  // short `delay` ready (well over the time an `echo ... >> file; exit 0`
+  // takes) makes the intended order deterministic instead of racy.
   auto trace = scratch_file("order");
   fs::remove(trace);
 
-  std::vector<Mads::ProcessConfig> procs{
-      make_proc("a", append_line_cmd(trace, "a") + "; exit 0"),
-      make_proc("b", append_line_cmd(trace, "b") + "; exit 0", {"a"}),
-      make_proc("c", append_line_cmd(trace, "c") + "; exit 0", {"b"}),
-  };
+  Mads::ReadySpec quick_delay;
+  quick_delay.kind = Mads::ReadyKind::Delay;
+  quick_delay.delay = 100ms;
+
+  Mads::ProcessConfig proc_a =
+      make_proc("a", append_line_cmd(trace, "a") + "; exit 0");
+  proc_a.ready = quick_delay;
+  Mads::ProcessConfig proc_b =
+      make_proc("b", append_line_cmd(trace, "b") + "; exit 0", {"a"});
+  proc_b.ready = quick_delay;
+  Mads::ProcessConfig proc_c =
+      make_proc("c", append_line_cmd(trace, "c") + "; exit 0", {"b"});
+
+  std::vector<Mads::ProcessConfig> procs{proc_a, proc_b, proc_c};
 
   Mads::UpOptions options;
   options.until_exit = "c"; // run() returns once the last one exits

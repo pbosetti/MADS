@@ -1,12 +1,10 @@
-#include "broker_probe.hpp"
-
-#include "mads.hpp"
-
-#include <zmqpp/zmqpp.hpp>
-
-#include <algorithm>
-#include <thread>
-
+// Windows networking headers must be included before anything else in this
+// translation unit (including "mads.hpp", which pulls in Logger and -- when
+// MADS_HAS_MONGOCXX is defined -- the Mongo C++ driver's own transitive
+// <windows.h>). Including <winsock2.h>/<ws2tcpip.h> after any of that risks
+// them landing after a plain <windows.h> has already dragged in the legacy
+// <winsock.h>, which corrupts later Windows-only zmqpp headers in ways that
+// surface as unrelated parse errors deep inside zmqpp itself.
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -23,6 +21,15 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
+
+#include "broker_probe.hpp"
+
+#include "mads.hpp"
+
+#include <zmqpp/zmqpp.hpp>
+
+#include <algorithm>
+#include <thread>
 
 namespace Mads {
 
