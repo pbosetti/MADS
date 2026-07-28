@@ -25,6 +25,29 @@ These changes summarize what was added or updated since `v2.3.1`.
   bring up broker + pipeline, run a test agent, exit); `--timeout`, `--grace`, `--no-shell` and `--dry-run`
   (print the fully expanded plan without spawning anything) round out the flags. Foreground-only by design:
   no daemonization, no PID file, no `mads down`. See [share/man/mads-up.md](share/man/mads-up.md).
+- **`mads doctor` health check.** New `mads-doctor` command, MADS's answer to `ros2 doctor`/`brew
+  doctor`: a single command that checks the things most likely to trip up the first hour of a new
+  deployment and reports each as `[PASS]`/`[WARN]`/`[FAIL]` with a one-line fix hint. It checks that
+  the settings file is found and parses as valid TOML; that the broker's settings endpoint is
+  reachable (reusing `Mads::probe_broker()` from P5); that every plugin declared via an `attachment`
+  key (or given explicitly with `--plugin`) resolves and dry-run loads through the same `pugg::Kernel`
+  path `mads-source`/`-filter`/`-sink` use, without ever calling `process()`/`get_output()`/
+  `load_data()`; that a loaded plugin's protocol matches the version pinned in
+  `share/plugin_deps.json`; that CURVE key files (when `--crypto` is given) exist and decode as valid
+  Z85 keys; and that the broker's configured frontend/backend/settings ports are not already bound
+  locally, to catch an already-running broker early. `--plan <director.toml>` delegates to the same
+  `src/director_config.hpp` parse/validate/expand pipeline `mads up --dry-run` uses and prints the
+  same kind of expanded-plan report, so a whole deployment can be sanity-checked before it is launched
+  for real. `--fix` scaffolds a missing settings file from the same template `mads ini` renders, and
+  only ever creates a missing file -- it never deletes or overwrites one. `--graph [file.dot]` renders
+  the settings file's declared pub/sub topology as Graphviz DOT text (to the given path, or stdout) --
+  one record-shaped node per agent section listing its `sub_topic` entries, one edge per matching
+  `pub_topic`/`sub_topic` pair (via P2's `Mads::topic_match()`, so the graph is faithful to
+  `Agent::connect_sub()`'s exact runtime semantics), nodes colored by inferred role (source/filter/sink),
+  and a dashed contour on any agent with a dangling topic -- a `pub_topic` nobody subscribes to, or a
+  `sub_topic` nothing ever publishes to. No new dependency: `mads doctor` only ever writes DOT text,
+  never shells out to `dot`. See
+  [share/man/mads-doctor.md](share/man/mads-doctor.md).
 - **`mads-federate` agent.** New agent that relays selected topics between two independent MADS networks, each with its own broker. It owns two ordinary agent connections ("side A" and "side B"), each configured via a normal `[name]` section in that network's own broker settings; whatever a side subscribes to via its `sub_topic` is forwarded to the other network. Only JSON messages are relayed (no blobs), and the `control`/`agent_event` topics are never forwarded, so remote-control commands and lifecycle events stay local. Relayed messages are tagged with the relay's id in a `mads_relay_path` field to prevent A→B→A loops. See [share/man/mads-federate.md](share/man/mads-federate.md).
 - **High-resolution loop pacing.** `Agent::loop()` now paces its internal timing in nanoseconds instead of milliseconds (existing millisecond-based code keeps compiling and behaving as before). Agents can set a `time_step_us` key in their settings section (wins over `time_step`) for microsecond-granularity periods, and opt into `enable_high_res_loop()` (or the `high_res_loop`/`spin_margin_us` settings keys) to busy-spin the tail of each interval instead of sleeping through it, trading CPU time for microsecond-accurate wake-up timing.
 - **`mads plugin --update` migration command.** C++ plugins can now be migrated in place to the current plugin protocol version instead of being rewritten by hand. It detects the plugin's current protocol from its `CMakeLists.txt`, chains the migration steps recorded in `share/plugin_migrations` up to the current protocol, bumps the pinned `GIT_TAG`, and rewrites affected method signatures (located structurally, so reformatted/multi-line declarations migrate correctly). Each modified file is saved as `*.bak`, and a change report plus manual follow-up checklist is printed; unless `--no-check`, the migrated plugin is then compiled so the compiler flags anything the rewrite could not handle. `--dry-run`, `--from`, and `--to` are also available. Rust plugins are unaffected (they track the `mads-plugin` crate version in `Cargo.toml`). See [share/man/mads-plugin.md](share/man/mads-plugin.md).
