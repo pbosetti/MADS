@@ -169,6 +169,21 @@ FetchContent_Declare(
   GIT_SHALLOW TRUE
 )
 
+# reproc: cross-platform process spawning/pipes/timeouts, vendored for
+# `mads-up` (src/up_supervisor.cpp). Plain C API only (REPROC++ OFF): the
+# supervisor needs direct access to reproc_t::id (the child pid) to manage
+# POSIX process groups itself (see up_supervisor.cpp), which the C++ wrapper
+# does not expose.
+set(REPROC++ OFF CACHE BOOL "" FORCE)
+set(REPROC_TEST OFF CACHE BOOL "" FORCE)
+set(REPROC_EXAMPLES OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+  reproc
+  GIT_REPOSITORY https://github.com/DaanDeMeyer/reproc.git
+  GIT_TAG v9.0.0
+  GIT_SHALLOW TRUE
+)
+
 if(MADS_ENABLE_MONGOCXX)
   set(MADS_MONGO_C_DRIVER_VERSION "2.3.3")
   set(MADS_MONGO_CXX_DRIVER_VERSION "4.4.0")
@@ -366,6 +381,7 @@ install(CODE "
   )
 ")
 add_vendor_exclude_from_all(pugg)
+add_vendor_exclude_from_all(reproc)
 add_vendor_exclude_from_all(libsodium)
 set(SODIUM_INCLUDE_DIRS
     "${libsodium_SOURCE_DIR}/libsodium/src/libsodium/include"

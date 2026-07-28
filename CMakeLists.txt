@@ -259,6 +259,10 @@ link_first_available(
     tomlplusplus::tomlplusplus_header_only
 )
 link_first_available(${LIB_NAME} CANDIDATES pugg::pugg pugg)
+# reproc is a private implementation detail of src/up_supervisor.cpp (mads-up
+# process spawning): no installed header depends on it, so it is not part of
+# MadsMainDeps either.
+link_first_available(${LIB_NAME} CANDIDATES reproc)
 link_first_available(${LIB_NAME} CANDIDATES sodium sodium::sodium)
 link_first_available(${LIB_NAME} CANDIDATES libzmq libzmq-static zmq)
 link_first_available(${LIB_NAME} CANDIDATES zmqpp-static zmqpp)

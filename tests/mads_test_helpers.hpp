@@ -10,7 +10,7 @@ Conventions for test authors:
     test_agent_*  (pub/sub, wire, loop)   42100-42199
     test_agent_settings / broker          42200-42299
     test_agent_c / test_curve             42300-42399
-    (spare)                               42400-42499
+    test_broker_probe                     42400-42499
 - Any test that touches Mads::Agent::loop() must instantiate RunningGuard,
   since Mads::running is a process-global atomic.
 */

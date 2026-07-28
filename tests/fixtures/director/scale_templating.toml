@@ -1,0 +1,13 @@
+# Exercises ${PWD}/${ID} templating together with `scale`, matching the
+# grammar shown in mads_director's own --example output (main.cpp): ${PWD} is
+# the instance's resolved workdir, ${ID} is the 0-based instance index.
+[db]
+command = "./bin/db --port 5432 --wd=${PWD} --id=${ID}"
+workdir = "services/db"
+
+[api]
+command = "./bin/api_server --port 8080 --wd=${PWD} --id=${ID}"
+after = "db"
+workdir = "services/api"
+scale = 3
+relaunch = false
