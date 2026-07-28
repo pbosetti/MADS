@@ -33,7 +33,7 @@ parent is done, so its own branch starts from working code rather than a moving 
 | P3 | `mads-record` / `mads-play` (bag) | P2 | `feat/P2` | IMPROVEMENT | v2.4.x |
 | P4 | `mads doctor` | P5 | `feat/P5` | IMPROVEMENT | v2.4.x |
 | P5 | `mads up` (headless `director.toml`) | — | `v2` | IMPROVEMENT | v2.4.x |
-| P6 | MQTT bridge agent | P2 | `feat/P2` | IMPROVEMENT | v2.4.x |
+| P6 | MQTT bridge agent | P2 | `feat/P2` | IMPROVEMENT | **held back** — candidate for extraction to a separate repo (see P6 section) rather than merging into v2.4.x |
 
 **Tier rationale, applied uniformly:** none of the six changes an existing public
 API signature, the wire protocol, or `LIB_VERSION_CHECK` (a minor bump is reserved
@@ -474,6 +474,20 @@ every `sample_rate`. `q`/Ctrl-C to quit.
 ## P6 — MQTT bridge agent
 
 **Depends on:** P2 (shared wildcard grammar with real MQTT) · **Branch:** `feat/P6` from `feat/P2`
+
+**Status: implemented and verified on `feat/P6`, deliberately held back from the
+v2.4.1 merge.** P1–P5 are being merged; P6 stays an unmerged branch for now. Reason:
+even gated behind `MADS_ENABLE_MQTT` (off by default, zero footprint on the default
+build), it's the one feature that grows MADS's *vendored* footprint should anyone turn
+it on (Eclipse Paho MQTT C++). Under evaluation instead: **extracting it into its own
+repo**, as an agent that links against the installed `libMadsCore` SDK, the same way
+`mads_director` already lives outside the core monorepo and is pulled in only by
+whoever wants it. That keeps the MQTT dependency entirely out of MADS core regardless
+of build flags, and fits the "public header hygiene" SDK boundary already documented in
+`MINOR_UPDATE.md` §5. If it ships that way, the `MADS_ENABLE_MQTT` option and the
+in-tree `src/mqtt_bridge.*`/`src/main/mqtt_bridge.cpp` this branch added would be
+removed from MADS core rather than merged — `feat/P6`'s value at that point is as a
+working reference implementation to port, not a branch to land as-is.
 
 ### Motivation
 
