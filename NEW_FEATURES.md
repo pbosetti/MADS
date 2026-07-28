@@ -342,20 +342,87 @@ mismatch, a port already in use. `mads doctor` is MADS's answer to `ros2 doctor`
 (e.g. scaffold a missing default `mads.ini` from the existing `mads ini` template).
 It only ever creates missing files — never deletes or overwrites.
 
+### Topology graph (`--graph [file.dot]`)
+
+A read-only reporting mode, not a pass/fail check: parses a `mads.ini` (a local path,
+or fetched via the broker's settings endpoint — either way it's the same ini text, just
+two ways to obtain it) and emits **Graphviz DOT** describing the declared pub/sub
+topology. Zero new vendored dependency — DOT is plain text; `mads doctor` only ever
+*writes* it. If a `dot` binary happens to be on `PATH`, optionally shell out to render
+straight to an image, but the feature is fully useful without one (the user renders it
+themselves, or feeds it to any DOT-consuming tool).
+
+- **One record-shaped node per section** (agent instance): name on top, its
+  `sub_topic` entries listed underneath, one per line —
+  `agent [shape=record, label="{name|topic1\ltopic2\l}"]`. `sub_topic = [""]`
+  (subscribe-all) renders as a single `(all)` entry; an agent with no subscriptions
+  gets an empty bottom compartment.
+- **One edge per matching pub/sub pair, labeled with the topic**: for every agent A's
+  `pub_topic` and every other agent B's `sub_topic` entries, draw `A -> B` labeled
+  `A`'s `pub_topic` whenever `Mads::topic_match(B's pattern, A's pub_topic)` is true
+  (reuses P2's matcher directly, so the graph is faithful to the exact semantics
+  `Agent::connect_sub()` applies at runtime — literal `sub_topic` entries fall back to
+  plain string equality). A `pub_topic` matching nobody is exactly the kind of
+  misconfiguration `doctor` exists to catch, so it's worth surfacing (a dangling edge,
+  or a warning alongside the graph) rather than silently dropping it.
+- **Colored by inferred role**, the same source/filter/sink mental model already in
+  `CONTEXT.md` (source = `pub_topic` only, sink = `sub_topic` only, filter = both; an
+  agent with neither gets a neutral/default color rather than a crash): node `color`
+  is `darkred` for source, `darkgreen` for filter, `darkblue` for sink.
+- **Dashed contour (`style=dashed`) on any agent with a dangling topic** — a
+  `pub_topic` nobody's `sub_topic` matches, *or* a `sub_topic` pattern nothing's
+  `pub_topic` ever satisfies. Both directions reuse the same `Mads::topic_match` pass
+  already computed for edges; an agent's own `pub_topic` matching its own `sub_topic`
+  (a self-loop) counts as satisfied on both sides, since that's exactly what would
+  happen at runtime through the broker. This is the visual payoff of the whole
+  feature — a glance at the graph shows every misconfigured agent, not just a text
+  warning buried in `doctor`'s other output.
+- Implementation detail: record-label metacharacters (`{ } | < >`, backslash) in a
+  topic string must be escaped before emission. No existing topic uses them, but don't
+  assume that holds forever.
+
+Example, for a three-agent `imu → filter → logger` pipeline plus a `debug_sink` whose
+subscription nothing satisfies:
+
+```dot
+digraph mads {
+  rankdir=LR;
+  node [shape=record, fontname="monospace"];
+
+  imu        [label="{imu|}", color=darkred];
+  filter     [label="{filter|sensors/imu/#\l}", color=darkgreen];
+  logger     [label="{logger|(all)\l}", color=darkblue];
+  debug_sink [label="{debug_sink|diagnostics/#\l}", color=darkblue, style=dashed];
+
+  imu    -> filter [label="sensors/imu/raw"];
+  filter -> logger [label="sensors/imu/filtered"];
+}
+```
+
 ### Files
 
 `src/main/doctor.cpp` → `mads-doctor` → `mads doctor`, same auto-discovery pattern
-as every other subcommand.
+as every other subcommand. The graph builder itself belongs in a pure, testable unit —
+`src/topology_graph.hpp/.cpp` — taking an already-parsed map of
+`section name -> {pub_topic, sub_topic[]}` and returning a DOT string; no ZMQ, no
+`Agent`, no file I/O, so it's fully unit-testable without a live broker and reusable
+if `mads up`/`mads_director` ever want the same view of a `director.toml`-driven fleet.
 
 ### Tests
 
 Table-driven: each check is a small function taking injected fakes (the existing
 fake-broker REP socket, a temp settings file, a temp CURVE key pair) and is tested in
 isolation — no live broker required beyond the harness already used elsewhere.
+`tests/test_topology_graph.cpp` covers the graph builder separately and purely: node
+record-label formatting (incl. subscribe-all and no-subscription cases), edge
+generation across literal and wildcard `sub_topic` patterns, role→color assignment
+(source/filter/sink/neither), dangling detection in both directions (unmatched
+`pub_topic`, unsatisfied `sub_topic`, and the self-loop-counts-as-satisfied case), and
+metacharacter escaping — all string-in/string-out, no sockets.
 
 ### Docs
 
-`share/man/mads-doctor.md`; `CHANGES.md` under v2.4.0.
+`share/man/mads-doctor.md` (incl. `--graph`); `CHANGES.md` under v2.4.0.
 
 ---
 
