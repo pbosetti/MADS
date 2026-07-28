@@ -90,7 +90,10 @@ const char *role_color(Role role) {
 }
 
 std::string record_label(const std::string &name, const AgentTopicInfo &info) {
-  std::string label = "{" + name + "|";
+  if (info.sub_topic.empty()) {
+    return name;
+  }
+  std::string label = name + "|{";
   if (info.sub_topic.size() == 1 && info.sub_topic[0].empty()) {
     label += "(all)\\l";
   } else {
@@ -168,7 +171,8 @@ std::string topology_graph(const std::map<std::string, AgentTopicInfo> &agents) 
   std::ostringstream out;
   out << "digraph mads {\n";
   out << "  rankdir=LR;\n";
-  out << "  node [shape=record, fontname=\"monospace\"];\n\n";
+  out << "  node [shape=record, fontname=\"monospace\", fontsize=8];\n";
+  out << "  edge [fontname=\"monospace\", fontsize=8];\n\n";
 
   for (const auto &[name, info] : agents) {
     const bool pub_dangling = !info.pub_topic.empty() && !pub_matched.count(name);
