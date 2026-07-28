@@ -39,7 +39,14 @@ These changes summarize what was added or updated since `v2.3.1`.
   `src/director_config.hpp` parse/validate/expand pipeline `mads up --dry-run` uses and prints the
   same kind of expanded-plan report, so a whole deployment can be sanity-checked before it is launched
   for real. `--fix` scaffolds a missing settings file from the same template `mads ini` renders, and
-  only ever creates a missing file -- it never deletes or overwrites one. See
+  only ever creates a missing file -- it never deletes or overwrites one. `--graph [file.dot]` renders
+  the settings file's declared pub/sub topology as Graphviz DOT text (to the given path, or stdout) --
+  one record-shaped node per agent section listing its `sub_topic` entries, one edge per matching
+  `pub_topic`/`sub_topic` pair (via P2's `Mads::topic_match()`, so the graph is faithful to
+  `Agent::connect_sub()`'s exact runtime semantics), nodes colored by inferred role (source/filter/sink),
+  and a dashed contour on any agent with a dangling topic -- a `pub_topic` nobody subscribes to, or a
+  `sub_topic` nothing ever publishes to. No new dependency: `mads doctor` only ever writes DOT text,
+  never shells out to `dot`. See
   [share/man/mads-doctor.md](share/man/mads-doctor.md).
 - **`mads-federate` agent.** New agent that relays selected topics between two independent MADS networks, each with its own broker. It owns two ordinary agent connections ("side A" and "side B"), each configured via a normal `[name]` section in that network's own broker settings; whatever a side subscribes to via its `sub_topic` is forwarded to the other network. Only JSON messages are relayed (no blobs), and the `control`/`agent_event` topics are never forwarded, so remote-control commands and lifecycle events stay local. Relayed messages are tagged with the relay's id in a `mads_relay_path` field to prevent A→B→A loops. See [share/man/mads-federate.md](share/man/mads-federate.md).
 - **High-resolution loop pacing.** `Agent::loop()` now paces its internal timing in nanoseconds instead of milliseconds (existing millisecond-based code keeps compiling and behaving as before). Agents can set a `time_step_us` key in their settings section (wins over `time_step`) for microsecond-granularity periods, and opt into `enable_high_res_loop()` (or the `high_res_loop`/`spin_margin_us` settings keys) to busy-spin the tail of each interval instead of sleeping through it, trading CPU time for microsecond-accurate wake-up timing.

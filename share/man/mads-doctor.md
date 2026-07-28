@@ -20,6 +20,8 @@
 
 **mads-doctor** **\-\-plan** *director.toml*
 
+**mads-doctor** **\-\-graph**\[=*file.dot*\]
+
 # DESCRIPTION
 
 **mads-doctor** is MADS's answer to `ros2 doctor`/`brew doctor`: a single command that checks the
@@ -66,6 +68,28 @@ process spawning), and prints the same kind of expanded-plan report -- start ord
 **\-\-settings**-independent behaviour: the settings file, broker, plugins, and CURVE keys are not
 touched. Use it to sanity-check a whole deployment before running `mads up` for real.
 
+## `--graph`
+
+**\-\-graph**\[=*file.dot*\] is another standalone, read-only mode: it parses the settings file (the
+same **\-\-settings** path used by check 1, reusing the same TOML-loading logic) and emits a
+**Graphviz DOT** description of the pub/sub topology it declares, to *file.dot* if given, or to
+standard output otherwise. It never probes the broker, plugins, ports, or CURVE keys, and never
+shells out to a `dot` binary -- rendering the DOT text to an image is left to the user (e.g.
+`mads doctor --graph | dot -Tpng -o topology.png`).
+
+Every non-`[agents]`/non-`[broker]` section becomes one record-shaped node, named after the section,
+with its `sub_topic` entries listed underneath (one per line; `sub_topic = [""]` -- subscribe-all --
+renders as a single `(all)` line; no subscriptions renders an empty compartment). One edge is drawn
+for every section A's `pub_topic` and every *other* section B's `sub_topic` pattern that matches it
+(per `Mads::topic_match()`, the same MQTT-style wildcard matcher `Agent::connect_sub()` uses at
+runtime), labeled with A's `pub_topic`. Nodes are colored by inferred role: a source (`pub_topic`
+only) is `darkred`, a filter (both) is `darkgreen`, a sink (`sub_topic` only) is `darkblue`; an agent
+with neither gets no color attribute. A node gets a **dashed** contour if it has a dangling topic -- a
+`pub_topic` nothing subscribes to, or a `sub_topic` pattern nothing ever publishes to -- which is
+usually a misconfiguration worth a second look. An agent's own `pub_topic` matching its own
+`sub_topic` (a self-loop) satisfies both sides and is not flagged as dangling, matching real broker
+behavior.
+
 ## `--fix`
 
 **\-\-fix** attempts the one check with an unambiguous, non-destructive auto-fix: if the settings file
@@ -107,6 +131,10 @@ is missing, it is scaffolded from the same template `mads ini` renders. **\-\-fi
 **\-\-plan** *director.toml*
 :  Validate a `director.toml` deployment plan (like `mads up --dry-run`) and exit; see above.
 
+**\-\-graph**\[=*file.dot*\]
+:  Emit a Graphviz DOT topology graph of the settings file's declared pub/sub topics to *file.dot*, or
+   standard output if omitted, and exit; see above.
+
 **\-\-fix**
 :  Attempt safe, non-destructive auto-fixes; see above.
 
@@ -140,6 +168,18 @@ Sanity-check a whole deployment plan before running it for real:
 
 ```
 mads doctor --plan deploy/director.toml
+```
+
+Print the declared pub/sub topology as DOT text, and render it to an image with Graphviz:
+
+```
+mads doctor --graph | dot -Tpng -o topology.png
+```
+
+Write the topology graph straight to a file instead:
+
+```
+mads doctor --graph=topology.dot
 ```
 
 # BUGS
