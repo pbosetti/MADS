@@ -50,6 +50,7 @@ Author(s): Paolo Bosetti
 #include <memory>
 #include "curve.hpp"
 #include "exec_path.hpp"
+#include "topic_match.hpp"
 
 #ifndef HOST_NAME_MAX
 #define HOST_NAME_MAX 255
@@ -990,6 +991,18 @@ protected:
    */
   bool receive_raw(zmqpp::message &message, bool dont_block = false);
 
+  /**
+   * @brief MQTT-style wildcard filter (P2): true if `topic` is accepted by
+   * at least one entry of _sub_topic -- literal entries are matched exactly
+   * as the raw ZMQ SUBSCRIBE prefix already does today, wildcard entries
+   * (containing '+'/'#') via Mads::topic_match(). Only ever consulted when
+   * _wildcard_sub_topic is non-empty; see connect_sub()/receive_raw().
+   *
+   * @param topic The concrete topic of an already-received message.
+   * @return true if the message should be delivered to receive()/callbacks.
+   */
+  bool _topic_matches_subscription(const std::string &topic) const;
+
   static std::tuple<std::string, std::string, std::string> split_URL(const std::string &url);
 
   // Member variables
@@ -1002,6 +1015,11 @@ protected:
   std::string _pub_topic;
   std::string _agent_id;
   std::vector<std::string> _sub_topic;
+  // Subset of _sub_topic containing a '+'/'#' wildcard token (P2), computed
+  // once by connect_sub(). Empty for every agent using only literal
+  // sub_topic entries, which keeps the receive-time filter a single cheap
+  // emptiness check in that -- the common -- case, adding no overhead.
+  std::vector<std::string> _wildcard_sub_topic;
   zmqpp::context _context;
   zmqpp::socket _publisher;
   zmqpp::socket _subscriber;

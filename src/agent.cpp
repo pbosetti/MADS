@@ -878,10 +878,22 @@ inline bool Agent::receive_raw(message &message, bool dont_block) {
       _latest_message.value.reset();
       r = true;
     }
-  } 
+  }
   // Queued operation (blocking or not)
   else {
-    r = _subscriber.receive(message, dont_block);
+    // Fast path (P2): an agent with no wildcard sub_topic entries never
+    // enters the loop body more than once -- same single receive() call,
+    // same behaviour, as before this feature existed.
+    while (true) {
+      r = _subscriber.receive(message, dont_block);
+      if (!r || _wildcard_sub_topic.empty() || message.parts() == 0)
+        break;
+      if (_topic_matches_subscription(message.get(0)))
+        break;
+      // Non-matching message under a broader wildcard-prefix subscribe:
+      // silently drop and try again (bounded by dont_block/receive_timeout
+      // on each individual receive() call).
+    }
   }
   return r;
 }
@@ -1193,8 +1205,20 @@ void Agent::connect_sub() {
     _subscriber.bind(_pub_endpoint);
   } else
     _subscriber.connect(_sub_endpoint);
+  // P2 (MQTT-style wildcards): a sub_topic entry with no '+'/'#' subscribes
+  // exactly as before -- identical subscribe() call, identical wire
+  // SUBSCRIBE frame. Only entries containing a wildcard token take the
+  // two-stage path: subscribe the broader literal_prefix() at the ZMQ layer,
+  // then filter with Mads::topic_match() before a message ever reaches
+  // receive_raw() (see below and _topic_matches_subscription()).
+  _wildcard_sub_topic.clear();
   for (auto &t : _sub_topic) {
-    _subscriber.subscribe(t);
+    if (t.find('+') != string::npos || t.find('#') != string::npos) {
+      _wildcard_sub_topic.push_back(t);
+      _subscriber.subscribe(Mads::literal_prefix(t));
+    } else {
+      _subscriber.subscribe(t);
+    }
   }
   // Drain thread
   // this keeps the queue updated to the LKV when its size is 1
@@ -1204,6 +1228,11 @@ void Agent::connect_sub() {
       while(keep_running() && _connected) {
         try {
           if (!_subscriber.receive(msg, false)) continue;
+          // Drop wildcard-subscribed messages that don't actually match
+          // (the ZMQ-level subscribe above is only a broader prefix).
+          if (!_wildcard_sub_topic.empty() && msg.parts() > 0 &&
+              !_topic_matches_subscription(msg.get(0)))
+            continue;
           std::lock_guard<std::mutex> lock(_latest_message.mtx);
           _latest_message.value = msg.copy();
           _latest_message.cv.notify_one();
@@ -1211,6 +1240,25 @@ void Agent::connect_sub() {
       }
     });
   }
+}
+
+bool Agent::_topic_matches_subscription(const string &topic) const {
+  // Literal entries: same byte-prefix acceptance the raw ZMQ SUBSCRIBE frame
+  // already applies today (untouched by P2).
+  for (auto &t : _sub_topic) {
+    if (t.find('+') != string::npos || t.find('#') != string::npos)
+      continue; // handled in the loop below
+    if (topic.compare(0, t.size(), t) == 0)
+      return true;
+  }
+  // Wildcard entries: full MQTT-style match against the pattern, not just
+  // the broader literal_prefix() that was actually subscribed at the ZMQ
+  // layer.
+  for (auto &pat : _wildcard_sub_topic) {
+    if (Mads::topic_match(pat, topic))
+      return true;
+  }
+  return false;
 }
 
 tuple<string, string, string> Agent::split_URL(const string &url) {
