@@ -2,7 +2,7 @@
 // `ready = "broker"`) and Mads::probe_tcp_port() (backs `ready = "port:<n>"`).
 // Reuses the same fake-broker pattern as tests/test_agent_broker.cpp (a
 // std::thread running a zmqpp REP socket on loopback), in this suite's own
-// port range (42400-42499, marked "spare" in mads_test_helpers.hpp).
+// port range (42600-42699, per mads_test_helpers.hpp).
 #include <catch2/catch_test_macros.hpp>
 
 #include <atomic>
@@ -60,7 +60,7 @@ private:
 } // namespace
 
 TEST_CASE("probe_broker succeeds against a reachable broker", "[broker_probe]") {
-  const uint16_t port = 42400;
+  const uint16_t port = 42600;
   FakeBroker broker(port);
   broker.start();
 
@@ -69,7 +69,7 @@ TEST_CASE("probe_broker succeeds against a reachable broker", "[broker_probe]") 
 
 TEST_CASE("probe_broker times out against an unreachable broker",
          "[broker_probe]") {
-  const uint16_t port = 42401; // intentionally nothing bound here
+  const uint16_t port = 42601; // intentionally nothing bound here
   const auto started = std::chrono::steady_clock::now();
   const bool ok = Mads::probe_broker(mads_test::loopback(port), 300ms);
   const auto elapsed = std::chrono::steady_clock::now() - started;
@@ -79,7 +79,7 @@ TEST_CASE("probe_broker times out against an unreachable broker",
 }
 
 TEST_CASE("probe_tcp_port succeeds against a listening port", "[broker_probe]") {
-  const uint16_t port = 42402;
+  const uint16_t port = 42602;
   FakeBroker broker(port); // any real bound TCP listener will do
   broker.start();
 
@@ -87,7 +87,7 @@ TEST_CASE("probe_tcp_port succeeds against a listening port", "[broker_probe]") 
 }
 
 TEST_CASE("probe_tcp_port times out against a closed port", "[broker_probe]") {
-  const uint16_t port = 42403;
+  const uint16_t port = 42603;
   const auto started = std::chrono::steady_clock::now();
   const bool ok = Mads::probe_tcp_port("127.0.0.1", port, 300ms);
   const auto elapsed = std::chrono::steady_clock::now() - started;
