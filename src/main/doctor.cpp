@@ -27,6 +27,7 @@ Author(s): Paolo Bosetti
 #include "../doctor_checks.hpp"
 #include "../exec_path.hpp"
 #include "../mads.hpp"
+#include "../topology_graph.hpp"
 #include "plugin_migrate.hpp"
 
 #include <cxxopts.hpp>
@@ -43,6 +44,7 @@ Author(s): Paolo Bosetti
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -316,6 +318,67 @@ bool fix_missing_settings_file(const fs::path &path) {
   return true;
 }
 
+// --graph [output.dot]: build a Mads::AgentTopicInfo map from every
+// non-'agents'/non-'broker' section's pub_topic/sub_topic keys -- the same
+// section-skipping convention the plugin `attachment` scan above uses -- and
+// hand it to the pure Mads::topology_graph() builder (src/topology_graph.hpp,
+// no ZMQ/Agent/file I/O of its own), then write the resulting DOT text to
+// `output_path`, or stdout when it's empty. Read-only reporting mode, like
+// --plan: does not touch the broker, plugins, or CURVE keys, and does not
+// affect overall_exit_code.
+int run_graph_check(const string &settings_path, const string &output_path) {
+  toml::table config;
+  try {
+    config = toml::parse_file(settings_path);
+  } catch (const exception &e) {
+    cerr << fg::red << "Error: cannot parse '" << settings_path << "': " << e.what()
+        << fg::reset << endl;
+    return 1;
+  }
+
+  map<string, Mads::AgentTopicInfo> agents;
+  for (const auto &[key, node] : config) {
+    const string section = string(key.str());
+    if (section == "agents" || section == "broker") {
+      continue;
+    }
+    const auto *table = node.as_table();
+    if (!table) {
+      continue;
+    }
+    Mads::AgentTopicInfo info;
+    if (auto pub = (*table)["pub_topic"].value<string>()) {
+      info.pub_topic = *pub;
+    }
+    const auto &sub_node = (*table)["sub_topic"];
+    if (sub_node.type() == toml::node_type::string) {
+      info.sub_topic.push_back(sub_node.value_or(string("")));
+    } else if (const auto *arr = sub_node.as_array()) {
+      arr->for_each(
+          [&](auto &&el) { info.sub_topic.push_back(el.value_or(string(""))); });
+    }
+    agents.emplace(section, std::move(info));
+  }
+
+  const string dot = Mads::topology_graph(agents);
+
+  if (output_path.empty()) {
+    cout << dot;
+    return 0;
+  }
+
+  ofstream ofs(output_path);
+  if (!ofs) {
+    cerr << fg::red << "Error: cannot write to '" << output_path << "'" << fg::reset
+        << endl;
+    return 1;
+  }
+  ofs << dot;
+  cout << fg::green << "Wrote topology graph (" << agents.size()
+      << " agent(s)) to '" << output_path << "'" << fg::reset << endl;
+  return 0;
+}
+
 } // namespace
 
 int main(int argc, char *argv[]) {
@@ -332,6 +395,7 @@ int main(int argc, char *argv[]) {
     ("key_broker", "Name of the broker/server key file (without .pub extension)", value<string>()->default_value("broker"))
     ("key_client", "Name of the client key file (without .key/.pub extension)", value<string>()->default_value("client"))
     ("plan", "Validate a director.toml deployment plan (like `mads up --dry-run`) and exit", value<string>())
+    ("graph", "Emit a Graphviz DOT topology graph of the settings file's declared pub/sub topics to the given path (default: stdout) and exit", value<string>()->implicit_value(""))
     ("fix", "Attempt safe, non-destructive auto-fixes (currently: scaffold a missing settings file)")
     ("v,version", "Print version")
     ("h,help", "Print usage");
@@ -359,6 +423,14 @@ int main(int argc, char *argv[]) {
   // not touch the settings file, broker, plugins, or CURVE keys.
   if (parsed.count("plan")) {
     return run_plan_check(parsed["plan"].as<string>());
+  }
+
+  // --graph is likewise a standalone, read-only reporting mode: it parses
+  // the settings file (like check 1) but never probes the broker/plugins/
+  // ports/CURVE keys, and always exits immediately after emitting the DOT
+  // text.
+  if (parsed.count("graph")) {
+    return run_graph_check(parsed["settings"].as<string>(), parsed["graph"].as<string>());
   }
 
   const auto timeout = chrono::milliseconds(parsed["timeout"].as<int>());
