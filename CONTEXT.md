@@ -43,6 +43,13 @@
   `SUBSCRIBE` frame); only entries containing `+`/`#` pay for the extra
   in-process match, applied after the (broader) ZMQ-level subscribe and
   before the message reaches `receive()`/callbacks.
+- Watch out: a plain entry is matched by ZeroMQ's raw **byte prefix** rule,
+  not by equality or by topic level -- `sub_topic = ["sensors"]` also
+  receives `sensors/imu/raw` (and `sensors_2`). `Mads::subscription_match()`
+  (same header) answers "would this entry receive this topic?" for both entry
+  kinds at once and reports how it matched (exact / prefix / wildcard); it is
+  what `Agent` and `mads doctor --graph` both use, so the topology graph is
+  never a different rule from the wire.
 
 ## Custom monolithic agent workflow
 1. Add agent class in `src/<agent>.hpp` deriving from `Mads::Agent`.

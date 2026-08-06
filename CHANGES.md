@@ -54,13 +54,23 @@ These changes summarize what was added or updated since `v2.4.0`.
   overwrites one. `--graph [file.dot]` renders the settings file's declared
   pub/sub topology as Graphviz DOT text (to the given path, or stdout) -- one
   record-shaped node per agent section listing its `sub_topic` entries, one edge
-  per matching `pub_topic`/`sub_topic` pair (via the same `Mads::topic_match()`
-  matcher behind the MQTT-style wildcards below, so the graph is faithful to
-  `Agent::connect_sub()`'s exact runtime semantics), nodes colored by inferred
-  role (source/filter/sink), and a dashed contour on any agent with a dangling
-  topic -- a `pub_topic` nobody subscribes to, or a `sub_topic` nothing ever
-  publishes to. No new dependency: `mads doctor` only ever writes DOT text,
-  never shells out to `dot`. See
+  per matching `pub_topic`/`sub_topic` pair, nodes colored by inferred role
+  (source/filter/sink), and a dashed contour on any agent with a dangling topic
+  -- a `pub_topic` nobody subscribes to, or a `sub_topic` nothing ever publishes
+  to, with the offending entry marked `[!]` in the node itself. Edges are
+  computed with the new `Mads::subscription_match()` (see the wildcard entry
+  below), i.e. exactly what the agent would receive on the wire -- literal
+  `sub_topic` entries match by raw ZeroMQ byte prefix, wildcard ones by MQTT
+  rules -- and *how* each edge came to exist is drawn into it: solid for an
+  exact match, dashed for a literal prefix catch, dotted for a wildcard, with
+  every non-exact edge naming the responsible pattern(s) under the published
+  topic. Sections with no `pub_topic` key still publish under their own name,
+  exactly as `Agent` itself defaults, so their edges are drawn too, in grey.
+  Edges reaching a subscribe-all (`sub_topic = [""]`) subscriber through nothing
+  but its `""` entry are collapsed into a count on that node's `(all)` line,
+  since they match every publisher by definition and otherwise bury the wiring
+  the graph is read for; `--graph-fanout` draws them anyway. No new dependency:
+  `mads doctor` only ever writes DOT text, never shells out to `dot`. See
   [share/man/mads-doctor.md](share/man/mads-doctor.md).
 - **`mads echo` / `mads top`.** Two new, purely read-only CLI subcommands for
   peeking at live traffic without writing an agent or touching `mads.ini` -- the
@@ -92,8 +102,12 @@ These changes summarize what was added or updated since `v2.4.0`.
   `Mads::topic_match()` filters each arriving message before it reaches
   `receive()`/callbacks, silently dropping non-matches. The matcher
   (`Mads::topic_match()`/`Mads::literal_prefix()`, `src/topic_match.hpp`) is a
-  pure, dependency-free function, independently unit-tested. See the "Settings
-  model" section of [CONTEXT.md](CONTEXT.md).
+  pure, dependency-free function, independently unit-tested. The two stages
+  together -- byte prefix for literal entries, MQTT matching for wildcard ones
+  -- are also exposed as a single `Mads::subscription_match()` predicate, which
+  `Agent` and `mads doctor --graph` both build on, so what the graph draws and
+  what the wire delivers cannot drift apart. See the "Settings model" section of
+  [CONTEXT.md](CONTEXT.md).
 - **`mads-record`/`mads-play`/`mads bag`: bag record & replay.** `mads-record`
   subscribes per `sub_topic` (MQTT-style filters) and writes every message to a
   bespoke binary bag file (`src/bag.hpp`) that stores the exact multi-part wire

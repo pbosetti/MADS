@@ -29,6 +29,14 @@ Topic levels are separated by '/'. Only a token that is *exactly* "+" or "#"
 is treated as a wildcard; a token that merely contains one of those
 characters (e.g. "a+b") is matched literally, mirroring strict MQTT grammar.
 
+topic_match() alone is NOT the whole delivery rule a MADS agent applies: a
+literal (wildcard-free) sub_topic entry never reaches topic_match() at
+runtime, it is handed to ZeroMQ as-is and matched by byte prefix. Use
+subscription_match() below whenever the question is "would this agent
+actually receive this message?" -- it is the single definition both
+Agent::_topic_matches_subscription() and `mads doctor --graph` are built on,
+so the wire and the topology graph can never drift apart.
+
 Author(s): Paolo Bosetti
 */
 
@@ -48,6 +56,69 @@ namespace Mads {
  * the top of this file.
  */
 bool topic_match(std::string_view pattern, std::string_view topic);
+
+/**
+ * @brief Tells whether a `sub_topic` entry is a wildcard pattern.
+ *
+ * Deliberately as coarse as the runtime check it replaces: ANY occurrence of
+ * '+' or '#' anywhere in the string, not just a whole wildcard token. A entry
+ * like "a+b" therefore takes the wildcard path even though topic_match()
+ * matches its "a+b" token literally -- keeping the two in step matters more
+ * than the (unreachable in practice) tightening, since Agent::connect_sub()
+ * and every consumer of subscription_match() must classify an entry the same
+ * way or the graph and the wire disagree.
+ *
+ * @param sub_entry One `sub_topic` entry.
+ * @return true if the entry must be handled as an MQTT-style pattern.
+ */
+bool has_wildcard(std::string_view sub_entry);
+
+/// How one `sub_topic` entry matched a concrete published topic. See
+/// subscription_match(): the two literal outcomes exist because a literal
+/// entry is issued verbatim as a raw ZeroMQ SUBSCRIBE frame, which matches by
+/// *byte prefix*, so "sensors" genuinely receives "sensors/imu/raw" too.
+enum class SubMatch {
+  None,     ///< Not delivered.
+  Exact,    ///< Literal entry equal to the topic.
+  Prefix,   ///< Literal entry that is a strict byte prefix of the topic.
+  Wildcard, ///< Entry containing '+'/'#', matched per topic_match().
+};
+
+/**
+ * @brief Single source of truth for "would an agent subscribing to
+ * `sub_entry` receive a message published on `topic`?".
+ *
+ * Reproduces both stages of the runtime subscribe path exactly (see
+ * Agent::connect_sub() / Agent::_topic_matches_subscription(), which are
+ * implemented on top of this function):
+ *
+ * - A literal entry (no '+'/'#') is passed straight to
+ *   `zmqpp::socket::subscribe()`, whose matching rule is a raw byte prefix.
+ *   Hence `SubMatch::Prefix`: entry "sensors" receives "sensors/imu/raw", and
+ *   the subscribe-all convention `sub_topic = [""]` receives everything.
+ *   NOTE this is *not* topic_match()'s rule -- topic_match() is exact-literal
+ *   and would reject both.
+ * - A wildcard entry subscribes literal_prefix() at the ZMQ layer and is then
+ *   narrowed by topic_match() before delivery, so only a full MQTT-style
+ *   match counts (`SubMatch::Wildcard`).
+ *
+ * @param sub_entry One `sub_topic` entry (pattern or literal).
+ * @param topic Concrete published topic.
+ * @return How the entry matched, or SubMatch::None if it did not.
+ */
+SubMatch subscription_match(std::string_view sub_entry, std::string_view topic);
+
+/**
+ * @brief Convenience predicate over subscription_match().
+ *
+ * @param sub_entry One `sub_topic` entry.
+ * @param topic Concrete published topic.
+ * @return true if the message would be delivered.
+ */
+inline bool subscription_matches(std::string_view sub_entry,
+                                 std::string_view topic) {
+  return subscription_match(sub_entry, topic) != SubMatch::None;
+}
 
 /**
  * @brief Computes the longest literal (wildcard-free) prefix of a pattern.

@@ -20,7 +20,7 @@
 
 **mads-doctor** **\-\-plan** *director.toml*
 
-**mads-doctor** **\-\-graph**\[=*file.dot*\]
+**mads-doctor** **\-\-graph**\[=*file.dot*\] [**\-\-graph-fanout**]
 
 # DESCRIPTION
 
@@ -79,16 +79,47 @@ shells out to a `dot` binary -- rendering the DOT text to an image is left to th
 
 Every non-`[agents]`/non-`[broker]` section becomes one record-shaped node, named after the section,
 with its `sub_topic` entries listed underneath (one per line; `sub_topic = [""]` -- subscribe-all --
-renders as a single `(all)` line; no subscriptions renders an empty compartment). One edge is drawn
-for every section A's `pub_topic` and every *other* section B's `sub_topic` pattern that matches it
-(per `Mads::topic_match()`, the same MQTT-style wildcard matcher `Agent::connect_sub()` uses at
-runtime), labeled with A's `pub_topic`. Nodes are colored by inferred role: a source (`pub_topic`
-only) is `darkred`, a filter (both) is `darkgreen`, a sink (`sub_topic` only) is `darkblue`; an agent
-with neither gets no color attribute. A node gets a **dashed** contour if it has a dangling topic -- a
-`pub_topic` nothing subscribes to, or a `sub_topic` pattern nothing ever publishes to -- which is
-usually a misconfiguration worth a second look. An agent's own `pub_topic` matching its own
+renders as a single `(all)` line; no subscriptions renders a bare name node). Nodes are colored by
+inferred role: a source (declared `pub_topic` only) is `darkred`, a filter (both) is `darkgreen`, a
+sink (`sub_topic` only) is `darkblue`; an agent with neither gets no color attribute.
+
+One edge is drawn for every section A's `pub_topic` and every *other* section B's `sub_topic` entry
+that matches it, using `Mads::subscription_match()` -- the same rule the running agent applies, which
+is deliberately **not** plain string equality:
+
+- A literal (wildcard-free) `sub_topic` entry is handed to ZeroMQ verbatim, and ZeroMQ matches by raw
+  **byte prefix**: `sub_topic = ["sensors"]` really does receive `sensors/imu/raw`, and
+  `sub_topic = [""]` really does receive everything.
+- An entry containing `+`/`#` is matched by MQTT rules (`Mads::topic_match()`), after a broader
+  `Mads::literal_prefix()` subscribe at the ZeroMQ layer.
+
+Since checking those looser matches is the main reason to draw the graph at all, how each edge came
+to exist is encoded in it: **solid** for an exact match, **dashed** for a literal prefix catch,
+**dotted** for a wildcard match. Any non-exact edge also names the pattern(s) responsible under the
+published topic (`sensors/imu/raw` over `via sensors/#`), so an unintended catch is visible at a
+glance rather than inferred by hand.
+
+Sections with no `pub_topic` key still publish -- under their own name, exactly as
+`Agent`'s `cfg["pub_topic"].value_or(<agent name>)` default does -- so their edges are drawn too, in
+**grey** to mark the topic as implied rather than declared. Such an implied topic never colors the
+node (a sink stays a sink) and is never reported as dangling, since nobody listening to it is the
+normal case.
+
+A node gets a **dashed** contour if it has a dangling topic -- a declared `pub_topic` nothing
+subscribes to, or a `sub_topic` entry nothing ever publishes to -- which is usually a
+misconfiguration worth a second look. The offending entry is marked `[!]` in the node's own label, so
+*which* pattern is dead is visible directly; a dangling `pub_topic`, which produces no edge to read
+it off, is spelled out in the node as `pub <topic> [!]`. An agent's own `pub_topic` matching its own
 `sub_topic` (a self-loop) satisfies both sides and is not flagged as dangling, matching real broker
 behavior.
+
+By default, edges into a subscribe-all subscriber that match *only* its `""` entry are collapsed into
+a count on that node's `(all)` line (`(all) [21 publishers]`) instead of being drawn. A subscribe-all
+subscriber matches every publisher by definition, so in a real deployment -- a logger, a monitor, a
+recorder -- those edges are at once the most numerous and the least informative, and they bury the
+wiring the graph is being read for. Nothing is lost: "receives everything" is exactly what the
+`(all)` line says, and a DOT comment records how many arrows were collapsed. Pass **\-\-graph-fanout**
+to draw them all instead.
 
 ## `--fix`
 
@@ -134,6 +165,11 @@ is missing, it is scaffolded from the same template `mads ini` renders. **\-\-fi
 **\-\-graph**\[=*file.dot*\]
 :  Emit a Graphviz DOT topology graph of the settings file's declared pub/sub topics to *file.dot*, or
    standard output if omitted, and exit; see above.
+
+**\-\-graph-fanout**
+:  With **\-\-graph**: draw one edge per publisher into every subscribe-all (`sub_topic = [""]`)
+   subscriber, instead of collapsing them into a count on the subscriber's `(all)` line. Ignored
+   without **\-\-graph**.
 
 **\-\-fix**
 :  Attempt safe, non-destructive auto-fixes; see above.

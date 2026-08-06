@@ -112,6 +112,79 @@ TEST_CASE("topic_match: '#' is rejected unless it is the final token",
 }
 
 // ---------------------------------------------------------------------------
+// subscription_match(): the full two-stage delivery rule (raw ZMQ byte
+// prefix for literal entries, MQTT matching for wildcard ones), shared by
+// Agent::_topic_matches_subscription() and `mads doctor --graph`.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("subscription_match: literal entries match by byte prefix, not by "
+          "equality",
+          "[topic_match]") {
+  using Mads::SubMatch;
+  struct Case {
+    std::string entry;
+    std::string topic;
+    SubMatch expected;
+  };
+  std::vector<Case> cases = {
+      // Exact and prefix are both deliveries; they are reported apart only so
+      // callers can tell a spelled-out wiring from an incidental catch.
+      {"sensors", "sensors", SubMatch::Exact},
+      {"sensors", "sensors/imu/raw", SubMatch::Prefix},
+      // Byte prefix, NOT topic-level prefix: ZeroMQ knows nothing about '/'.
+      {"sensor", "sensors", SubMatch::Prefix},
+      {"sensors/imu", "sensors/imu_2", SubMatch::Prefix},
+      // The subscribe-all convention matches everything, including "".
+      {"", "anything/at/all", SubMatch::Prefix},
+      {"", "", SubMatch::Exact},
+      // A longer entry can never be a prefix of a shorter topic.
+      {"sensors/imu/raw", "sensors/imu", SubMatch::None},
+      {"sensors", "sensor", SubMatch::None},
+      {"gps", "sensors/gps", SubMatch::None},
+  };
+  for (auto const &c : cases) {
+    INFO("entry=\"" << c.entry << "\" topic=\"" << c.topic << "\"");
+    CHECK(Mads::subscription_match(c.entry, c.topic) == c.expected);
+    CHECK(Mads::subscription_matches(c.entry, c.topic) ==
+          (c.expected != SubMatch::None));
+  }
+}
+
+TEST_CASE("subscription_match: wildcard entries use MQTT matching, with no "
+          "prefix fallback",
+          "[topic_match]") {
+  using Mads::SubMatch;
+  CHECK(Mads::subscription_match("sensors/+/raw", "sensors/imu/raw") ==
+        SubMatch::Wildcard);
+  CHECK(Mads::subscription_match("sensors/#", "sensors/imu/raw") ==
+        SubMatch::Wildcard);
+  CHECK(Mads::subscription_match("sensors/#", "sensors") == SubMatch::Wildcard);
+  // Once an entry is a pattern, the literal byte-prefix rule is gone: at
+  // runtime literal_prefix() only widens the ZMQ subscribe, and topic_match()
+  // then narrows it back down before delivery.
+  CHECK(Mads::subscription_match("sensors/+/raw", "sensors/imu/raw/extra") ==
+        SubMatch::None);
+  CHECK(Mads::subscription_match("sensors/+", "sensors") == SubMatch::None);
+  // Invalid grammar ('#' not final) never matches, rather than throwing.
+  CHECK(Mads::subscription_match("sensors/#/x", "sensors/imu/x") ==
+        SubMatch::None);
+}
+
+TEST_CASE("has_wildcard: classifies an entry exactly as connect_sub() does",
+          "[topic_match]") {
+  CHECK_FALSE(Mads::has_wildcard(""));
+  CHECK_FALSE(Mads::has_wildcard("sensors/imu/raw"));
+  CHECK(Mads::has_wildcard("+"));
+  CHECK(Mads::has_wildcard("#"));
+  CHECK(Mads::has_wildcard("sensors/+/raw"));
+  // Deliberately coarse: any occurrence counts, even one topic_match() would
+  // go on to treat as a literal token. Agent::connect_sub() classifies with
+  // this same call, so both stay in step.
+  CHECK(Mads::has_wildcard("a+b"));
+  CHECK(Mads::subscription_match("a+b", "a+b") == Mads::SubMatch::Wildcard);
+}
+
+// ---------------------------------------------------------------------------
 // literal_prefix()
 // ---------------------------------------------------------------------------
 

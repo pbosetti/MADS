@@ -1251,7 +1251,7 @@ void Agent::connect_sub() {
   // receive_raw() (see below and _topic_matches_subscription()).
   _wildcard_sub_topic.clear();
   for (auto &t : _sub_topic) {
-    if (t.find('+') != string::npos || t.find('#') != string::npos) {
+    if (Mads::has_wildcard(t)) {
       _wildcard_sub_topic.push_back(t);
       _subscriber.subscribe(Mads::literal_prefix(t));
     } else {
@@ -1281,19 +1281,13 @@ void Agent::connect_sub() {
 }
 
 bool Agent::_topic_matches_subscription(const string &topic) const {
-  // Literal entries: same byte-prefix acceptance the raw ZMQ SUBSCRIBE frame
-  // already applies today (untouched by P2).
+  // One rule for both entry kinds, shared verbatim with `mads doctor --graph`
+  // (see Mads::subscription_match()): literal entries keep the byte-prefix
+  // acceptance the raw ZMQ SUBSCRIBE frame already applies, wildcard entries
+  // get the full MQTT-style match rather than just the broader
+  // literal_prefix() that was actually subscribed at the ZMQ layer.
   for (auto &t : _sub_topic) {
-    if (t.find('+') != string::npos || t.find('#') != string::npos)
-      continue; // handled in the loop below
-    if (topic.compare(0, t.size(), t) == 0)
-      return true;
-  }
-  // Wildcard entries: full MQTT-style match against the pattern, not just
-  // the broader literal_prefix() that was actually subscribed at the ZMQ
-  // layer.
-  for (auto &pat : _wildcard_sub_topic) {
-    if (Mads::topic_match(pat, topic))
+    if (Mads::subscription_matches(t, topic))
       return true;
   }
   return false;

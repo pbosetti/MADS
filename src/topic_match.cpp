@@ -61,6 +61,28 @@ bool topic_match(std::string_view pattern, std::string_view topic) {
   return ti == ttoks.size();
 }
 
+bool has_wildcard(std::string_view sub_entry) {
+  return sub_entry.find('+') != std::string_view::npos ||
+         sub_entry.find('#') != std::string_view::npos;
+}
+
+SubMatch subscription_match(std::string_view sub_entry,
+                            std::string_view topic) {
+  if (has_wildcard(sub_entry)) {
+    return topic_match(sub_entry, topic) ? SubMatch::Wildcard : SubMatch::None;
+  }
+  // Literal entry: raw ZeroMQ SUBSCRIBE semantics, i.e. byte prefix. Equal
+  // lengths are reported separately as Exact so callers can tell an intended
+  // one-to-one wiring from an incidental prefix catch.
+  if (topic.size() < sub_entry.size()) {
+    return SubMatch::None;
+  }
+  if (topic.compare(0, sub_entry.size(), sub_entry) != 0) {
+    return SubMatch::None;
+  }
+  return topic.size() == sub_entry.size() ? SubMatch::Exact : SubMatch::Prefix;
+}
+
 std::string literal_prefix(std::string_view pattern) {
   auto toks = split_levels(pattern);
   std::string prefix;

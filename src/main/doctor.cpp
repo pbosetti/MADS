@@ -326,7 +326,8 @@ bool fix_missing_settings_file(const fs::path &path) {
 // `output_path`, or stdout when it's empty. Read-only reporting mode, like
 // --plan: does not touch the broker, plugins, or CURVE keys, and does not
 // affect overall_exit_code.
-int run_graph_check(const string &settings_path, const string &output_path) {
+int run_graph_check(const string &settings_path, const string &output_path,
+                    const Mads::GraphOptions &graph_options) {
   toml::table config;
   try {
     config = toml::parse_file(settings_path);
@@ -349,6 +350,17 @@ int run_graph_check(const string &settings_path, const string &output_path) {
     Mads::AgentTopicInfo info;
     if (auto pub = (*table)["pub_topic"].value<string>()) {
       info.pub_topic = *pub;
+    } else {
+      // Agent::init() reads `cfg["pub_topic"].value_or(_name)`, so a section
+      // with no pub_topic key still publishes -- under its own name. Filters
+      // routinely rely on that (`[running_avg] sub_topic = ["serial_reader"]`
+      // with no pub_topic publishes "running_avg"), and omitting it here used
+      // to drop those edges from the graph entirely. Flagged as implicit so
+      // topology_graph() can draw it muted and never call it dangling: a pure
+      // sink inherits exactly the same default and nobody listening to it is
+      // the normal case.
+      info.pub_topic = section;
+      info.pub_implicit = true;
     }
     const auto &sub_node = (*table)["sub_topic"];
     if (sub_node.type() == toml::node_type::string) {
@@ -360,7 +372,7 @@ int run_graph_check(const string &settings_path, const string &output_path) {
     agents.emplace(section, std::move(info));
   }
 
-  const string dot = Mads::topology_graph(agents);
+  const string dot = Mads::topology_graph(agents, graph_options);
 
   if (output_path.empty()) {
     cout << dot;
@@ -396,6 +408,7 @@ int main(int argc, char *argv[]) {
     ("key_client", "Name of the client key file (without .key/.pub extension)", value<string>()->default_value("client"))
     ("plan", "Validate a director.toml deployment plan (like `mads up --dry-run`) and exit", value<string>())
     ("graph", "Emit a Graphviz DOT topology graph of the settings file's declared pub/sub topics to the given path (default: stdout) and exit", value<string>()->implicit_value(""))
+    ("graph-fanout", "With --graph: draw one edge per publisher into every subscribe-all (sub_topic = [\"\"]) subscriber, instead of collapsing them into a count")
     ("fix", "Attempt safe, non-destructive auto-fixes (currently: scaffold a missing settings file)")
     ("v,version", "Print version")
     ("h,help", "Print usage");
@@ -430,7 +443,10 @@ int main(int argc, char *argv[]) {
   // ports/CURVE keys, and always exits immediately after emitting the DOT
   // text.
   if (parsed.count("graph")) {
-    return run_graph_check(parsed["settings"].as<string>(), parsed["graph"].as<string>());
+    Mads::GraphOptions graph_options;
+    graph_options.expand_catch_all = parsed.count("graph-fanout") > 0;
+    return run_graph_check(parsed["settings"].as<string>(),
+                           parsed["graph"].as<string>(), graph_options);
   }
 
   const auto timeout = chrono::milliseconds(parsed["timeout"].as<int>());
