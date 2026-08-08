@@ -103,10 +103,10 @@ int main(int argc, char *argv[]) {
                               Mads::version());
   // clang-format off
   options.add_options()
-    ("f,file", "Path to director.toml (default: director.toml)", value<string>()->default_value("director.toml"))
+    ("f,file", "Path to director.toml", value<string>()->default_value("director.toml"))
     ("until-exit", "Tear down and propagate the exit code once the named process exits", value<string>())
     ("timeout", "Hard cap on the whole run, e.g. '30s', '5m' (default: none)", value<string>())
-    ("grace", "SIGTERM -> SIGKILL grace period, e.g. '5s' (default: 5s)", value<string>()->default_value("5s"))
+    ("grace", "SIGTERM -> SIGKILL grace period, e.g. '5s'", value<string>()->default_value("5s"))
     ("max-restarts", "Cap on relaunch attempts per process (default: unlimited)", value<int>())
     ("no-shell", "Tokenize 'command' and exec it directly instead of shelling out")
     ("dry-run", "Print the fully expanded plan (templates resolved, scale expanded, start order) without spawning anything")

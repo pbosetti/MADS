@@ -40,7 +40,7 @@ stdout/stderr, prefixed with `[name]`, unless **\-\-quiet** is given.
 **SIGINT**/**SIGTERM** tear down every managed process (in reverse start order) and this process then
 exits -- exactly what `systemd Type=simple`, Docker, and CI runners expect.
 
-## The `ready` key
+## The ready key
 
 Beyond the schema Director already defines (`command`, `after`, `workdir`, `enabled`, `scale`,
 `relaunch`, `tty`), **mads-up** adds one new, optional, per-process key:
