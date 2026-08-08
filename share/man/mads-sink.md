@@ -7,6 +7,7 @@
 
 **mads-sink** 
   [**\-n, \-\-name** *agent_name*] 
+  [**\-\-driver** *driver_name*]
   [**\-i, \-\-agent-id** *agent-id*]
   [**\-d, \-\-delay** *delay in ms*]
   [**\-b, \-\-dont-block**]
@@ -41,25 +42,58 @@ For this to work, the INI section of a given agent must have the `attachment` ke
 
 When the agent starts on a remote device, it requests the broker for an copy of the INI file. If the INI section specifies the `attachment`, then the broker also sends a compiled copy of the plugin, which is saved by the agent to a temporary directory and then dynamically loaded.
 
-Pligin loading follows this logic:
+Three things are resolved independently, each with its own precedence, and each is settled before the plugin file is actually loaded:
 
-1. the command line provides a plugin: that plugin is used (regardless the INI file);
-2. there is no plugin on command line but the INI file has an `attachment`: the latter is used;
-3. no plugin is given on command line and no attachment in the INI file: the default plugin is used.
+**Plugin file:**
+
+1. the command line provides a *plugin* argument: that file is used (regardless of the INI file);
+2. there is no plugin on the command line but the INI section has an `attachment`: the latter is used;
+3. neither is given: the default plugin is used.
+
+**Driver** (the name looked up inside the plugin file — matters when one file registers more than one driver, or when OTA's own naming, see below, doesn't match):
+
+1. `--driver` on the command line;
+2. the `driver` key in the INI section;
+3. the plugin file's stem (e.g. `feedback.plugin` → `feedback`).
+
+**Settings section** (which INI section configures this agent):
+
+1. `-n`/`--name` on the command line;
+2. the stem of a *plugin* argument, if one was given;
+3. the compiled-in default agent name.
+
+The settings section is always resolved before the plugin file, since it is what the broker request for an `attachment` is keyed on. A loaded plugin's self-reported `kind()` is checked against the driver name it was loaded under and a warning is printed on a mismatch, but it does not otherwise change anything — this is a diagnostic, not a fourth precedence rule.
+
+Because the OTA-served file is always saved under a temporary name matching the *settings section*, not the driver's own name, an OTA plugin whose registered driver name differs from the section name needs an explicit `driver` key — see the multi-architecture example below.
 
 In case of multiple devices using the same plugin but **on different architectures**:
 
 * the broker needs to have a copy of the same plugin compiled for each architecture;
 * the INI file needs one section for each architecture, e.g. `[my_plugin_x86]` and `[my_plugin_arm64]`;
-* each section has a different `attachment`, pointing to the path of the properly compiled plugins;
-* each agent is launched with custom name: e.g. `mads source -n my_plugin_x86` on X86 linux, `mads source -n my_plugin_arm64` on ARM64 linux;
-* the INI section for each agent specified the same `pub_topic`, so that all plugins publish on the same topic (remember that the default publish topic is the agent name!).
+* each section has a different `attachment`, pointing to the path of the properly compiled plugin, and the same `driver` key naming the driver actually registered inside it (e.g. `driver = "my_plugin"`, since OTA would otherwise look for a driver named after the section instead);
+* each agent is launched with a custom name: e.g. `mads sink -n my_plugin_x86` on X86 linux, `mads sink -n my_plugin_arm64` on ARM64 linux;
+* the INI section for each agent specifies the same `pub_topic`, so that all plugins publish on the same topic (remember that the default publish topic is the agent name!).
+
+```ini
+[my_plugin_x86]
+attachment = "/opt/mads/plugins/x86/my_plugin.plugin"
+driver = "my_plugin"
+pub_topic = "my_plugin"
+
+[my_plugin_arm64]
+attachment = "/opt/mads/plugins/arm64/my_plugin.plugin"
+driver = "my_plugin"
+pub_topic = "my_plugin"
+```
 
 
 # OPTIONS
 
 **\-n**, **\-\-name**
 :  The agent name. By default, the agent name is the plugin file name, without extension, so the plugin **publish.plugin** will have the agent name **publish**. The agent name is used for fetching the proper section forom the INI file, so this option allows to have different settings for different sink agents loading the same plugin.
+
+**\-\-driver** *driver_name*
+:  The driver to instantiate from the plugin file, overriding both the section's `driver` setting and the file-stem default. Only needed when a plugin file registers more than one driver, or when OTA's temporary filename (named after the settings section, not the driver) doesn't match the driver's own registered name.
 
 **\-i**, **\-\-agent-id**
 :  The agent_id field is appended to the message payload. It allows to mark different agents that share the same agent name and the same settings section.

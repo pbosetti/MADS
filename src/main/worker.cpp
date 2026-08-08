@@ -35,6 +35,7 @@ int main(int argc, char *argv[]) {
   // clang-format off
   agent.options()
     ("plugin", "Plugin to load (must be a filter!)", cxxopts::value<string>())
+    ("driver", "Driver to instantiate from the plugin file (default: the 'driver' setting, else the file stem)", cxxopts::value<string>())
     ("n,name", "Agent name (default to plugin name)", cxxopts::value<string>())
     ("i,agent-id", "Agent ID to be added to JSON frames", cxxopts::value<string>());
   agent.raw_options().parse_positional({"plugin"});
@@ -108,7 +109,18 @@ int main(int argc, char *argv[]) {
   } else if (!agent.attachment_path().empty()) {
     plugin_file = agent.attachment_path().string();
   }
+
+  // Driver: --driver > 'driver' setting > file stem.
   plugin_name = fs::path(plugin_file).stem().string();
+  string driver_source = "file stem";
+  if (settings.contains("driver") && settings["driver"].is_string()) {
+    plugin_name = settings["driver"].get<string>();
+    driver_source = "'driver' setting";
+  }
+  if (options_parsed.count("driver") != 0) {
+    plugin_name = options_parsed["driver"].as<string>();
+    driver_source = "--driver";
+  }
 
   agent.info(cerr);
 
@@ -125,7 +137,8 @@ int main(int argc, char *argv[]) {
       kernel.get_driver<FilterDriverJ>(FilterJ::server_name(), plugin_name);
   if (filter_driver == nullptr) {
     cerr << fg::red << "Error: cannot find plugin driver " << plugin_name
-         << " in plugin at " << plugin_file << fg::reset << endl;
+         << " (from " << driver_source << ") in plugin at " << plugin_file
+         << fg::reset << endl;
     auto drivers = kernel.get_all_drivers<FilterDriverJ>(FilterJ::server_name());
     cerr << "Available drivers:" << endl;
     for (auto &d : drivers) {

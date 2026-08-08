@@ -130,6 +130,7 @@ int main(int argc, char *argv[]) {
   // clang-format off
   agent.options()
     ("plugin", "Plugin to load", value<string>())
+    ("driver", "Driver to instantiate from the plugin file (default: the 'driver' setting, else the file stem)", value<string>())
     ("n,name", "Agent name (default to plugin name)", value<string>())
     ("i,agent-id", "Agent ID to be added to JSON frames", value<string>())
     ("d,delay", "Initial delay before forst message in ms (default 0)", value<size_t>())
@@ -173,34 +174,65 @@ int main(int argc, char *argv[]) {
     silent = true;
   }
 
-  // Loading plugin
-  if (options_parsed.count("plugin") != 0) {
-    if (!fs::exists(plugin_file)) {
-      cerr << style::italic 
-           << "  Searching for installed plugin in the default location "
-           << style::reset;
-#ifdef _WIN32
-      cerr << Mads::exec_dir("../bin/") << endl;
-      plugin_file = Mads::exec_dir("../bin/" + plugin_file);
-#else
-      cerr << Mads::exec_dir("../lib/") << endl;
-      plugin_file = Mads::exec_dir("../lib/" + plugin_file);
-#endif
-    }
-    if (!fs::exists(plugin_file)) {
-      cerr << fg::red << "Error: cannot find plugin file " << plugin_file
-           << " (extension .plugin is required!)" << fg::reset << endl;
-      exit(1);
-    }
-  } else if (!agent.attachment_path().empty()) {
+  // Settings section is fixed by CLI precedence (-n/--name, else the
+  // --plugin stem, else the compiled-in default) resolved above -- it has to
+  // be known before we can ask the broker for anything, including a plugin
+  // served as an attachment. fetch_settings() only fetches (settings +
+  // attachment); it does not bind the section or start the loop watchdog,
+  // so it is safe to call before the plugin exists. init() (below) reuses
+  // what it fetched and completes the rest.
+  agent.set_agent_name(agent_name);
+  try {
+    agent.fetch_settings(options_parsed);
+  } catch (const AgentError &e) {
+    cerr << fg::red << "Error fetching settings: " << e.what() << fg::reset
+         << endl;
+    exit(EXIT_FAILURE);
+  } catch (const std::exception &e) {
+    cerr << fg::red << "Runtime error fetching settings: " << e.what()
+         << fg::reset << endl;
+    exit(EXIT_FAILURE);
+  }
+  json settings = agent.settings_json();
+
+  // File: --plugin > attachment (broker-served OTA) > compiled-in default.
+  if (options_parsed.count("plugin") == 0 && !agent.attachment_path().empty()) {
     plugin_file = agent.attachment_path().string();
   }
+  if (!fs::exists(plugin_file)) {
+    cerr << style::italic
+         << "  Searching for installed plugin in the default location "
+         << style::reset;
+#ifdef _WIN32
+    cerr << Mads::exec_dir("../bin/") << endl;
+    plugin_file = Mads::exec_dir("../bin/" + plugin_file);
+#else
+    cerr << Mads::exec_dir("../lib/") << endl;
+    plugin_file = Mads::exec_dir("../lib/" + plugin_file);
+#endif
+  }
+  if (!fs::exists(plugin_file)) {
+    cerr << fg::red << "Error: cannot find plugin file " << plugin_file
+         << " (extension .plugin is required!)" << fg::reset << endl;
+    exit(1);
+  }
+
+  // Driver: --driver > 'driver' setting > file stem.
   plugin_name = fs::path(plugin_file).stem().string();
+  string driver_source = "file stem";
+  if (settings.contains("driver") && settings["driver"].is_string()) {
+    plugin_name = settings["driver"].get<string>();
+    driver_source = "'driver' setting";
+  }
+  if (options_parsed.count("driver") != 0) {
+    plugin_name = options_parsed["driver"].as<string>();
+    driver_source = "--driver";
+  }
 
   pugg::Kernel kernel;
   kernel.add_server<PLUGIN_CLASS<>>();
   if (!kernel.load_plugin(plugin_file)) {
-    cerr << fg::red << "Error: cannot load plugin file " << plugin_file 
+    cerr << fg::red << "Error: cannot load plugin file " << plugin_file
          << fg::reset << endl;
     exit(1);
   }
@@ -208,9 +240,10 @@ int main(int argc, char *argv[]) {
       kernel.get_driver<PluginDriver>(Plugin::server_name(), plugin_name);
   if (plugin_driver == nullptr) {
     cerr << fg::red << "Error: cannot find plugin driver " << plugin_name
-         << " in plugin at " << plugin_file << fg::reset << endl;
+         << " (from " << driver_source << ") in plugin at " << plugin_file
+         << fg::reset << endl;
     auto drivers = kernel.get_all_drivers<PluginDriver>(Plugin::server_name());
-    cerr << "Available drivers (run `mads inspect_plugin <path>` for more):" 
+    cerr << "Available drivers (run `mads inspect_plugin <path>` for more):"
          << endl;
     for (auto &d : drivers) {
       cerr << "- " << d->name() << endl;
@@ -221,12 +254,12 @@ int main(int argc, char *argv[]) {
   auto plugin = std::unique_ptr<Plugin>(plugin_driver->create());
 
   cerr << style::bold << "Plugin settings:" << style::reset << endl
-       << "  Plugin:           " << style::bold << plugin_file 
-       << " (loaded as " << agent_name << "/" << plugin->kind()
+       << "  Plugin:           " << style::bold << plugin_file
+       << " (loaded as " << agent_name << "/" << plugin_name
        << " prot. v" << plugin->version << ")" << style::reset << endl;
-  
+
   if (plugin->version < MADS_PLUGIN_MIN_PROTOCOL) {
-    cerr << style::bold << fg::red 
+    cerr << style::bold << fg::red
          << "Fatal error: unsupported plugin protocol version. Minimum is "
          << plugin->version << ", loaded plugin protocol is version "
          << MADS_PLUGIN_MIN_PROTOCOL << ".\n"
@@ -235,12 +268,17 @@ int main(int argc, char *argv[]) {
     return EXIT_FAILURE;
   }
 
-  // Core stuff. The settings section is selected by the plugin's kind(),
-  // unless the user forces a specific name with -n/--name, which always wins.
-  if (options_parsed.count("name") == 0) {
-    agent_name = plugin->kind();
+  // kind() is a self-reported consistency check now, not a selector: the
+  // settings section (agent_name) was already fixed above, since it drove
+  // fetch_settings()/attachment/driver resolution. A well-formed plugin's
+  // kind() matches the driver name it was loaded under (both come from the
+  // same PLUGIN_NAME at registration); flag it if they disagree.
+  if (plugin->kind() != plugin_name) {
+    cerr << fg::yellow << "Warning: plugin kind '" << plugin->kind()
+         << "' differs from the driver name '" << plugin_name
+         << "' it was loaded under" << fg::reset << endl;
   }
-  agent.set_agent_name(agent_name);
+
   try {
     agent.init(options_parsed);
   } catch (const AgentError &e) {
@@ -259,7 +297,7 @@ int main(int argc, char *argv[]) {
   #endif
 
   // Copy agent settings as plugin parameters
-  json settings = agent.settings_json();
+  settings = agent.settings_json();
   settings["agent_name"] = agent_name;
   if (options_parsed.count("agent-id")) {
     settings["agent_id"] = options_parsed["agent-id"].as<string>();

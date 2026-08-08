@@ -236,32 +236,47 @@ int main(int argc, char *argv[]) {
   if (opts.count("delay")) delay       = opts["delay"].as<size_t>();
   if (opts.count("silent")) silent     = true;
 
+  /* ── fetch settings ───────────────────────────────────────────────────── */
+  /* Settings section is fixed by CLI precedence (-n/--name, else the
+     --plugin stem, else the compiled-in default) resolved above -- it has
+     to be known before we can ask the broker for anything, including a
+     plugin served as an attachment. fetch_settings() only fetches (settings
+     + attachment); it does not bind the section or start the loop
+     watchdog, so it is safe to call before the plugin exists. init() below
+     reuses what it fetched and completes the rest. */
+  agent.set_agent_name(agent_name);
+  try {
+    agent.fetch_settings(opts);
+  } catch (const AgentError &e) {
+    cerr << fg::red << "Error fetching settings: " << e.what() << fg::reset << endl;
+    return EXIT_FAILURE;
+  } catch (const exception &e) {
+    cerr << fg::red << "Runtime error fetching settings: " << e.what() << fg::reset << endl;
+    return EXIT_FAILURE;
+  }
+
   /* ── resolve plugin path ─────────────────────────────────────────────── */
-  if (opts.count("plugin")) {
-    if (!fs::exists(plugin_file)) {
-      cerr << style::italic << "  Searching installed plugins in " << style::reset;
-#ifdef _WIN32
-      cerr << Mads::exec_dir("../bin/") << endl;
-      plugin_file = Mads::exec_dir("../bin/" + plugin_file);
-#else
-      cerr << Mads::exec_dir("../lib/") << endl;
-      plugin_file = Mads::exec_dir("../lib/" + plugin_file);
-#endif
-    }
-    if (!fs::exists(plugin_file)) {
-      cerr << fg::red << "Error: cannot find plugin file " << plugin_file
-           << fg::reset << endl;
-      return EXIT_FAILURE;
-    }
-  } else if (!agent.attachment_path().empty()) {
+  /* File: --plugin > attachment (broker-served OTA) > compiled-in default. */
+  if (!opts.count("plugin") && !agent.attachment_path().empty()) {
     plugin_file = agent.attachment_path().string();
+  }
+  if (!fs::exists(plugin_file)) {
+    cerr << style::italic << "  Searching installed plugins in " << style::reset;
+#ifdef _WIN32
+    cerr << Mads::exec_dir("../bin/") << endl;
+    plugin_file = Mads::exec_dir("../bin/" + plugin_file);
+#else
+    cerr << Mads::exec_dir("../lib/") << endl;
+    plugin_file = Mads::exec_dir("../lib/" + plugin_file);
+#endif
+  }
+  if (!fs::exists(plugin_file)) {
+    cerr << fg::red << "Error: cannot find plugin file " << plugin_file
+         << fg::reset << endl;
+    return EXIT_FAILURE;
   }
 
   /* ── load plugin ─────────────────────────────────────────────────────── */
-  /* Load before init so the agent name — and therefore the settings section
-     the agent reads — comes from the plugin's self-reported identity rather
-     than the file name. The Rust ABI's `name` field is the analogue of the
-     C++ plugin's kind(). */
   RustPlugin plugin;
   {
     string load_err;
@@ -278,12 +293,15 @@ int main(int argc, char *argv[]) {
        << ", kind=" << plugin.fns->kind
        << ", abi=" << plugin.fns->version << ")" << style::reset << endl;
 
-  // The settings section is selected by the plugin's identity (the Rust ABI's
-  // `name`, analogue of the C++ kind()), unless the user forces a specific name
-  // with -n/--name, which always wins.
-  if (!opts.count("name"))
-    agent_name = plugin.fns->name;
-  agent.set_agent_name(agent_name);
+  // The Rust ABI's `name` is a self-reported consistency check now, not a
+  // selector: the settings section (agent_name) was already fixed above,
+  // since it drove fetch_settings()/attachment resolution.
+  if (string(plugin.fns->name) != agent_name) {
+    cerr << fg::yellow << "Warning: plugin name '" << plugin.fns->name
+         << "' differs from settings section '" << agent_name << "'"
+         << fg::reset << endl;
+  }
+
   try {
     agent.init(opts);
   } catch (const AgentError &e) {

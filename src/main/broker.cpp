@@ -478,7 +478,7 @@ int main(int argc, char **argv) {
                      << "  Attaching binary object: " << style::bold
                      << attachment_path << " ("
                      << filesystem::file_size(attachment_path) << " bytes)"
-                     << fg::reset << endl;
+                     << fg::reset << style::reset << endl;
                 attachment_content << attachment_file.rdbuf();
                 content << attachment_content.str();
               }

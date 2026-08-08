@@ -351,7 +351,10 @@ void Agent::init(string name, string settings_uri, bool crypto, filesystem::path
   init(crypto, install_watchdog);
 }
 
-void Agent::init(bool crypto, bool install_watchdog) {
+void Agent::fetch_settings(bool crypto) {
+  if (_settings_fetched) {
+    return;
+  }
   if (crypto) {
     if (!_curve_auth) {
       setup_crypto(auth_verbose);
@@ -383,6 +386,24 @@ void Agent::init(bool crypto, bool install_watchdog) {
     _timecode_offset = get<2>(received);
     _config = (toml::table)toml::parse(_raw_settings);
   }
+
+  // rename attachment if not a plugin
+  if (!_attachment_path.empty()) {
+    auto cfg = _config[_name];
+    string ext = cfg["attachment_ext"].value_or("plugin");
+    if (ext.rfind('.', 0) == 0) {
+      ext = ext.substr(1); // remove leading dot
+    }
+    auto saved_attach = _attachment_path;
+    _attachment_path.replace_extension(ext);
+    filesystem::rename(saved_attach, _attachment_path);
+  }
+
+  _settings_fetched = true;
+}
+
+void Agent::init(bool crypto, bool install_watchdog) {
+  fetch_settings(crypto);
   // member variables
   auto all_cfg = _config["agents"];
   timecode_fps = all_cfg["timecode_fps"].value_or(MADS_FPS);
@@ -444,17 +465,6 @@ void Agent::init(bool crypto, bool install_watchdog) {
   }
 
   set_high_watermark((int64_t)cfg["queue_size"].value_or<int>(1000));
-
-  // rename attachment if not a plugin
-  if (!_attachment_path.empty()) {
-    string ext = cfg["attachment_ext"].value_or("plugin");
-    if (ext.rfind('.', 0) == 0) {
-      ext = ext.substr(1); // remove leading dot
-    }
-    auto saved_attach = _attachment_path;
-    _attachment_path.replace_extension(ext);
-    filesystem::rename(saved_attach, _attachment_path);
-  }
 
   if (install_watchdog) {
     install_loop_watchdog();

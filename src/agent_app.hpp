@@ -103,6 +103,7 @@ class AgentAppT : public AgentT {
 
 public:
   using AgentT::init;
+  using AgentT::fetch_settings;
 
   /**
    * @brief CURVE encryption options parsed from the command line.
@@ -388,16 +389,33 @@ public:
   void init(const cxxopts::ParseResult &parsed,
             std::string default_settings_uri = SETTINGS_URI,
             bool install_watchdog = true) {
-    auto cli_options =
-        cli_options_from_parse_result(parsed, std::move(default_settings_uri));
-    configure_from_cli_options(cli_options);
-    if (cli_options.settings_timeout > 0) {
-      print_status(std::cout, "Using settings timeout of " +
-                                  std::to_string(cli_options.settings_timeout) +
-                                  " ms");
-      this->set_settings_timeout(cli_options.settings_timeout);
-    }
+    const auto &cli_options =
+        resolve_cli_options(parsed, std::move(default_settings_uri));
+    apply_cli_options(cli_options);
     AgentT::init(cli_options.crypto.enabled, install_watchdog);
+    _settings = this->get_settings();
+  }
+
+  /**
+   * @brief Apply parsed CLI options and fetch settings (and any broker-served
+   * attachment) without binding the wrapped agent to a settings section.
+   *
+   * Mirrors init(), but calls Agent::fetch_settings() instead of
+   * Agent::init(). Useful when the settings section name itself depends on
+   * something only known after inspecting settings/attachment (e.g. a
+   * plugin loader resolving which plugin file to load). A later call to
+   * init() reuses the CLI options resolved here (so --room service discovery
+   * only runs once) and completes section binding.
+   *
+   * @param parsed cxxopts parse result.
+   * @param default_settings_uri Settings URI to use when --settings is absent.
+   */
+  void fetch_settings(const cxxopts::ParseResult &parsed,
+                       std::string default_settings_uri = SETTINGS_URI) {
+    const auto &cli_options =
+        resolve_cli_options(parsed, std::move(default_settings_uri));
+    apply_cli_options(cli_options);
+    AgentT::fetch_settings(cli_options.crypto.enabled);
     _settings = this->get_settings();
   }
 
@@ -578,6 +596,29 @@ private:
     return options;
   }
 
+  // Resolves CliOptions once and caches them, so that a fetch_settings() call
+  // followed by an init() call (or two fetch_settings() calls) only pays for
+  // --room service discovery (see cli_options_from_parse_result) a single
+  // time. Second and later calls ignore their arguments and return the cache.
+  const CliOptions &resolve_cli_options(const cxxopts::ParseResult &parsed,
+                                         std::string default_settings_uri) {
+    if (!_cli_options) {
+      _cli_options =
+          cli_options_from_parse_result(parsed, std::move(default_settings_uri));
+    }
+    return *_cli_options;
+  }
+
+  void apply_cli_options(const CliOptions &cli_options) {
+    configure_from_cli_options(cli_options);
+    if (cli_options.settings_timeout > 0) {
+      print_status(std::cout, "Using settings timeout of " +
+                                  std::to_string(cli_options.settings_timeout) +
+                                  " ms");
+      this->set_settings_timeout(cli_options.settings_timeout);
+    }
+  }
+
   void configure_from_cli_options(const CliOptions &options) {
     this->_settings_uri = options.settings_uri;
 
@@ -607,6 +648,7 @@ private:
   nlohmann::json _settings;
   cxxopts::Options _options;
   cxxopts::ParseResult _parsed_options;
+  std::optional<CliOptions> _cli_options;
 };
 
 using AgentApp = AgentAppT<Agent>;

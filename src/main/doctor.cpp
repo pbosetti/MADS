@@ -156,7 +156,12 @@ fs::path resolve_cli_plugin_path(const string &raw) {
 // load_data(). Mirrors src/main/plugin_loader.cpp's loading sequence, just
 // generalized across all three plugin kinds since doctor does not know
 // ahead of time which one a given `attachment`/`--plugin` file is.
-Mads::Doctor::PluginLoadFacts probe_plugin_load(const fs::path &plugin_file) {
+//
+// `driver_name` is the key to look the driver up under, mirroring
+// plugin_loader.cpp's own precedence: the section's `driver` setting if one
+// was declared, else the file stem (see the caller below).
+Mads::Doctor::PluginLoadFacts probe_plugin_load(const fs::path &plugin_file,
+                                                 const string &driver_name) {
   Mads::Doctor::PluginLoadFacts facts;
   facts.plugin_file = plugin_file.string();
   facts.file_exists = fs::exists(plugin_file);
@@ -178,32 +183,32 @@ Mads::Doctor::PluginLoadFacts probe_plugin_load(const fs::path &plugin_file) {
     return facts;
   }
 
-  const string plugin_name = plugin_file.stem().string();
   if (auto *driver = kernel.get_driver<SourceDriver<json>>(
-          Source<json>::server_name(), plugin_name)) {
+          Source<json>::server_name(), driver_name)) {
     auto instance = driver->create();
     facts.driver_kind = "source";
     facts.driver_name = instance->kind();
     facts.protocol_version = driver->version();
     facts.loaded = true;
   } else if (auto *fdriver = kernel.get_driver<FilterDriver<json, json>>(
-                 Filter<json, json>::server_name(), plugin_name)) {
+                 Filter<json, json>::server_name(), driver_name)) {
     auto instance = fdriver->create();
     facts.driver_kind = "filter";
     facts.driver_name = instance->kind();
     facts.protocol_version = fdriver->version();
     facts.loaded = true;
   } else if (auto *sdriver = kernel.get_driver<SinkDriver<json>>(
-                 Sink<json>::server_name(), plugin_name)) {
+                 Sink<json>::server_name(), driver_name)) {
     auto instance = sdriver->create();
     facts.driver_kind = "sink";
     facts.driver_name = instance->kind();
     facts.protocol_version = sdriver->version();
     facts.loaded = true;
   } else {
-    facts.error = "no Source/Filter/Sink driver named '" + plugin_name +
-                  "' found in this plugin file (looked for a stem match, "
-                  "same convention as mads-source/-filter/-sink)";
+    facts.error = "no Source/Filter/Sink driver named '" + driver_name +
+                  "' found in this plugin file (looked for a 'driver' "
+                  "setting or file-stem match, same convention as "
+                  "mads-source/-filter/-sink)";
   }
 
   kernel.clear_drivers();
@@ -498,11 +503,16 @@ int main(int argc, char *argv[]) {
   // Resolved up front (CLI --plugin resolves like plugin_loader.cpp's own
   // positional argument -- CWD first, installed location as fallback; a
   // settings-file `attachment` key resolves like broker.cpp serves one --
-  // relative to the executable directory).
-  vector<fs::path> plugin_files;
+  // relative to the executable directory). Each entry also carries the
+  // driver name to look it up under: the section's `driver` setting if one
+  // was declared, else the file stem -- the same precedence
+  // plugin_loader.cpp applies at load time (a bare --plugin has no section
+  // to read a `driver` key from, so it always falls back to the stem).
+  vector<pair<fs::path, string>> plugin_files;
   if (parsed.count("plugin")) {
     for (const auto &raw : parsed["plugin"].as<vector<string>>()) {
-      plugin_files.push_back(resolve_cli_plugin_path(raw));
+      auto resolved = resolve_cli_plugin_path(raw);
+      plugin_files.emplace_back(resolved, resolved.stem().string());
     }
   } else if (config.has_value()) {
     for (const auto &[key, node] : *config) {
@@ -512,7 +522,10 @@ int main(int argc, char *argv[]) {
       }
       if (const auto *table = node.as_table()) {
         if (auto attachment = (*table)["attachment"].value<string>()) {
-          plugin_files.push_back(resolve_attachment_path(*attachment));
+          auto resolved = resolve_attachment_path(*attachment);
+          string driver_name =
+              (*table)["driver"].value_or(resolved.stem().string());
+          plugin_files.emplace_back(resolved, driver_name);
         }
       }
     }
@@ -531,8 +544,8 @@ int main(int argc, char *argv[]) {
       pinned_protocol = Doctor::parse_pinned_plugin_protocol(manifest_text);
     }
 
-    for (const auto &resolved : plugin_files) {
-      auto facts = probe_plugin_load(resolved);
+    for (const auto &[resolved, driver_name] : plugin_files) {
+      auto facts = probe_plugin_load(resolved, driver_name);
       auto load_result = Doctor::evaluate_plugin_load(facts);
       print_result(load_result);
       print_result(Doctor::evaluate_plugin_protocol(facts.protocol_version,

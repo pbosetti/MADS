@@ -131,6 +131,32 @@ These changes summarize what was added or updated since `v2.4.0`.
 
 ## Bug fixes
 
+- **OTA plugin delivery (the `attachment` INI key) stopped working.** Fixed in
+  `mads-source`/`-filter`/`-sink` and `mads-rsource`/`-rfilter`/`-rsink`: the
+  broker-served attachment is only known after `Agent::init()` runs, but a
+  recent change moved plugin loading to *before* `init()` so a plugin's own
+  `kind()` could pick its settings section -- so the loaders' attachment check
+  always saw an empty path and silently fell back to the compiled-in default
+  plugin. Fixed by splitting `Agent::init()`'s settings-acquisition step out
+  into a new, idempotent `Agent::fetch_settings()` (and an `AgentApp`-level
+  wrapper of the same name): the loaders now resolve the settings section from
+  CLI precedence alone (`-n`/`--name`, else the `--plugin` stem, else the
+  compiled-in default), fetch settings under that name -- which also pulls
+  down any served attachment -- and only then resolve which plugin file and
+  which driver inside it to load. A loaded plugin's self-reported `kind()` is
+  now a mismatch warning rather than a section selector, since the section has
+  to be fixed before the plugin can be fetched at all.
+  As part of the same fix, plugin file, driver and settings section are now
+  three independent, symmetric choices instead of being conflated through the
+  file name: a new `driver` INI key / `--driver` CLI flag (falling back to the
+  plugin file's stem, as before) selects which driver to instantiate from a
+  plugin file that registers more than one, and lets an OTA-delivered
+  plugin's driver name differ from the settings section that fetched it --
+  needed since the OTA temp file is always named after the section, not the
+  driver. `mads doctor`'s plugin dry-run check now honours the same `driver`
+  key when validating a declared `attachment`. See the "OTA Plugins" section
+  in `man mads-source`/`mads-filter`/`mads-sink` for the full precedence
+  rules and a worked multi-architecture example.
 - **`Mads::Runtime::process_running()` was silently disconnected across DLL
   boundaries on Windows.** The process-wide run flag was a function-local
   `static` defined inline in `mads.hpp.in`; on Windows, an inline function-local

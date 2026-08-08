@@ -254,6 +254,26 @@ public:
    */
   void init(bool crypto = false, bool install_watchdog = true);
 
+  /**
+   * @brief Acquires settings (and any broker-served attachment) without
+   * binding the agent to a settings section.
+   *
+   * This performs the settings acquisition portion of init() only: CURVE
+   * setup, resolving the local-file/broker-URI settings source, and (if
+   * settings come from a broker) saving any served attachment and renaming
+   * it per the section's `attachment_ext`. It does not validate or bind the
+   * `_name` section, install the loop watchdog, or call load_settings().
+   *
+   * Idempotent: a second call (including the one made internally by init(),
+   * if not already fetched) is a no-op. Useful for callers that need to
+   * inspect settings or a served attachment (e.g. to select a plugin file)
+   * before committing to init()'s section binding.
+   *
+   * @param crypto Whether to use CURVE encryption (default false).
+   * @throws AgentError if timed out in reading settings from broker.
+   */
+  void fetch_settings(bool crypto = false);
+
   // Destructor
   virtual ~Agent();
 
@@ -1081,6 +1101,7 @@ protected:
   int _receive_timeout = DEFAULT_RECEIVE_TIMEOUT_MS;
   int _settings_timeout = 0;
   bool _init_done = false;
+  bool _settings_fetched = false;
   bool _restart = false;
   std::shared_ptr<Mads::Runtime> _runtime = std::make_shared<Mads::Runtime>();
   // Per-agent stop request: set by shutdown()/disconnect(), cleared by
