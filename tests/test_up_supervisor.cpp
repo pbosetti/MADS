@@ -83,22 +83,34 @@ TEST_CASE("run() starts processes in after-order", "[up_supervisor]") {
   // order, not *completion* order (see up_supervisor.cpp:593-594: wait_ready()
   // is only invoked when a process configures `ready`). Since these are
   // trivial, near-instant commands, asserting completion order via the shared
-  // trace file needs `a`/`b` to actually gate their dependent's start -- a
-  // short `delay` ready (well over the time an `echo ... >> file; exit 0`
-  // takes) makes the intended order deterministic instead of racy.
+  // trace file needs `a`/`b` to actually gate their dependent's start.
+  //
+  // A prior version of this test used a fixed `delay` ready (see 6a0a835,
+  // "deflake after-order test") on the assumption that 100ms is "well over"
+  // the time an `echo ... >> file; exit 0` takes. That's a guess about shell
+  // fork/exec latency, and it flaked again under CI load (the Coverage job
+  // runs gcov-instrumented binaries and is more prone to scheduling jitter):
+  // observed order was {c, a, b}, meaning both `a` and `b` were still
+  // starting up when the 100ms elapsed. A `log` ready tied to a marker each
+  // process prints *after* its trace-file write removes the guess entirely --
+  // wait_ready() only proceeds once that process has actually finished
+  // writing, regardless of how long fork/exec/shell-startup took.
   auto trace = scratch_file("order");
   fs::remove(trace);
 
-  Mads::ReadySpec quick_delay;
-  quick_delay.kind = Mads::ReadyKind::Delay;
-  quick_delay.delay = 100ms;
+  Mads::ReadySpec ready_a;
+  ready_a.kind = Mads::ReadyKind::Log;
+  ready_a.log_pattern = "READY_A";
+  Mads::ReadySpec ready_b;
+  ready_b.kind = Mads::ReadyKind::Log;
+  ready_b.log_pattern = "READY_B";
 
-  Mads::ProcessConfig proc_a =
-      make_proc("a", append_line_cmd(trace, "a") + "; exit 0");
-  proc_a.ready = quick_delay;
-  Mads::ProcessConfig proc_b =
-      make_proc("b", append_line_cmd(trace, "b") + "; exit 0", {"a"});
-  proc_b.ready = quick_delay;
+  Mads::ProcessConfig proc_a = make_proc(
+      "a", append_line_cmd(trace, "a") + " && echo READY_A; exit 0");
+  proc_a.ready = ready_a;
+  Mads::ProcessConfig proc_b = make_proc(
+      "b", append_line_cmd(trace, "b") + " && echo READY_B; exit 0", {"a"});
+  proc_b.ready = ready_b;
   Mads::ProcessConfig proc_c =
       make_proc("c", append_line_cmd(trace, "c") + "; exit 0", {"b"});
 
