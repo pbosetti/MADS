@@ -14,8 +14,9 @@ release version accordingly before tagging.
   the ZeroMQ organisation itself.
 
   **The wire protocol does not change.** Frame layouts, topics and the
-  CURVE/ZAP handshake are all libzmq-side, so a `v2.4.2` agent and a `v2.4.1`
-  broker interoperate in both directions, and `bag` files are unaffected.
+  CURVE/ZAP handshake are all libzmq-side, so a migrated agent and a `v2.4.1`
+  broker interoperate in both directions (verified in all five
+  broker/publisher/subscriber crossings), and `bag` files are unaffected.
 
   **Not affected, no action needed:** plugins (`.plugin` modules link only
   `pugg` + `nlohmann_json`; the plugin protocol stays at v8), the C API
