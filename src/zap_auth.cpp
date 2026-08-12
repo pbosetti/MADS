@@ -29,7 +29,7 @@ constexpr size_t ZAP_VERSION = 0;
 constexpr size_t ZAP_REQUEST_ID = 1;
 constexpr size_t ZAP_DOMAIN = 2;
 constexpr size_t ZAP_ADDRESS = 3;
-constexpr size_t ZAP_IDENTITY = 4;
+// Frame 4 is the peer identity, which MADS does not use.
 constexpr size_t ZAP_MECHANISM = 5;
 constexpr size_t ZAP_CREDENTIALS = 6;
 // version..mechanism are mandatory; credentials are mechanism-specific.
@@ -48,9 +48,17 @@ void ZapAuth::start() {
   // while no handler is bound, so a lazily-bound socket would be a security
   // hole for anything connecting in the meantime.
   _socket = make_unique<zmq::socket_t>(_context, zmq::socket_type::rep);
-  _socket->set(zmq::sockopt::linger, 0);
-  _socket->set(zmq::sockopt::rcvtimeo, ZAP_POLL_MS);
-  _socket->bind(endpoint);
+  try {
+    _socket->set(zmq::sockopt::linger, 0);
+    _socket->set(zmq::sockopt::rcvtimeo, ZAP_POLL_MS);
+    _socket->bind(endpoint);
+  } catch (...) {
+    // Leave the object cleanly un-started (typically: another handler already
+    // owns the ZAP endpoint in this context) so a caller that handles the
+    // failure can retry start() later.
+    _socket.reset();
+    throw;
+  }
   _stop.store(false);
   _running.store(true);
   _thread = thread(&ZapAuth::_serve, this);
@@ -133,7 +141,9 @@ void ZapAuth::_serve() {
       if (!request.recv(*_socket))
         continue; // rcvtimeo expiry: re-check the stop flag
     } catch (const zmq::error_t &e) {
-      if (zmq_errno() == ETERM)
+      // e.num() rather than zmq_errno(): the latter can have been overwritten
+      // by the time we look at it.
+      if (e.num() == ETERM)
         break; // context terminated under us
       continue;
     }
@@ -185,8 +195,8 @@ void ZapAuth::_serve() {
     reply.addstr("");
     try {
       reply.send(*_socket);
-    } catch (const zmq::error_t &) {
-      if (zmq_errno() == ETERM)
+    } catch (const zmq::error_t &e) {
+      if (e.num() == ETERM)
         break;
     }
   }
