@@ -265,20 +265,6 @@ link_first_available(${LIB_NAME} CANDIDATES pugg::pugg pugg)
 link_first_available(${LIB_NAME} CANDIDATES reproc)
 link_first_available(${LIB_NAME} CANDIDATES sodium sodium::sodium)
 link_first_available(${LIB_NAME} CANDIDATES libzmq libzmq-static zmq)
-link_first_available(${LIB_NAME} CANDIDATES zmqpp-static zmqpp)
-if(TARGET zmqpp-static)
-  get_target_property(_zmqpp_source_dir zmqpp-static SOURCE_DIR)
-  get_target_property(_zmqpp_binary_dir zmqpp-static BINARY_DIR)
-elseif(TARGET zmqpp)
-  get_target_property(_zmqpp_source_dir zmqpp SOURCE_DIR)
-  get_target_property(_zmqpp_binary_dir zmqpp BINARY_DIR)
-endif()
-if(DEFINED _zmqpp_source_dir AND _zmqpp_source_dir)
-  target_include_directories(${LIB_NAME} PRIVATE "${_zmqpp_source_dir}/src")
-endif()
-if(DEFINED _zmqpp_binary_dir AND _zmqpp_binary_dir)
-  target_include_directories(${LIB_NAME} PRIVATE "${_zmqpp_binary_dir}")
-endif()
 # cppzmq is header-only; vendors/ populates it without configuring its project.
 if(MADS_CPPZMQ_INCLUDE_DIR)
   target_include_directories(${LIB_NAME} PRIVATE "${MADS_CPPZMQ_INCLUDE_DIR}")
@@ -355,26 +341,11 @@ link_first_available(
 link_first_available(MadsMainDeps LINK_SCOPE INTERFACE CANDIDATES pugg::pugg pugg)
 link_first_available(MadsMainDeps LINK_SCOPE INTERFACE CANDIDATES sodium sodium::sodium)
 link_first_available(MadsMainDeps LINK_SCOPE INTERFACE CANDIDATES libzmq libzmq-static zmq)
-link_first_available(MadsMainDeps LINK_SCOPE INTERFACE CANDIDATES zmqpp-static zmqpp)
 link_first_available(MadsMainDeps LINK_SCOPE INTERFACE CANDIDATES inja::inja inja)
 link_first_available(MadsMainDeps LINK_SCOPE INTERFACE CANDIDATES Snappy::snappy snappy)
 if(MADS_ENABLE_MONGOCXX)
   link_first_available(MadsMainDeps LINK_SCOPE INTERFACE CANDIDATES mongo::mongocxx_static mongocxx_static)
   link_first_available(MadsMainDeps LINK_SCOPE INTERFACE CANDIDATES mongo::bsoncxx_static bsoncxx_static)
-endif()
-if(DEFINED _zmqpp_source_dir AND _zmqpp_source_dir)
-  target_include_directories(
-    MadsMainDeps
-    INTERFACE
-      "${_zmqpp_source_dir}/src"
-  )
-endif()
-if(DEFINED _zmqpp_binary_dir AND _zmqpp_binary_dir)
-  target_include_directories(
-    MadsMainDeps
-    INTERFACE
-      "${_zmqpp_binary_dir}"
-  )
 endif()
 if(MADS_CPPZMQ_INCLUDE_DIR)
   target_include_directories(

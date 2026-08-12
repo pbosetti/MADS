@@ -39,13 +39,6 @@ set(INJA_EXPORT OFF CACHE BOOL "" FORCE)
 set(INJA_USE_EMBEDDED_JSON OFF CACHE BOOL "" FORCE)
 
 set(SNAPPY_INSTALL OFF CACHE BOOL "" FORCE)
-set(ZMQPP_LIBZMQ_CMAKE ON CACHE BOOL "" FORCE)
-set(ZMQPP_BUILD_STATIC ON CACHE BOOL "" FORCE)
-set(ZMQPP_BUILD_SHARED OFF CACHE BOOL "" FORCE)
-set(ZMQPP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(ZMQPP_BUILD_CLIENT OFF CACHE BOOL "" FORCE)
-set(ZMQPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-
 set(BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(BUILD_STATIC ON CACHE BOOL "" FORCE)
 set(ZMQ_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -137,13 +130,6 @@ FetchContent_Declare(
   libzmq
   GIT_REPOSITORY https://github.com/zeromq/libzmq.git
   GIT_TAG v4.3.5
-  GIT_SHALLOW TRUE
-)
-
-FetchContent_Declare(
-  zmqpp
-  GIT_REPOSITORY https://github.com/zeromq/zmqpp.git
-  GIT_TAG master
   GIT_SHALLOW TRUE
 )
 
@@ -443,52 +429,6 @@ if(TARGET snappy)
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
     COMPONENT MadsCore
   )
-endif()
-
-# Work around zmqpp upstream CMake: generate_export_header(zmqpp) is called
-# even when ZMQPP_BUILD_SHARED is OFF.
-if(NOT TARGET zmqpp)
-  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/zmqpp_dummy.cpp" "int zmqpp_dummy = 0;\n")
-  add_library(zmqpp STATIC EXCLUDE_FROM_ALL "${CMAKE_CURRENT_BINARY_DIR}/zmqpp_dummy.cpp")
-endif()
-
-# zmqpp has legacy cmake_minimum_required(2.8.12) and links to parent-defined
-# target "zmqpp" on Windows; force modern policy behavior in the subdir.
-set(CMAKE_POLICY_DEFAULT_CMP0079 NEW)
-# zmqpp unconditionally searches for zmq.h; point it to fetched libzmq headers.
-set(ZEROMQ_INCLUDE_DIR "${libzmq_SOURCE_DIR}/include" CACHE PATH "" FORCE)
-add_vendor_exclude_from_all(zmqpp)
-if(EXISTS "${zmqpp_SOURCE_DIR}/src/zmqpp")
-  install(
-    DIRECTORY "${zmqpp_SOURCE_DIR}/src/zmqpp/"
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/zmqpp"
-    COMPONENT MadsCore
-    FILES_MATCHING
-      PATTERN "*.h"
-      PATTERN "*.hh"
-      PATTERN "*.hpp"
-      PATTERN "*.hxx"
-      PATTERN "*.inl"
-      PATTERN "*.inc"
-  )
-endif()
-if(EXISTS "${zmqpp_BINARY_DIR}/zmqpp_export.h")
-  install(
-    FILES "${zmqpp_BINARY_DIR}/zmqpp_export.h"
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/zmqpp"
-    COMPONENT MadsCore
-  )
-endif()
-if(MSVC)
-  # zmqpp expects SOCKET to be available on Windows.
-  if(TARGET zmqpp-static)
-    target_compile_definitions(zmqpp-static PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-    target_compile_options(zmqpp-static PRIVATE /FIwinsock2.h)
-  endif()
-  if(TARGET zmqpp)
-    target_compile_definitions(zmqpp PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-    target_compile_options(zmqpp PRIVATE /FIwinsock2.h)
-  endif()
 endif()
 
 if(MADS_ENABLE_MONGOCXX)

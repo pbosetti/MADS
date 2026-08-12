@@ -1,3 +1,65 @@
+# Unreleased
+
+**Breaking for downstream C++ agents that touch ZMQ sockets directly; the wire
+protocol is unchanged.** `MadsCore` is a shared library whose class layout
+changed, so anything built against `v2.4.1` must be **recompiled**. Set the
+release version accordingly before tagging.
+
+## Dependencies
+
+- **ZeroMQ C++ binding: `zmqpp` replaced by `cppzmq`.** MADS now talks to
+  libzmq through [cppzmq](https://github.com/zeromq/cppzmq) (pinned to
+  `v4.11.0`) instead of `zmqpp`, which has had no release since 2021 and was
+  tracked here at a moving `master`. cppzmq is header-only and maintained by
+  the ZeroMQ organisation itself.
+
+  **The wire protocol does not change.** Frame layouts, topics and the
+  CURVE/ZAP handshake are all libzmq-side, so a `v2.4.2` agent and a `v2.4.1`
+  broker interoperate in both directions, and `bag` files are unaffected.
+
+  **Not affected, no action needed:** plugins (`.plugin` modules link only
+  `pugg` + `nlohmann_json`; the plugin protocol stays at v8), the C API
+  (`agent_c.h`), the Rust crate, and **every consumer of `Mads::AgentApp`** --
+  its interface never named a ZMQ type.
+
+  **Affected:** a custom agent deriving from `Mads::Agent` that touches the
+  sockets directly. `Agent`'s protected members are now `zmq::context_t` /
+  `zmq::socket_t` / `zmq::multipart_t`, `receive_raw()` takes a
+  `zmq::multipart_t&`, and `agent.hpp` no longer pulls in `<zmqpp/zmqpp.hpp>`.
+  For those, add one include:
+
+  ```cpp
+  #include <agent.hpp>
+  #include <zmqpp_compat.hpp>   // deprecated shim: old zmqpp:: spellings keep working
+  ```
+
+  `zmqpp_compat.hpp` re-exposes `zmqpp::context`/`socket`/`message`/
+  `socket_type`/`socket_option`/`curve` over cppzmq, deriving from the cppzmq
+  types so references bind both ways. Every type is `[[deprecated]]` and names
+  its replacement; define `MADS_NO_ZMQPP_COMPAT_WARNING` to silence the
+  warnings while porting. **It will be removed in the release after next.**
+
+  Note this is source compatibility only: `MadsCore` is a shared library whose
+  class layout changed, so downstream code must be **recompiled** either way.
+
+- **New `Mads::ZapAuth` (`zap_auth.hpp`).** cppzmq has no equivalent of
+  `zmqpp::auth`, so MADS now owns its ZAP (RFC 27) handler. `Mads::CurveAuth`
+  keeps the same method names and behaviour on top of it. Two improvements
+  fall out: `setup_auth()` completes the ZAP bind before returning (libzmq lets
+  connections through unauthenticated while no handler is bound), and teardown
+  is deterministic rather than relying on zmqpp's process-lifetime actor state.
+  `Mads::generate_keypair()` replaces `zmqpp::curve::generate_keypair()`.
+
+## Fixes
+
+- **Broker `PAUSE`/`RESUME` are no longer inverted.** The interactive broker's
+  `p` and `r` keys now do what they say. Steering commands reach
+  `zmq_proxy_steerable()` directly instead of going through zmqpp, which
+  swapped the two.
+
+
+---
+
 # Release v2.4.1
 
 This document summarizes what changed between `v2.4.0` and `v2.4.1`. This is a

@@ -4,7 +4,7 @@ Shared helpers for the MADS unit-test suite.
 Conventions for test authors:
 - ZeroMQ endpoints must be in-process loopback only (tcp://127.0.0.1:<port>).
   inproc:// does NOT work between two Agent instances, because each Agent owns
-  its own zmqpp context.
+  its own ZMQ context.
 - Tests run serially under ctest, but each suite must still use its own port
   range to stay independent:
     test_agent_*  (pub/sub, wire, loop)   42100-42199

@@ -79,7 +79,7 @@
 - Formatting convention is LLVM style (`clang-format` guidance in docs/instructions).
 
 ## Key dependencies and integration points
-- Messaging: `libzmq` + `zmqpp`
+- Messaging: `libzmq` + `cppzmq`
 - Config parsing: `toml++`
 - JSON: `nlohmann/json`
 - Plugin loading: `pugg`

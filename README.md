@@ -326,7 +326,7 @@ cmake --build build -j6
 cmake --install build
 ```
 
-Key dependencies: ZeroMQ (`libzmq` + `zmqpp`), `nlohmann/json`, `toml++`, Snappy, `pugg` (plugins), and the MongoDB C++ driver (optional, for the logger).
+Key dependencies: ZeroMQ (`libzmq` + `cppzmq`), `nlohmann/json`, `toml++`, Snappy, `pugg` (plugins), and the MongoDB C++ driver (optional, for the logger).
 
 > All these dependencies are bundled and built from source via CMake FetchContent, so no external library installation is needed.
 

@@ -93,7 +93,7 @@ enum class SubMatch {
  * implemented on top of this function):
  *
  * - A literal entry (no '+'/'#') is passed straight to
- *   `zmqpp::socket::subscribe()`, whose matching rule is a raw byte prefix.
+ *   the ZMQ SUBSCRIBE option, whose matching rule is a raw byte prefix.
  *   Hence `SubMatch::Prefix`: entry "sensors" receives "sensors/imu/raw", and
  *   the subscribe-all convention `sub_topic = [""]` receives everything.
  *   NOTE this is *not* topic_match()'s rule -- topic_match() is exact-literal
@@ -146,7 +146,7 @@ inline bool subscription_matches(std::string_view sub_entry,
  *   byte-prefix that excludes the bare topic "sensors" itself.
  *
  * @param pattern Subscription pattern.
- * @return The literal prefix, suitable for zmqpp::socket::subscribe().
+ * @return The literal prefix, suitable for zmq::sockopt::subscribe.
  */
 std::string literal_prefix(std::string_view pattern);
 

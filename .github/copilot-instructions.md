@@ -48,7 +48,7 @@ Data flows: Sources publish JSON messages → Filters process/transform → Sink
 - **Docker**: `docker run --name mads-mongo -p27017:27017 -d mongo` for database
 
 ### External Dependencies
-- **ZeroMQ** (libzmq + zmqpp wrapper) for messaging
+- **ZeroMQ** (libzmq + cppzmq wrapper) for messaging
 - **MongoDB driver** (mongocxx) for logging agent
 - **Snappy** for optional compression
 - **pugg** for plugin loading (dlopen/dlsym abstraction)
