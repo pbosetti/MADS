@@ -5,14 +5,17 @@
 MADS uses **libzmq 4.3.5 + zmqpp** for all messaging. zmqpp has had no release since
 2021 and `vendors/CMakeLists.txt` pins it to a moving `GIT_TAG master` — an
 unmaintained, unpinned dependency in the middle of the framework's transport layer.
-It is also the direct cause of two workarounds already carried in the tree:
+It is also the direct cause of a workaround already carried in the tree:
 
 - `tests/test_main.cpp:1-26` — every test executable calls `TerminateProcess()` on
   Windows because zmqpp's process-lifetime static (`zmqpp::actor::actor_pipe_ctx_`)
   aborts during DLL detach once `CurveAuth` has been used. This costs Windows a normal
   exit path and coverage instrumentation.
-- `src/main/broker.cpp:679-681` — "there is a bug in zmqpp lib and PAUSE and RESUME
-  commands have inverted meanings".
+
+A second workaround, `src/main/broker.cpp:679-681` ("there is a bug in zmqpp lib and
+PAUSE and RESUME commands have inverted meanings"), *looked* like a third reason to
+migrate but turned out to misattribute a **libzmq** bug — see R3 below. It is fixed
+separately as part of this work.
 
 **cppzmq** is the ZeroMQ organisation's own C++ binding: header-only, actively
 maintained (v4.11.0, 2024), and a much thinner layer over libzmq. The goal is to drop
@@ -83,7 +86,7 @@ Only **10 non-test files** name a ZMQ type; everything else goes through `Mads::
 |---|---|---|---|
 | R1 | **Hand-written ZAP handler.** A bug means either open access or total lockout — security-critical. | **High** | **De-risked in Phase 0**: a ~60-line RFC 27 prototype accepted an authorised CURVE client and rejected an unauthorised one end-to-end. `tests/test_curve.cpp` (15+ cases) is the acceptance gate. |
 | R2 | **`multipart_t::recv()` semantics.** `Agent::receive_raw()` and both drain threads reuse one long-lived message object. If `recv()` does not clear first, parts accumulate silently. | **High** | **Resolved in Phase 0**: `recv()` clears before filling; verified across receives of 2/3/4 parts into one reused object. |
-| R3 | **`proxy_steerable` behaviour change.** cppzmq passes straight through to libzmq, so the PAUSE/RESUME inversion workaround is probably wrong afterwards; the extra `capture` argument must be a null `socket_ref`. | Medium | Manual broker test of `p`/`r`/`i`/`q` keys; flip the handlers back and record it in CHANGES.md as a user-visible fix. |
+| R3 | **`proxy_steerable` behaviour change.** The extra `capture` argument must be a null `socket_ref`. | Medium | **Resolved, but not as predicted.** The PAUSE/RESUME inversion is a bug in **libzmq 4.3.5 itself** (`src/proxy.cpp`: the `PAUSE` arm is missing its `0 ==` and compares six bytes against a five-byte command, so it always matches and selects `active`; `RESUME` selects `paused`). zmqpp was passing it through, not causing it, so the migration does not fix it. The broker now sends the command that produces the intended effect, and `tests/test_broker_steering.cpp` pins the semantics so an upstream fix fails the build rather than silently re-inverting the keys. |
 | R4 | **`ZMQ_HAS_PROXY_STEERABLE` + STATISTICS** availability against pinned libzmq v4.3.5. | Medium | **Resolved in Phase 0**: the macro is defined with libzmq 4.3.5. |
 | R5 | **Wire-parser regressions** in the blob path (`raw_data(3)`/`size(3)` → `at(3)`). | Medium | `tests/test_agent_wire.cpp` covers malformed/extended frames and `dropped_messages()` — do not touch it, just make it pass. |
 | R6 | **Windows/MSVC header ordering** (`winsock2.h` before ZMQ headers) — `curve.hpp:13-21` and `broker_probe.cpp:6-7` already fight this. | Medium | cppzmq is header-only and better behaved, but re-verify on the Windows CI job early, not at the end. |
@@ -150,7 +153,9 @@ Roughly 200 LOC, header-only, covering only the ~10 options / ~11 socket methods
 3. **Fixes the Windows teardown abort.** With MADS owning the ZAP handler thread and
    shutting it down deterministically, `tests/test_main.cpp` can return normally on
    Windows — restoring the standard exit path and unblocking Windows coverage.
-4. **Fixes the PAUSE/RESUME inversion** in the interactive broker.
+4. ~~Fixes the PAUSE/RESUME inversion in the interactive broker.~~ **Withdrawn:**
+   the inversion turned out to be a libzmq bug, not a zmqpp one, so migrating
+   does not fix it. It is fixed separately, and now regression-tested.
 5. **Compile-time-checked socket options** (`zmq::sockopt::*` carries the option's type)
    instead of zmqpp's runtime-typed `socket_option` enum.
 6. **Access to the full modern libzmq surface** zmqpp never exposed — notably

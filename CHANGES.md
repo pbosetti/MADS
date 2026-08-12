@@ -52,10 +52,15 @@ release version accordingly before tagging.
 
 ## Fixes
 
-- **Broker `PAUSE`/`RESUME` are no longer inverted.** The interactive broker's
-  `p` and `r` keys now do what they say. Steering commands reach
-  `zmq_proxy_steerable()` directly instead of going through zmqpp, which
-  swapped the two.
+- **Broker `p`/`r` keys now actually pause and resume.** The interactive
+  broker's pause/resume keys had inverted effects. The cause is a bug in
+  libzmq 4.3.5 itself (`src/proxy.cpp`: the `PAUSE` arm is missing its `0 ==`
+  and compares six bytes against a five-byte command, so it always matches and
+  selects `active`, while `RESUME` selects `paused`) -- not in zmqpp, which an
+  older code comment blamed. The broker now sends the command that produces
+  the intended effect, and `tests/test_broker_steering.cpp` pins the observed
+  semantics so a future libzmq upgrade that fixes this upstream fails the
+  build instead of silently re-inverting the keys.
 
 
 ---

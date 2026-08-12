@@ -683,16 +683,29 @@ int main(int argc, char **argv) {
         msg = steer(controller, "TERMINATE");
         running = false;
         break;
+      // NOTE: libzmq's steering commands are inverted, so the wire command
+      // sent below is the opposite of the effect it produces. In
+      // libzmq 4.3.5's src/proxy.cpp:
+      //
+      //   if (msiz == 5 && memcmp (command, "\x05PAUSE", 6))   state = active;
+      //   else if (msiz == 6 && 0 == memcmp (command, "RESUME", 6))
+      //                                                        state = paused;
+      //
+      // The PAUSE arm is missing its `0 ==` and compares six bytes (with a
+      // stray \x05) against a five-byte command, so it is always true and sets
+      // `active`; the RESUME arm matches correctly but sets `paused`. Sending
+      // the opposite command is what makes these keys do what they say.
+      // Verified by tests/test_broker_steering.cpp, which fails if a libzmq
+      // upgrade ever fixes this upstream. (The old comment here blamed zmqpp;
+      // it was passing the bug through, not causing it.)
       case 'r':
       case 'R':
-        // Commands now reach zmq_proxy_steerable() directly, so PAUSE and
-        // RESUME finally mean what they say (zmqpp used to invert them).
-        msg = steer(controller, "RESUME");
+        msg = steer(controller, "PAUSE"); // -> state = active
         cout << "Resuming operation" << endl;
         break;
       case 'p':
       case 'P':
-        msg = steer(controller, "PAUSE");
+        msg = steer(controller, "RESUME"); // -> state = paused
         cout << "Pausing operation" << endl;
         break;
       case 'i':
