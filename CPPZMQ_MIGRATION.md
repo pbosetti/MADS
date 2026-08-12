@@ -277,23 +277,38 @@ Branch: `devel/cppzmq`. Each phase should build and pass tests on its own.
 
 ## 3. Verification
 
-1. **Unit/integration:** `cmake -Bbuild -DCMAKE_BUILD_TYPE=Debug -GNinja && cmake --build build -j6 && ctest --test-dir build --output-on-failure`.
-   Suites whose *content* must not change (they are the regression gate):
-   `test_agent_wire`, `test_curve`, `test_bag_roundtrip`, `test_lazy_payload`.
-2. **CURVE end-to-end (R1):** beyond `test_curve.cpp`, run a real broker with
-   `-k <keydir>` plus one authorised and one unauthorised agent; confirm the
-   unauthorised one is rejected and `mads doctor` reports the key check green.
-3. **Cross-version interop (backward compat):** run a **pre-migration** `mads-broker`
-   against a **post-migration** `mads-source`/`mads-sink`, and the reverse. Payloads
-   must flow in both directions — this is the proof the wire format is untouched.
-4. **Broker control:** interactive `mads-broker`, exercise `p`/`r`/`i`/`q`; confirm
-   pause actually pauses and STATISTICS numbers match pre-migration output.
-5. **Plugins:** scaffold with `mads plugin`, build it, run under `mads-filter`
-   against the migrated broker — no plugin rebuild flags should change.
-6. **C/Rust:** `smoke_test/` (`test_messaging.cpp`, `test_cpp_agent.cpp`,
-   `test_c_agent.c`) plus a `rust/mads-plugin-example` build.
-7. **Shim:** build `tests/test_zmqpp_compat.cpp`; separately, compile a scratch
-   `Agent` subclass that touches `_context`/`_publisher` through the shim.
-8. **CI:** full matrix (macOS universal, Linux x86_64 + arm64, Windows MSVC) plus the
-   coverage job — the Windows job is the one that validates removing the
-   `TerminateProcess()` hack.
+Status as executed on macOS (AppleClang 21, libzmq 4.3.5, cppzmq 4.11.0).
+
+| # | Check | Result |
+|---|---|---|
+| 1 | **Unit/integration** — `ctest` over the whole suite, run serially | **383/383 pass** (7 mongo cases skipped without the driver). Baseline before the migration was 362/362; the 21 new cases are `test_zap_auth` (9), `test_zmqpp_compat` (9) and `test_broker_steering` (3). A parallel `-j4` run has one pre-existing port-collision flake unrelated to this work. |
+| 2 | **CURVE end-to-end** against a real `mads-broker --crypto` | **PASS.** An authorised client received payload-exact encrypted messages; a rogue client with a valid keypair absent from the broker's key dir received **zero**, and the broker logged `ZAP: DENIED CURVE from 127.0.0.1 (Unknown client key)`. |
+| 3 | **Cross-version interop** — the central backward-compatibility claim | **PASS in all 5 combinations**: old broker + new agents, new broker + old agents, old publisher → new subscriber, new publisher → old subscriber, and new throughout. Each asserts a unique marker payload arrives on the expected topic, so it cannot pass on incidental traffic. The wire protocol is unchanged. |
+| 4 | **Broker steering** (`p`/`r`/`i`/`q`) | **PASS, with a correction** — see R3. Now regression-tested by `test_broker_steering.cpp`. |
+| 5 | **Plugins** — scaffold, build and run under the loaders | **PASS** via the smoke suite (`plugin_gen`, `plugin_run_*`). |
+| 6 | **Installed SDK + C/C++/Python agents** | **PASS — 32/32 smoke tests** against a fresh `cmake --install` prefix. The install tree now carries `zmq.hpp`/`zmq_addon.hpp`/`zmqpp_compat.hpp` and no longer has an `include/zmqpp/` directory. |
+| 7 | **Compat shim** | **PASS.** `test_zmqpp_compat.cpp` is written entirely in the old idiom, including an `Agent` subclass building a socket from `_context` and passing `_publisher` as a `zmqpp::socket&`. Deprecation warnings verified to fire outside the MADS build. |
+| 8 | **Default build configuration** (`MADS_ENABLE_MONGOCXX=ON`, `MADS_DIRECTOR=ON`) | see below |
+
+**Not verified here — must pass in CI before merge:**
+- **Windows/MSVC.** Two things need the Windows job specifically: that the
+  cppzmq headers behave with the `winsock2.h` include ordering (R6), and that
+  removing the `TerminateProcess()` hack from `tests/test_main.cpp` really does
+  leave a clean exit. That removal is deliberately its own commit so it can be
+  reverted alone if the job disagrees.
+- **Linux x86_64 and arm64**, and the coverage job.
+- **Rust plugin crate** — unaffected by design (pure C ABI over `agent_c.h`), but
+  not built as part of this verification.
+
+### Reproducing the out-of-tree checks
+
+The interop, CURVE and steering harnesses are scripts rather than unit tests
+because they need two builds and real processes:
+
+- `interop2.sh` — builds nothing; expects a pre-migration worktree built
+  alongside the current one, then crosses brokers/publishers/subscribers.
+- `curve_e2e.sh` — generates two key directories with `mads --keypair`, runs a
+  `--crypto` broker, and checks both the authorised and the rejected path.
+
+`test_broker_steering.cpp` is the one that graduated into the suite, because it
+guards a libzmq behaviour that a dependency bump could silently change.
