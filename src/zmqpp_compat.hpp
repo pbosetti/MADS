@@ -68,6 +68,7 @@ Copyright (C) 2026 Paolo Bosetti
 
 #include <cstring>
 #include <string>
+#include <utility>
 
 #include <zmq.hpp>
 #include <zmq_addon.hpp>

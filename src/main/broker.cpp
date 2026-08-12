@@ -713,9 +713,13 @@ int main(int argc, char **argv) {
         msg = steer(controller, "STATISTICS");
         vector<uint64_t> stats;
         for (size_t i = 0; i < msg.size(); i++) {
+          // Each counter arrives as a raw uint64_t frame. Not std::min():
+          // <algorithm> is only included on Linux here, and on Windows
+          // <windows.h> would turn min into a macro.
           uint64_t v = 0;
-          std::memcpy(&v, msg.at(i).data(),
-                      std::min(sizeof(v), msg.at(i).size()));
+          const size_t n =
+              msg.at(i).size() < sizeof(v) ? msg.at(i).size() : sizeof(v);
+          std::memcpy(&v, msg.at(i).data(), n);
           stats.push_back(v);
         }
         cout << setw(13) << " " << style::bold << setw(13) << "FRONTEND"
