@@ -12,7 +12,8 @@ An agent that works on PUSH-PULL messages received by a Dealer agent.
 
 #include "agent.hpp"
 #include "mads.hpp"
-#include <zmqpp/zmqpp.hpp>
+#include <zmq.hpp>
+#include <zmq_addon.hpp>
 
 using json = nlohmann::json;
 
@@ -22,7 +23,7 @@ class Worker : public Agent {
 public:
   Worker(string name, string settings_path) : 
     Agent(name, settings_path), 
-    _receiver(_context, zmqpp::socket_type::pull) {
+    _receiver(_context, zmq::socket_type::pull) {
     load_settings();
   }
 
@@ -38,13 +39,13 @@ public:
 
   json pull() {
     string payload;
-    zmqpp::message msg;
+    zmq::multipart_t msg;
     json j;
 
-    _receiver.receive(msg);
-    if (msg.parts() == 0) return j;
-      
-    msg >> payload;
+    msg.recv(_receiver);
+    if (msg.size() == 0) return j;
+
+    payload = msg.at(0).to_string();
     try {
       j = json::parse(payload);
     } catch (const std::exception &e) {
@@ -64,7 +65,7 @@ private:
 
 private:
   string _dealer_address;
-  zmqpp::socket _receiver;
+  zmq::socket_t _receiver;
 
 };
 

@@ -1,7 +1,8 @@
 #include "agent.hpp"
 #include <nlohmann/json.hpp>
 #include <toml++/toml.hpp>
-#include <zmqpp/zmqpp.hpp>
+#include <zmq.hpp>
+#include <zmq_addon.hpp>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -28,7 +29,6 @@ using namespace rang;
 
 using namespace std::string_view_literals;
 using namespace std::string_literals;
-using namespace zmqpp;
 using namespace std;
 using namespace std::chrono;
 
@@ -214,7 +214,7 @@ unique_ptr<Agent> start_agent(string name, string settings_uri,
 
 // Private methods implementations
 
-void Agent::setup_curve_on(zmqpp::socket &socket) {
+void Agent::setup_curve_on(zmq::socket_t &socket) {
   if (!_curve_auth)
     return;
   if (_curve_auth->client_public_key().empty() ||
@@ -229,45 +229,47 @@ void Agent::setup_curve_on(zmqpp::socket &socket) {
 tuple<string, filesystem::path, double>
 Agent::query_broker(string uri, string name, int timeout) {
   // Single REQ socket reused for both the settings and timecode round-trips.
-  zmqpp::socket socket(_context, zmqpp::socket_type::req);
+  zmq::socket_t socket(_context, zmq::socket_type::req);
   setup_curve_on(socket);
   // Drop any undelivered request on close: with the default infinite linger,
   // a request queued toward an unreachable broker keeps the context alive and
   // context termination (Agent shutdown) blocks forever.
-  socket.set(zmqpp::socket_option::linger, 0);
+  socket.set(zmq::sockopt::linger, 0);
   if (timeout > 0) {
-    socket.set(zmqpp::socket_option::receive_timeout, timeout);
-    socket.set(zmqpp::socket_option::send_timeout, timeout);
+    socket.set(zmq::sockopt::rcvtimeo, timeout);
+    socket.set(zmq::sockopt::sndtimeo, timeout);
   }
   socket.connect(uri);
 
   // ---- settings request ----
-  message msg_out, msg_in;
-  msg_out << LIB_VERSION << "settings" << name;
-  if (!socket.send(msg_out)) {
+  zmq::multipart_t msg_out, msg_in;
+  msg_out.addstr(LIB_VERSION);
+  msg_out.addstr("settings");
+  msg_out.addstr(name);
+  if (!msg_out.send(socket)) {
     socket.close();
     throw AgentError("Timed out in sending settings request to broker");
   }
-  if (!socket.receive(msg_in)) {
+  if (!msg_in.recv(socket)) {
     socket.close();
     throw AgentError("Timed out in receiving settings from broker");
   }
-  if (msg_in.parts() < 2) {
+  if (msg_in.size() < 2) {
     socket.close();
     throw AgentError(
         "Broker refuses to provide settings, check for version mismatch or "
         "missing settings for agent '" +
         name + "'");
   }
-  string version_str = msg_in.get(0);
+  string version_str = msg_in.at(0).to_string();
   if (!Mads::check_version(version_str)) {
     socket.close();
     throw AgentError("Received settings from broker with wrong version: " +
                      version_str);
   }
-  string raw_settings = msg_in.get(1);
+  string raw_settings = msg_in.at(1).to_string();
   filesystem::path attachment;
-  if (msg_in.parts() == 3) {
+  if (msg_in.size() == 3) {
     auto tmp_mads_dir = filesystem::temp_directory_path() / "mads";
     if (!filesystem::exists(tmp_mads_dir)) {
       if (!filesystem::create_directory(tmp_mads_dir)) {
@@ -283,7 +285,8 @@ Agent::query_broker(string uri, string name, int timeout) {
       throw AgentError(
           "Failed to open temporary file for writing attachment from broker");
     }
-    ofs.write(msg_in.get(2).data(), msg_in.get(2).size());
+    ofs.write(static_cast<const char *>(msg_in.at(2).data()),
+              msg_in.at(2).size());
     if (!ofs.good()) {
       socket.close();
       throw AgentError(
@@ -295,14 +298,15 @@ Agent::query_broker(string uri, string name, int timeout) {
 
   // ---- timecode request (same socket) ----
   chrono::system_clock::time_point now = chrono::system_clock::now();
-  message tc_out, tc_in;
-  tc_out << string("v") + LIB_VERSION << "timecode";
-  socket.send(tc_out);
-  if (!socket.receive(tc_in)) {
+  zmq::multipart_t tc_out, tc_in;
+  tc_out.addstr(string("v") + LIB_VERSION);
+  tc_out.addstr("timecode");
+  tc_out.send(socket);
+  if (!tc_in.recv(socket)) {
     socket.close();
     throw AgentError("Timed out in receiving timecode from broker");
   }
-  double broker_tc = std::stod(tc_in.get(0));
+  double broker_tc = std::stod(tc_in.at(0).to_string());
   double timecode_offset = broker_tc - timecode(now, timecode_fps);
 
   socket.disconnect(uri);
@@ -314,8 +318,8 @@ Agent::query_broker(string uri, string name, int timeout) {
 
 Agent::Agent(string name, string settings_uri)
     : _settings_uri(settings_uri), _context(),
-      _publisher(_context, socket_type::pub),
-      _subscriber(_context, socket_type::sub) {
+      _publisher(_context, zmq::socket_type::pub),
+      _subscriber(_context, zmq::socket_type::sub) {
 
   char hostname[HOST_NAME_MAX];
   if (gethostname(hostname, HOST_NAME_MAX)) {
@@ -533,11 +537,13 @@ void Agent::shutdown() {
   // Default linger is -1 (infinite), which causes the context to block forever
   // if any messages remain in the send buffer after disconnect().
   _curve_auth = nullptr;
-  try { _publisher.set(zmqpp::socket_option::linger, 0); } catch (...) {}
-  try { _subscriber.set(zmqpp::socket_option::linger, 0); } catch (...) {}
+  try { _publisher.set(zmq::sockopt::linger, 0); } catch (...) {}
+  try { _subscriber.set(zmq::sockopt::linger, 0); } catch (...) {}
   try { _publisher.close(); } catch (...) {}
   try { _subscriber.close(); } catch (...) {}
-  try { _context.terminate(); } catch (...) {}
+  // context_t::close() is zmq_ctx_term(): the same blocking teardown zmqpp
+  // spelled terminate(), not a non-blocking shutdown.
+  try { _context.close(); } catch (...) {}
 }
 
 void Agent::install_loop_watchdog(uint8_t max_count) {
@@ -779,7 +785,7 @@ void Agent::register_event(const event_type event, const nlohmann::json &info,
 void Agent::publish(nlohmann::json payload, string topic) {
   if (!_init_done)
     throw AgentError("Agent not initialized");
-  message message;
+  zmq::multipart_t message;
   int32_t offset = 0;
   if (payload.contains("event"))
     if (payload["event"] == event_map.at(event_type::shutdown) ||
@@ -815,13 +821,17 @@ void Agent::publish(nlohmann::json payload, string topic) {
   // (the receiver assumes that for 2-part frames). Any other combination must
   // carry the self-describing header.
   if (_wire_format == WireFormat::MsgPack || comp != Comp::Snappy) {
-    message << topic << make_wire_header(_wire_format, comp, false) << out;
+    message.addstr(topic);
+    message.addstr(make_wire_header(_wire_format, comp, false));
+    message.addstr(out);
   } else {
-    message << topic << out; // [topic][snappy(json)]
+    // [topic][snappy(json)]
+    message.addstr(topic);
+    message.addstr(out);
   }
   {
     std::lock_guard<std::mutex> lock(_publish_mutex);
-    _publisher.send(message);
+    message.send(_publisher);
   }
 }
 
@@ -829,7 +839,7 @@ void Agent::publish(const char *payload, size_t len,
            nlohmann::json meta, string topic) {
   if (!_init_done)
     throw AgentError("Agent not initialized");
-  message message;
+  zmq::multipart_t message;
   chrono::system_clock::time_point now = chrono::system_clock::now();
   if (!meta.contains("timestamp"))
     meta["timestamp"]["$date"] = get_ISODate_time(now);
@@ -844,16 +854,18 @@ void Agent::publish(const char *payload, size_t len,
   if (_wire_format == WireFormat::MsgPack) {
     // [topic][header(has_blob)][msgpack(meta)][raw bytes]. Metadata is small,
     // so it is left uncompressed.
-    message << topic << make_wire_header(WireFormat::MsgPack, Comp::None, true)
-            << encode_payload(meta, WireFormat::MsgPack);
+    message.addstr(topic);
+    message.addstr(make_wire_header(WireFormat::MsgPack, Comp::None, true));
+    message.addstr(encode_payload(meta, WireFormat::MsgPack));
   } else {
     // Legacy blob frame: [topic][json meta][raw bytes].
-    message << topic << meta.dump();
+    message.addstr(topic);
+    message.addstr(meta.dump());
   }
-  message.add_raw(payload, len);
+  message.addmem(payload, len);
   {
     std::lock_guard<std::mutex> lock(_publish_mutex);
-    _publisher.send(message);
+    message.send(_publisher);
   }
 }
 
@@ -870,7 +882,7 @@ void Agent::publish(const vector<unsigned char> &payload,
 }
 
 
-inline bool Agent::receive_raw(message &message, bool dont_block) {
+inline bool Agent::receive_raw(zmq::multipart_t &message, bool dont_block) {
   bool r = false;
   // LKV semantic: try and fetch the value from the drain thread
   // behaves as blocking
@@ -884,7 +896,7 @@ inline bool Agent::receive_raw(message &message, bool dont_block) {
        return _latest_message.value.has_value() || !keep_running() || dont_block;
     });
     if (_latest_message.value.has_value()) {
-      message = _latest_message.value.value().copy();
+      message = _latest_message.value.value().clone();
       _latest_message.value.reset();
       r = true;
     }
@@ -895,10 +907,10 @@ inline bool Agent::receive_raw(message &message, bool dont_block) {
     // enters the loop body more than once -- same single receive() call,
     // same behaviour, as before this feature existed.
     while (true) {
-      r = _subscriber.receive(message, dont_block);
-      if (!r || _wildcard_sub_topic.empty() || message.parts() == 0)
+      r = message.recv(_subscriber, dont_block ? ZMQ_DONTWAIT : 0);
+      if (!r || _wildcard_sub_topic.empty() || message.size() == 0)
         break;
-      if (_topic_matches_subscription(message.get(0)))
+      if (_topic_matches_subscription(message.at(0).to_string()))
         break;
       // Non-matching message under a broader wildcard-prefix subscribe:
       // silently drop and try again (bounded by dont_block/receive_timeout
@@ -917,37 +929,37 @@ message_type Agent::receive(bool dont_block) {
   if (_rc_owns_socket)
     throw AgentError("receive() cannot be used while threaded remote control "
                      "owns the subscriber socket");
-  message message;
+  zmq::multipart_t message;
   if (!receive_raw(message, dont_block)) {
     return message_type::none;
   }
 
-  const size_t parts = message.parts();
+  const size_t parts = message.size();
   // Malformed frames from the network are dropped, never fatal (§1.2).
   if (parts < 2) {
     _dropped_messages++;
     return message_type::none;
   }
 
-  string topic = message.get(0);
+  string topic = message.at(0).to_string();
 
   // Extended, self-describing frame? (§1.3)
   WireHeader hdr;
-  if (parse_wire_header(message.get(1), hdr)) {
+  if (parse_wire_header(message.at(1).to_string(), hdr)) {
     if (hdr.has_blob) {
       if (parts < 4) {
         _dropped_messages++;
         return message_type::none;
       }
       string meta_text;
-      if (!decode_to_json_text(message.get(2), hdr.format, hdr.compression,
+      if (!decode_to_json_text(message.at(2).to_string(), hdr.format, hdr.compression,
                                meta_text)) {
         _dropped_messages++;
         return message_type::none;
       }
       const auto *p =
-          static_cast<const unsigned char *>(message.raw_data(3));
-      const size_t n = message.size(3);
+          static_cast<const unsigned char *>(message.at(3).data());
+      const size_t n = message.at(3).size();
       std::lock_guard<std::mutex> lock(_message_state_mutex);
       _last_blob = make_tuple(std::move(topic), std::move(meta_text),
                               vector<unsigned char>(p, p + n));
@@ -958,7 +970,7 @@ message_type Agent::receive(bool dont_block) {
       _dropped_messages++;
       return message_type::none;
     }
-    auto pl = decode_to_payload(message.get(2), hdr.format, hdr.compression);
+    auto pl = decode_to_payload(message.at(2).to_string(), hdr.format, hdr.compression);
     if (!pl) {
       _dropped_messages++;
       return message_type::none;
@@ -977,7 +989,7 @@ message_type Agent::receive(bool dont_block) {
   // Legacy frames, disambiguated by part count.
   switch (parts) {
   case 2: { // [topic][snappy(json)]
-    string payload = message.get(1);
+    string payload = message.at(1).to_string();
     if (payload.empty()) {
       return message_type::none;
     }
@@ -1000,9 +1012,9 @@ message_type Agent::receive(bool dont_block) {
     return message_type::json;
   }
   case 3: { // [topic][json meta][raw bytes]
-    string format = message.get(1);
-    const auto *p = static_cast<const unsigned char *>(message.raw_data(2));
-    const size_t n = message.size(2);
+    string format = message.at(1).to_string();
+    const auto *p = static_cast<const unsigned char *>(message.at(2).data());
+    const size_t n = message.at(2).size();
     std::lock_guard<std::mutex> lock(_message_state_mutex);
     _last_blob = make_tuple(std::move(topic), std::move(format),
                             vector<unsigned char>(p, p + n));
@@ -1023,32 +1035,32 @@ bool Agent::receive_raw_message(string &topic, vector<string> &parts,
   if (_rc_owns_socket)
     throw AgentError("receive_raw_message() cannot be used while threaded "
                      "remote control owns the subscriber socket");
-  message message;
+  zmq::multipart_t message;
   if (!receive_raw(message, dont_block))
     return false;
 
-  const size_t n = message.parts();
+  const size_t n = message.size();
   if (n == 0)
     return false;
 
-  topic = message.get(0);
+  topic = message.at(0).to_string();
   parts.clear();
   parts.reserve(n - 1);
   for (size_t i = 1; i < n; ++i)
-    parts.push_back(message.get(i));
+    parts.push_back(message.at(i).to_string());
   return true;
 }
 
 void Agent::publish_raw_message(const string &topic, const vector<string> &parts) {
   if (!_init_done)
     throw AgentError("Agent not initialized");
-  message message;
-  message.add_raw(topic.data(), topic.size());
+  zmq::multipart_t message;
+  message.addmem(topic.data(), topic.size());
   for (auto const &part : parts)
-    message.add_raw(part.data(), part.size());
+    message.addmem(part.data(), part.size());
   {
     std::lock_guard<std::mutex> lock(_publish_mutex);
-    _publisher.send(message);
+    message.send(_publisher);
   }
 }
 
@@ -1162,25 +1174,26 @@ void Agent::enable_remote_control(bool threaded) {
     // The drain thread owns the subscriber socket exclusively (§1.7).
     _rc_owns_socket = true;
     _rc_thread = thread([this]() {
-      _subscriber.set(zmqpp::socket_option::receive_timeout, 500);
-      message msg;
+      _subscriber.set(zmq::sockopt::rcvtimeo, 500);
+      zmq::multipart_t msg;
       while (keep_running()) {
-        if (!_subscriber.receive(msg, false))
+        if (!msg.recv(_subscriber))
           continue;
-        const size_t parts = msg.parts();
+        const size_t parts = msg.size();
         if (parts < 2)
           continue;
-        string topic = msg.get(0);
+        string topic = msg.at(0).to_string();
         if (topic != "control")
           continue;
         string j;
         bool ok = false;
         WireHeader hdr;
-        if (parse_wire_header(msg.get(1), hdr) && !hdr.has_blob &&
+        if (parse_wire_header(msg.at(1).to_string(), hdr) && !hdr.has_blob &&
             parts >= 3) {
-          ok = decode_to_json_text(msg.get(2), hdr.format, hdr.compression, j);
+          ok = decode_to_json_text(msg.at(2).to_string(), hdr.format,
+                                   hdr.compression, j);
         } else if (parts == 2) {
-          string payload = msg.get(1);
+          string payload = msg.at(1).to_string();
           ok = snappy::Uncompress(payload.data(), payload.size(), &j);
         }
         if (ok)
@@ -1246,7 +1259,7 @@ void Agent::connect_pub(chrono::milliseconds delay) {
 }
 
 void Agent::connect_sub() {
-  _subscriber.set(zmqpp::socket_option::receive_timeout, _receive_timeout);
+  _subscriber.set(zmq::sockopt::rcvtimeo, _receive_timeout);
   if (_cross) {
     string port = _pub_endpoint.substr(_pub_endpoint.find_last_of(":") + 1);
     _pub_endpoint = "tcp://*:" + port;
@@ -1263,26 +1276,26 @@ void Agent::connect_sub() {
   for (auto &t : _sub_topic) {
     if (Mads::has_wildcard(t)) {
       _wildcard_sub_topic.push_back(t);
-      _subscriber.subscribe(Mads::literal_prefix(t));
+      _subscriber.set(zmq::sockopt::subscribe, Mads::literal_prefix(t));
     } else {
-      _subscriber.subscribe(t);
+      _subscriber.set(zmq::sockopt::subscribe, t);
     }
   }
   // Drain thread
   // this keeps the queue updated to the LKV when its size is 1
   if (_last_value_only) {
     _drain_thread = thread([this]() {
-      zmqpp::message_t msg;
+      zmq::multipart_t msg;
       while(keep_running() && _connected) {
         try {
-          if (!_subscriber.receive(msg, false)) continue;
+          if (!msg.recv(_subscriber)) continue;
           // Drop wildcard-subscribed messages that don't actually match
           // (the ZMQ-level subscribe above is only a broader prefix).
-          if (!_wildcard_sub_topic.empty() && msg.parts() > 0 &&
-              !_topic_matches_subscription(msg.get(0)))
+          if (!_wildcard_sub_topic.empty() && msg.size() > 0 &&
+              !_topic_matches_subscription(msg.at(0).to_string()))
             continue;
           std::lock_guard<std::mutex> lock(_latest_message.mtx);
-          _latest_message.value = msg.copy();
+          _latest_message.value = msg.clone();
           _latest_message.cv.notify_one();
         } catch (...) {}
       }
@@ -1381,7 +1394,7 @@ int Agent::receive_timeout() { return _receive_timeout; }
 
 void Agent::set_receive_timeout(int to) {
   _receive_timeout = to;
-  _subscriber.set(zmqpp::socket_option::receive_timeout, _receive_timeout);
+  _subscriber.set(zmq::sockopt::rcvtimeo, _receive_timeout);
 }
 
 void Agent::set_receive_timeout(std::chrono::milliseconds to) {
@@ -1433,7 +1446,7 @@ string Agent::settings_uri() { return _settings_uri; }
 // TODO: investigate
 void Agent::set_conflate(bool conflate) {
   if (_connected) throw AgentError("Cannot set_conflate after connection");
-  _subscriber.set(socket_option::conflate, conflate);
+  _subscriber.set(zmq::sockopt::conflate, static_cast<int>(conflate));
   _conflate = conflate;
 }
 
@@ -1446,15 +1459,13 @@ void Agent::set_high_watermark(int i) {
   if (_connected) throw AgentError("Cannot set_high_watermark after connection");
   // i == 0 now means "unlimited" (ZMQ semantics); it no longer silently
   // switches to Last-Known-Value mode as it used to (REFACTOR.md §1.4).
-  _subscriber.set(socket_option::receive_high_water_mark, i);
+  _subscriber.set(zmq::sockopt::rcvhwm, i);
   // Backward-compatible convenience: a queue of exactly 1 selects LKV delivery.
   set_delivery(i == 1 ? Delivery::LastKnownValue : Delivery::Queued);
 }
 
 int Agent::high_watermark() {
-  int i = 0;
-  _subscriber.get(socket_option::receive_high_water_mark, i);
-  return i;
+  return _subscriber.get(zmq::sockopt::rcvhwm);
 }
 
 void Agent::set_delivery(Delivery d) {

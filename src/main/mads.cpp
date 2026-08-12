@@ -37,8 +37,10 @@ Author: Paolo Bosetti, July 2024
 #include <optional>
 #include <nlohmann/json.hpp>
 #include <rang.hpp>
-#include <zmqpp/zmqpp.hpp>
-#include <zmqpp/curve.hpp>
+#include <zmq.hpp>
+#include <zmq_addon.hpp>
+
+#include "zap_auth.hpp"
 
 #ifdef _WIN32
 #include <process.h>
@@ -152,7 +154,7 @@ static int run_windows_subcommand(const std::string &exec_dir, int argc, char **
 
 bool save_keypair(pair<string, string> &key_files, const string &path, const string &name, bool force=false) {
   try {
-    zmqpp::curve::keypair keypair = zmqpp::curve::generate_keypair();
+    Mads::CurveKeypair keypair = Mads::generate_keypair();
     key_files.first = ( fs::path(path) / (name + ".key") ).string();
     key_files.second = ( fs::path(path) / (name + ".pub") ).string();
     if (!force) {
@@ -168,7 +170,7 @@ bool save_keypair(pair<string, string> &key_files, const string &path, const str
     pub_file << keypair.public_key;
     key_file.close();
     pub_file.close();
-  } catch (const zmqpp::zmq_internal_exception &e) {
+  } catch (const zmq::error_t &e) {
     cerr << fg::red << "Error: cannot generate CURVE keypair: " << e.what()
          << fg::reset << endl;
     cerr << fg::yellow
@@ -896,7 +898,7 @@ int main(int argc, char **argv) {
     return 0;
   }
   if (options_parsed.count("keypair")) {
-    zmqpp::context context;
+    zmq::context_t context;
     string name = options_parsed["keypair"].as<string>();
     pair<string, string> key_files;
     if (!save_keypair(key_files, fs::current_path().string(), name, force)) {

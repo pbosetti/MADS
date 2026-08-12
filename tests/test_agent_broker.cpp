@@ -1,7 +1,7 @@
 // Unit tests for the Mads::Agent <-> broker settings protocol
 // (src/agent.cpp: Agent::query_broker() ~230-307, Agent::init() broker branch
 // ~375-380, Agent::save_settings(), Mads::start_agent() ~193-213), exercised
-// against an in-process fake broker (a std::thread running a zmqpp REP socket
+// against an in-process fake broker (a std::thread running a cppzmq REP socket
 // on tcp://127.0.0.1:<port>, port range 42200-42299).
 //
 // Wire protocol transcribed from src/agent.cpp query_broker():
@@ -47,8 +47,8 @@ namespace {
 class FakeBroker {
 public:
   explicit FakeBroker(uint16_t port)
-      : _ctx(), _sock(_ctx, zmqpp::socket_type::rep) {
-    _sock.set(zmqpp::socket_option::receive_timeout, 100);
+      : _ctx(), _sock(_ctx, zmq::socket_type::rep) {
+    _sock.set(zmq::sockopt::rcvtimeo, 100);
     _sock.bind(mads_test::loopback(port));
   }
 
@@ -75,36 +75,38 @@ public:
 private:
   void run() {
     while (!_stopped) {
-      zmqpp::message msg;
-      if (!_sock.receive(msg)) continue; // 100ms poll timeout, check _stopped
-      if (msg.parts() < 2) continue;     // malformed request, ignore
-      std::string kind = msg.get(1);
-      zmqpp::message reply;
+      zmq::multipart_t msg;
+      if (!msg.recv(_sock)) continue; // 100ms poll timeout, check _stopped
+      if (msg.size() < 2) continue;     // malformed request, ignore
+      std::string kind = msg.at(1).to_string();
+      zmq::multipart_t reply;
       if (kind == "settings") {
         if (refuse_settings) {
-          reply << settings_version;
+          reply.addstr(settings_version);
         } else {
-          reply << settings_version << settings_body;
-          if (with_attachment) reply << attachment_bytes;
+          reply.addstr(settings_version);
+          reply.addstr(settings_body);
+          if (with_attachment) reply.addstr(attachment_bytes);
         }
-        _sock.send(reply);
+        reply.send(_sock);
       } else if (kind == "timecode") {
         if (timecode_delay_ms > 0)
           std::this_thread::sleep_for(
               std::chrono::milliseconds(timecode_delay_ms));
-        reply << std::to_string(timecode_value);
-        _sock.send(reply);
+        reply.addstr(std::to_string(timecode_value));
+        reply.send(_sock);
       } else {
         // Keep the REP socket's strict recv/send alternation intact even for
         // requests this fake broker does not otherwise understand.
-        reply << std::string(LIB_VERSION) << std::string("{}");
-        _sock.send(reply);
+        reply.addstr(std::string(LIB_VERSION));
+        reply.addstr(std::string("{}"));
+        reply.send(_sock);
       }
     }
   }
 
-  zmqpp::context _ctx;
-  zmqpp::socket _sock;
+  zmq::context_t _ctx;
+  zmq::socket_t _sock;
   std::thread _thread;
   std::atomic<bool> _stopped{false};
 };

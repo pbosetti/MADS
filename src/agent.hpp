@@ -41,7 +41,8 @@ Author(s): Paolo Bosetti
 #include <string_view>
 #include <thread>
 #include <future>
-#include <zmqpp/zmqpp.hpp>
+#include <zmq.hpp>
+#include <zmq_addon.hpp>
 #include <mutex>
 #include <condition_variable>
 #include <optional>
@@ -185,7 +186,7 @@ private:
    *
    * @param socket The socket to configure.
    */
-  void setup_curve_on(zmqpp::socket &socket);
+  void setup_curve_on(zmq::socket_t &socket);
 
   /**
    * @brief Read settings and timecode from the broker over a single REQ socket.
@@ -1056,7 +1057,7 @@ protected:
    * @return true new message
    * @return false no new message (when non blocking or timeout)
    */
-  bool receive_raw(zmqpp::message &message, bool dont_block = false);
+  bool receive_raw(zmq::multipart_t &message, bool dont_block = false);
 
   /**
    * @brief MQTT-style wildcard filter (P2): true if `topic` is accepted by
@@ -1087,9 +1088,9 @@ protected:
   // sub_topic entries, which keeps the receive-time filter a single cheap
   // emptiness check in that -- the common -- case, adding no overhead.
   std::vector<std::string> _wildcard_sub_topic;
-  zmqpp::context _context;
-  zmqpp::socket _publisher;
-  zmqpp::socket _subscriber;
+  zmq::context_t _context;
+  zmq::socket_t _publisher;
+  zmq::socket_t _subscriber;
   // A single LazyPayload per message is shared between _last_message and
   // _status so the lazy text/object caches are shared and never duplicated.
   std::map<std::string, std::shared_ptr<LazyPayload>> _status;
@@ -1120,7 +1121,7 @@ protected:
   std::filesystem::path _key_dir;
   bool _last_value_only = false;
   bool _shutdown_done = false;
-  SharedLatest<zmqpp::message_t> _latest_message;
+  SharedLatest<zmq::multipart_t> _latest_message;
   std::thread _drain_thread;
   std::thread _rc_thread;
   std::thread _watchdog_thread;

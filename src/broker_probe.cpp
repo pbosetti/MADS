@@ -3,8 +3,8 @@
 // MADS_HAS_MONGOCXX is defined -- the Mongo C++ driver's own transitive
 // <windows.h>). Including <winsock2.h>/<ws2tcpip.h> after any of that risks
 // them landing after a plain <windows.h> has already dragged in the legacy
-// <winsock.h>, which corrupts later Windows-only zmqpp headers in ways that
-// surface as unrelated parse errors deep inside zmqpp itself.
+// <winsock.h>, which corrupts later Windows-only ZMQ headers in ways that
+// surface as unrelated parse errors deep inside the ZMQ headers themselves.
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -26,7 +26,8 @@
 
 #include "mads.hpp"
 
-#include <zmqpp/zmqpp.hpp>
+#include <zmq.hpp>
+#include <zmq_addon.hpp>
 
 #include <algorithm>
 #include <thread>
@@ -132,25 +133,26 @@ bool tcp_connect_once(const std::string &host, int port,
 
 bool probe_broker(const std::string &uri, std::chrono::milliseconds timeout) {
   try {
-    zmqpp::context context;
-    zmqpp::socket socket(context, zmqpp::socket_type::req);
-    socket.set(zmqpp::socket_option::linger, 0);
+    zmq::context_t context;
+    zmq::socket_t socket(context, zmq::socket_type::req);
+    socket.set(zmq::sockopt::linger, 0);
     const int timeout_ms = static_cast<int>(
         std::max<std::chrono::milliseconds::rep>(0, timeout.count()));
-    socket.set(zmqpp::socket_option::receive_timeout, timeout_ms);
-    socket.set(zmqpp::socket_option::send_timeout, timeout_ms);
+    socket.set(zmq::sockopt::rcvtimeo, timeout_ms);
+    socket.set(zmq::sockopt::sndtimeo, timeout_ms);
     socket.connect(uri);
 
-    zmqpp::message request;
-    request << std::string(LIB_VERSION) << std::string("settings")
-           << std::string("__mads_up_probe__");
-    if (!socket.send(request)) {
+    zmq::multipart_t request;
+    request.addstr(std::string(LIB_VERSION));
+    request.addstr(std::string("settings"));
+    request.addstr(std::string("__mads_up_probe__"));
+    if (!request.send(socket)) {
       socket.close();
       return false;
     }
 
-    zmqpp::message reply;
-    const bool ok = socket.receive(reply);
+    zmq::multipart_t reply;
+    const bool ok = reply.recv(socket);
     socket.close();
     return ok;
   } catch (const std::exception &) {

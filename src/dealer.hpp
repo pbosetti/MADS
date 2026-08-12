@@ -13,7 +13,8 @@ listening workers, in a round-robin fashion.
 
 #include "agent.hpp"
 #include "mads.hpp"
-#include <zmqpp/zmqpp.hpp>
+#include <zmq.hpp>
+#include <zmq_addon.hpp>
 
 using json = nlohmann::json;
 
@@ -23,7 +24,7 @@ class Dealer : public Agent {
 public:
   Dealer(string name, string settings_path) : 
     Agent(name, settings_path), 
-    _sender(_context, zmqpp::socket_type::push) {
+    _sender(_context, zmq::socket_type::push) {
     load_settings();
   }
 
@@ -38,11 +39,12 @@ public:
   }
 
   void push(string message) {
-    _sender.send(message);
+    _sender.send(zmq::buffer(message), zmq::send_flags::none);
   }
 
   void push(json j) {
-    _sender.send(j.dump());
+    const string payload = j.dump();
+    _sender.send(zmq::buffer(payload), zmq::send_flags::none);
   }
 
 private: 
@@ -54,7 +56,7 @@ private:
 
 private:
   string _dealer_address;
-  zmqpp::socket _sender;
+  zmq::socket_t _sender;
 
 };
 

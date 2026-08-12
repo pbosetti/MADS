@@ -57,7 +57,7 @@ public:
    * @note This function is blocking. 
    */
   void route() {
-    zmqpp::message message;
+    zmq::multipart_t message;
     string payload, compressed;
     regex re("^(\\w+):\\s*(\\{.*\\})\\s*$");
     smatch match;

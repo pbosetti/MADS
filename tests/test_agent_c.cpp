@@ -24,7 +24,7 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
-#include <zmqpp/curve.hpp>
+#include "zap_auth.hpp"
 
 #include "agent.hpp"
 #include "agent_c.h"
@@ -384,8 +384,8 @@ TEST_CASE("agent_set_client_public_key/secret_key/server_public_key succeed "
   // ZMQ validates CURVE key length/encoding (32 raw bytes or 40-char Z85) as
   // soon as the socket option is set, so real keypairs are needed even
   // though this test never opens a network connection.
-  zmqpp::curve::keypair client_kp = zmqpp::curve::generate_keypair();
-  zmqpp::curve::keypair server_kp = zmqpp::curve::generate_keypair();
+  Mads::CurveKeypair client_kp = Mads::generate_keypair();
+  Mads::CurveKeypair server_kp = Mads::generate_keypair();
 
   // Before agent_setup_crypto() the CurveAuth is not initialized yet, so the
   // key setters must fail cleanly with -1 and report an error.
@@ -413,7 +413,7 @@ TEST_CASE("agent_init(crypto=true) with an incomplete key setup fails and "
   agent_t a = agent_create("cabcrypto2", "none");
   REQUIRE(agent_setup_crypto(a, false) == 0);
   // Only the client public key is set; secret/server keys are missing.
-  zmqpp::curve::keypair client_kp = zmqpp::curve::generate_keypair();
+  Mads::CurveKeypair client_kp = Mads::generate_keypair();
   REQUIRE(agent_set_client_public_key(a, client_kp.public_key.c_str()) == 0);
   REQUIRE(agent_init(a, true) == -1);
   REQUIRE(std::string(agent_last_error()).find("Error initializing agent") !=

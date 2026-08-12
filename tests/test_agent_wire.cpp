@@ -58,7 +58,7 @@ bool retry_until(PublishFn publish_once, CheckFn check_received,
 
 // Hand-crafts a MADS extended-frame header identical to
 // src/agent.cpp make_wire_header()/WIRE_HEADER_SIZE, used only to inject
-// synthetic frames via a raw zmqpp PUB socket (bypassing Agent::publish()).
+// synthetic frames via a raw cppzmq PUB socket (bypassing Agent::publish()).
 std::string wire_header_bytes(uint8_t fmt, uint8_t comp, bool blob) {
   std::string h;
   h.append("MADS", 4);
@@ -209,8 +209,8 @@ TEST_CASE("dropped_messages() counts malformed frames and the agent stays "
           "[agent_wire]") {
   mads_test::RunningGuard guard;
   const uint16_t port = 42128;
-  zmqpp::context ctx;
-  zmqpp::socket raw_pub(ctx, zmqpp::socket_type::pub);
+  zmq::context_t ctx;
+  zmq::socket_t raw_pub(ctx, zmq::socket_type::pub);
   raw_pub.bind(mads_test::loopback(port));
 
   auto sub = make_sub("subMal", port);
@@ -224,10 +224,10 @@ TEST_CASE("dropped_messages() counts malformed frames and the agent stays "
   // payload fails to decompress, so it must be dropped, not delivered.
   bool saw_drop = false;
   for (int attempt = 0; attempt < 50 && !saw_drop; ++attempt) {
-    zmqpp::message bad;
-    bad << std::string("mal")
-        << std::string("this is definitely not snappy compressed data");
-    raw_pub.send(bad);
+    zmq::multipart_t bad;
+    bad.addstr(std::string("mal"));
+    bad.addstr(std::string("this is definitely not snappy compressed data"));
+    bad.send(raw_pub);
     // dropped_messages() only increments as a side effect of receive()
     // actually parsing (and rejecting) a frame, so the predicate must drive
     // receive() itself rather than passively poll the counter.
@@ -248,11 +248,11 @@ TEST_CASE("dropped_messages() counts malformed frames and the agent stays "
   size_t dropped_after_bad = sub->dropped_messages();
   bool got_good = false;
   for (int attempt = 0; attempt < 50 && !got_good; ++attempt) {
-    zmqpp::message good;
-    good << std::string("mal") << wire_header_bytes(0 /*Json*/, 0 /*None*/,
-                                                     false)
-        << std::string(R"({"ok":true})");
-    raw_pub.send(good);
+    zmq::multipart_t good;
+    good.addstr(std::string("mal"));
+    good.addstr(wire_header_bytes(0 /*Json*/, 0 /*None*/, false));
+    good.addstr(std::string(R"({"ok":true})"));
+    good.send(raw_pub);
     got_good = mads_test::wait_for(
         [&] { return sub->receive(true) == Mads::message_type::json; }, 150ms,
         10ms);

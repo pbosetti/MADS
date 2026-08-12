@@ -41,9 +41,8 @@ Author(s): Paolo Bosetti
 #include <string_view>
 #include <sys/stat.h>
 #include <toml++/toml.hpp>
-#include <zmqpp/proxy.hpp>
-#include <zmqpp/proxy_steerable.hpp>
-#include <zmqpp/zmqpp.hpp>
+#include <zmq.hpp>
+#include <zmq_addon.hpp>
 #ifdef _WIN32
 #include <iphlpapi.h>
 #include <signal.h>
@@ -209,9 +208,20 @@ template <typename T> constexpr unsigned long long htonll(T value) noexcept {
 // message payloads. This is what lets the wire payload format evolve (snappy,
 // MsgPack, new compression — see REFACTOR.md §4.1 / MSGPACK.md) with zero broker
 // changes. Do NOT add payload parsing here.
-void proxy(zmqpp::socket &frontend, zmqpp::socket &backend,
-           zmqpp::socket &ctrl) {
-  zmqpp::proxy_steerable(frontend, backend, ctrl);
+void proxy(zmq::socket_t &frontend, zmq::socket_t &backend,
+           zmq::socket_t &ctrl) {
+  // No capture socket: the broker never taps the stream it forwards.
+  zmq::proxy_steerable(frontend, backend, zmq::socket_ref(), ctrl);
+}
+
+// Send one steering command (TERMINATE/PAUSE/RESUME/STATISTICS) to the proxy
+// and wait for its acknowledgement, which the REQ/REP pair requires before the
+// next command can be sent.
+zmq::multipart_t steer(zmq::socket_t &controller, std::string_view command) {
+  controller.send(zmq::buffer(command), zmq::send_flags::none);
+  zmq::multipart_t reply;
+  reply.recv(controller);
+  return reply;
 }
 
 // Install SIGINT/SIGTERM handlers that request a clean shutdown by stopping
@@ -365,9 +375,9 @@ int main(int argc, char **argv) {
       config[name]["prefer_loopback_for_local_services"].value_or(true);
 
   // Create broker sockets
-  zmqpp::context context;
-  zmqpp::socket frontend(context, zmqpp::socket_type::xsub);
-  zmqpp::socket backend(context, zmqpp::socket_type::xpub);
+  zmq::context_t context;
+  zmq::socket_t frontend(context, zmq::socket_type::xsub);
+  zmq::socket_t backend(context, zmq::socket_type::xpub);
   if (crypto) {
     auto whitelist = config[name]["ip_whitelist"].as_array();
     bool verbose = config[name]["auth_verbose"].value_or(false);
@@ -389,7 +399,7 @@ int main(int argc, char **argv) {
       curve_auth_ptr = nullptr;
       frontend.close();
       backend.close();
-      context.terminate();
+      context.close();
       std::exit(EXIT_FAILURE);
     }
     try {
@@ -400,7 +410,7 @@ int main(int argc, char **argv) {
       curve_auth_ptr = nullptr;
       frontend.close();
       backend.close();
-      context.terminate();
+      context.close();
       std::exit(EXIT_FAILURE);
     }
   }
@@ -412,39 +422,39 @@ int main(int argc, char **argv) {
     std::cout << "Binding broker backend (XPUB) at " << style::bold
               << backend_address << style::reset << endl;
     backend.bind(backend_address);
-  } catch (const zmqpp::zmq_internal_exception &e) {
+  } catch (const zmq::error_t &e) {
     cerr << fg::red << "ZMQ error, could not connect: " << e.what() << fg::reset
          << endl;
     std::exit(EXIT_FAILURE);
   }
 
   // Create Settings socket (Req/Rep)
-  zmqpp::socket settings(context, zmqpp::socket_type::rep);
+  zmq::socket_t settings(context, zmq::socket_type::rep);
   if (crypto)
     curve_auth_ptr->setup_curve_server(settings, key_name);
   settings.bind(settings_address);
-  settings.set(zmqpp::socket_option::receive_timeout, 1000);
+  settings.set(zmq::sockopt::rcvtimeo, 1000);
   cout << "Binding broker shared settings (REP) at " << style::bold
        << settings_address << style::reset << endl;
   string ini_table = read_settings_file(settings_path);
   std::mutex ini_table_mutex;
   thread settings_thread([&]() {
     while (running) {
-      zmqpp::message msg;
-      zmqpp::message content;
-      content << LIB_VERSION;
-      if (settings.receive(msg)) {
-        if (msg.parts() < 2) {
+      zmq::multipart_t msg;
+      zmq::multipart_t content;
+      content.addstr(LIB_VERSION);
+      if (msg.recv(settings)) {
+        if (msg.size() < 2) {
           cerr << goback(1, !daemon) << fg::red << timestamp()
                << "Received malformed message from agent, "
                << "expected at least 2 parts" << fg::reset << endl;
           continue;
         }
-        string agent_version = msg.get(0);
-        string cmd = msg.get(1);
+        string agent_version = msg.at(0).to_string();
+        string cmd = msg.at(1).to_string();
         string agent_name = "unknown";
-        if (msg.parts() == 3) {
-          agent_name = msg.get(2);
+        if (msg.size() == 3) {
+          agent_name = msg.at(2).to_string();
         }
         if (cmd == "settings") {
           if (!Mads::check_version(agent_version)) {
@@ -458,7 +468,7 @@ int main(int argc, char **argv) {
                  << agent_version << ")" << endl;
             {
               std::lock_guard<std::mutex> lock(ini_table_mutex);
-              content << ini_table;
+              content.addstr(ini_table);
             }
             string attachment_path =
                 config[agent_name]["attachment"].value_or("");
@@ -480,18 +490,19 @@ int main(int argc, char **argv) {
                      << filesystem::file_size(attachment_path) << " bytes)"
                      << fg::reset << style::reset << endl;
                 attachment_content << attachment_file.rdbuf();
-                content << attachment_content.str();
+                content.addstr(attachment_content.str());
               }
             }
           }
-          settings.send(content);
+          content.send(settings);
         } else if (cmd == "timecode") {
           chrono::system_clock::time_point now = chrono::system_clock::now();
-          settings.send(to_string(Mads::timecode(now, timecode_fps)));
+          const string tc = to_string(Mads::timecode(now, timecode_fps));
+          settings.send(zmq::buffer(tc), zmq::send_flags::none);
         } else {
           cerr << goback(1, !daemon) << fg::yellow << timestamp()
                << "Got unexpected command " << cmd << fg::reset << endl;
-          settings.send(content);
+          content.send(settings);
         }
       }
     }
@@ -604,12 +615,12 @@ int main(int argc, char **argv) {
 
     // Graceful shutdown: run the proxy in steerable mode so that SIGINT/SIGTERM
     // (stopping the process-wide run flag, see install_signal_handlers above) can unwind it
-    // cleanly. The blocking zmqpp::proxy() cannot be interrupted by a signal, so
+    // cleanly. The blocking zmq::proxy() cannot be interrupted by a signal, so
     // we drive a steerable proxy from a control socket and send TERMINATE once a
     // shutdown is requested.
-    zmqpp::socket controlled(context, zmqpp::socket_type::rep);
+    zmq::socket_t controlled(context, zmq::socket_type::rep);
     controlled.bind("inproc://broker-ctrl");
-    zmqpp::socket controller(context, zmqpp::socket_type::req);
+    zmq::socket_t controller(context, zmq::socket_type::req);
     controller.connect("inproc://broker-ctrl");
 
     thread proxy_thread(proxy, ref(frontend), ref(backend), ref(controlled));
@@ -620,9 +631,7 @@ int main(int argc, char **argv) {
 
     cout << fg::green << "Shutdown requested, stopping proxy..." << fg::reset
          << endl;
-    zmqpp::message msg;
-    controller.send("TERMINATE");
-    controller.receive(msg);
+    steer(controller, "TERMINATE");
     proxy_thread.join();
 
     if (discovery_retry_thread.joinable()) {
@@ -639,15 +648,15 @@ int main(int argc, char **argv) {
     controlled.close();
     frontend.close();
     backend.close();
-    context.terminate();
+    context.close();
     exit(EXIT_SUCCESS);
   }
 
   // Run interactively as a steerable proxy
   else {
-    zmqpp::socket controlled(context, zmqpp::socket_type::rep);
+    zmq::socket_t controlled(context, zmq::socket_type::rep);
     controlled.bind("inproc://broker-ctrl");
-    zmqpp::socket controller(context, zmqpp::socket_type::req);
+    zmq::socket_t controller(context, zmq::socket_type::req);
     controller.connect("inproc://broker-ctrl");
 
     auto settings_url_list = settings_urls(settings_address);
@@ -657,7 +666,7 @@ int main(int argc, char **argv) {
     print_instructions();
 
     while (running) {
-      zmqpp::message msg;
+      zmq::multipart_t msg;
       char c = getch();
       if (c == '\0')
         continue;
@@ -671,31 +680,30 @@ int main(int argc, char **argv) {
 #endif
       case 'q':
       case 'Q':
-        controller.send("TERMINATE");
-        controller.receive(msg);
+        msg = steer(controller, "TERMINATE");
         running = false;
         break;
       case 'r':
       case 'R':
-        // NOTE: there is a bug in zmqpp lib and PAUSE and RESUME commands
-        // have inverted meanings
-        controller.send("RESUME");
-        controller.receive(msg);
+        // Commands now reach zmq_proxy_steerable() directly, so PAUSE and
+        // RESUME finally mean what they say (zmqpp used to invert them).
+        msg = steer(controller, "RESUME");
         cout << "Resuming operation" << endl;
         break;
       case 'p':
       case 'P':
-        controller.send("PAUSE");
-        controller.receive(msg);
+        msg = steer(controller, "PAUSE");
         cout << "Pausing operation" << endl;
         break;
       case 'i':
       case 'I': {
-        controller.send("STATISTICS");
-        controller.receive(msg);
+        msg = steer(controller, "STATISTICS");
         vector<uint64_t> stats;
-        for (size_t i = 0; i < msg.parts(); i++) {
-          stats.push_back(msg.get<uint64_t>(i));
+        for (size_t i = 0; i < msg.size(); i++) {
+          uint64_t v = 0;
+          std::memcpy(&v, msg.at(i).data(),
+                      std::min(sizeof(v), msg.at(i).size()));
+          stats.push_back(v);
         }
         cout << setw(13) << " " << style::bold << setw(13) << "FRONTEND"
              << setw(13) << "BACKEND" << style::reset << endl;
@@ -741,7 +749,7 @@ int main(int argc, char **argv) {
       curve_auth_ptr = nullptr;
     frontend.close();
     backend.close();
-    context.terminate();
+    context.close();
     if (reload) {
       cout << fg::yellow << "Restarting..." << fg::reset << endl;
 #ifdef _WIN32

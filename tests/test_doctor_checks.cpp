@@ -23,8 +23,10 @@
 #include <string>
 #include <thread>
 
-#include <zmqpp/curve.hpp>
-#include <zmqpp/zmqpp.hpp>
+#include <zmq.hpp>
+#include <zmq_addon.hpp>
+
+#include "zap_auth.hpp"
 
 #include "doctor_checks.hpp"
 #include "mads_test_helpers.hpp"
@@ -43,8 +45,8 @@ fs::path fixtures_dir() { return fs::path(MADS_TEST_FIXTURES_DIR) / "settings"; 
 // needs proof that something is there and speaking back.
 class FakeBroker {
 public:
-  explicit FakeBroker(uint16_t port) : _ctx(), _sock(_ctx, zmqpp::socket_type::rep) {
-    _sock.set(zmqpp::socket_option::receive_timeout, 100);
+  explicit FakeBroker(uint16_t port) : _ctx(), _sock(_ctx, zmq::socket_type::rep) {
+    _sock.set(zmq::sockopt::rcvtimeo, 100);
     _sock.bind(mads_test::loopback(port));
   }
   ~FakeBroker() { stop(); }
@@ -58,15 +60,16 @@ public:
 private:
   void run() {
     while (!_stopped) {
-      zmqpp::message msg;
-      if (!_sock.receive(msg)) continue;
-      zmqpp::message reply;
-      reply << std::string("v0.0") << std::string("{}");
-      _sock.send(reply);
+      zmq::multipart_t msg;
+      if (!msg.recv(_sock)) continue;
+      zmq::multipart_t reply;
+      reply.addstr(std::string("v0.0"));
+      reply.addstr(std::string("{}"));
+      reply.send(_sock);
     }
   }
-  zmqpp::context _ctx;
-  zmqpp::socket _sock;
+  zmq::context_t _ctx;
+  zmq::socket_t _sock;
   std::thread _thread;
   std::atomic<bool> _stopped{false};
 };
@@ -76,13 +79,13 @@ private:
 // connection.
 class FakeListener {
 public:
-  explicit FakeListener(uint16_t port) : _ctx(), _sock(_ctx, zmqpp::socket_type::rep) {
+  explicit FakeListener(uint16_t port) : _ctx(), _sock(_ctx, zmq::socket_type::rep) {
     _sock.bind(mads_test::loopback(port));
   }
 
 private:
-  zmqpp::context _ctx;
-  zmqpp::socket _sock;
+  zmq::context_t _ctx;
+  zmq::socket_t _sock;
 };
 
 // RAII temp directory, same shape as tests/test_curve.cpp's TempKeyDir.
@@ -106,7 +109,7 @@ void write_file(const fs::path &p, const std::string &content) {
 }
 
 void write_keypair(const fs::path &dir, const std::string &name,
-                   const zmqpp::curve::keypair &kp) {
+                   const Mads::CurveKeypair &kp) {
   write_file(dir / (name + ".key"), kp.secret_key + "\n");
   write_file(dir / (name + ".pub"), kp.public_key + "\n");
 }
@@ -286,7 +289,7 @@ TEST_CASE("evaluate_plugin_protocol passes on an exact match", "[doctor][plugin]
 
 TEST_CASE("is_well_formed_curve_key accepts a real generated Z85 key and rejects junk",
          "[doctor][curve]") {
-  auto kp = zmqpp::curve::generate_keypair();
+  auto kp = Mads::generate_keypair();
   REQUIRE(Mads::Doctor::is_well_formed_curve_key(kp.public_key));
   REQUIRE(Mads::Doctor::is_well_formed_curve_key(kp.secret_key));
 
@@ -322,8 +325,8 @@ TEST_CASE("check_curve_keys fails listing every missing file", "[doctor][curve]"
 TEST_CASE("check_curve_keys fails when a key file exists but is not well-formed",
          "[doctor][curve]") {
   TempDir dir("curve_malformed");
-  auto client_kp = zmqpp::curve::generate_keypair();
-  auto server_kp = zmqpp::curve::generate_keypair();
+  auto client_kp = Mads::generate_keypair();
+  auto server_kp = Mads::generate_keypair();
   write_keypair(dir.path, "client", client_kp);
   write_file(dir.path / "broker.pub", "not-a-real-z85-key-value\n");
 
@@ -341,8 +344,8 @@ TEST_CASE("check_curve_keys fails when a key file exists but is not well-formed"
 TEST_CASE("check_curve_keys passes when client + server key files are all well-formed",
          "[doctor][curve]") {
   TempDir dir("curve_ok");
-  auto client_kp = zmqpp::curve::generate_keypair();
-  auto server_kp = zmqpp::curve::generate_keypair();
+  auto client_kp = Mads::generate_keypair();
+  auto server_kp = Mads::generate_keypair();
   write_keypair(dir.path, "client", client_kp);
   write_file(dir.path / "broker.pub", server_kp.public_key + "\n");
 
@@ -357,8 +360,8 @@ TEST_CASE("check_curve_keys passes when client + server key files are all well-f
 
 TEST_CASE("check_curve_keys tolerates CRLF line endings in key files", "[doctor][curve]") {
   TempDir dir("curve_crlf");
-  auto client_kp = zmqpp::curve::generate_keypair();
-  auto server_kp = zmqpp::curve::generate_keypair();
+  auto client_kp = Mads::generate_keypair();
+  auto server_kp = Mads::generate_keypair();
   write_file(dir.path / "client.key", client_kp.secret_key + "\r\n");
   write_file(dir.path / "client.pub", client_kp.public_key + "\r\n");
   write_file(dir.path / "broker.pub", server_kp.public_key + "\r\n");

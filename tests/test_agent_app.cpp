@@ -48,8 +48,8 @@ struct Argv {
 class FakeBroker {
 public:
   explicit FakeBroker(uint16_t port, std::string body)
-      : _body(std::move(body)), _ctx(), _sock(_ctx, zmqpp::socket_type::rep) {
-    _sock.set(zmqpp::socket_option::receive_timeout, 100);
+      : _body(std::move(body)), _ctx(), _sock(_ctx, zmq::socket_type::rep) {
+    _sock.set(zmq::sockopt::rcvtimeo, 100);
     _sock.bind(mads_test::loopback(port));
     _thread = std::thread([this] { run(); });
   }
@@ -61,25 +61,27 @@ public:
 private:
   void run() {
     while (!_stopped) {
-      zmqpp::message msg;
-      if (!_sock.receive(msg)) continue;
-      if (msg.parts() < 2) continue;
-      std::string kind = msg.get(1);
-      zmqpp::message reply;
+      zmq::multipart_t msg;
+      if (!msg.recv(_sock)) continue;
+      if (msg.size() < 2) continue;
+      std::string kind = msg.at(1).to_string();
+      zmq::multipart_t reply;
       if (kind == "settings") {
-        reply << std::string(LIB_VERSION) << _body;
+        reply.addstr(std::string(LIB_VERSION));
+        reply.addstr(_body);
       } else if (kind == "timecode") {
-        reply << std::string("0.0");
+        reply.addstr(std::string("0.0"));
       } else {
-        reply << std::string(LIB_VERSION) << std::string("{}");
+        reply.addstr(std::string(LIB_VERSION));
+        reply.addstr(std::string("{}"));
       }
-      _sock.send(reply);
+      reply.send(_sock);
     }
   }
 
   std::string _body;
-  zmqpp::context _ctx;
-  zmqpp::socket _sock;
+  zmq::context_t _ctx;
+  zmq::socket_t _sock;
   std::thread _thread;
   std::atomic<bool> _stopped{false};
 };

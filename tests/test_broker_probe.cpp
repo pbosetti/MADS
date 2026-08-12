@@ -1,7 +1,7 @@
 // Unit tests for src/broker_probe.hpp/.cpp: Mads::probe_broker() (backs
 // `ready = "broker"`) and Mads::probe_tcp_port() (backs `ready = "port:<n>"`).
 // Reuses the same fake-broker pattern as tests/test_agent_broker.cpp (a
-// std::thread running a zmqpp REP socket on loopback), in this suite's own
+// std::thread running a cppzmq REP socket on loopback), in this suite's own
 // port range (42600-42699, per mads_test_helpers.hpp).
 #include <catch2/catch_test_macros.hpp>
 
@@ -9,7 +9,8 @@
 #include <chrono>
 #include <thread>
 
-#include <zmqpp/zmqpp.hpp>
+#include <zmq.hpp>
+#include <zmq_addon.hpp>
 
 #include "broker_probe.hpp"
 #include "mads_test_helpers.hpp"
@@ -24,8 +25,8 @@ namespace {
 class FakeBroker {
 public:
   explicit FakeBroker(uint16_t port)
-      : _ctx(), _sock(_ctx, zmqpp::socket_type::rep) {
-    _sock.set(zmqpp::socket_option::receive_timeout, 100);
+      : _ctx(), _sock(_ctx, zmq::socket_type::rep) {
+    _sock.set(zmq::sockopt::rcvtimeo, 100);
     _sock.bind(mads_test::loopback(port));
   }
 
@@ -43,16 +44,17 @@ public:
 private:
   void run() {
     while (!_stopped) {
-      zmqpp::message msg;
-      if (!_sock.receive(msg)) continue;
-      zmqpp::message reply;
-      reply << std::string("v0.0") << std::string("{}");
-      _sock.send(reply);
+      zmq::multipart_t msg;
+      if (!msg.recv(_sock)) continue;
+      zmq::multipart_t reply;
+      reply.addstr(std::string("v0.0"));
+      reply.addstr(std::string("{}"));
+      reply.send(_sock);
     }
   }
 
-  zmqpp::context _ctx;
-  zmqpp::socket _sock;
+  zmq::context_t _ctx;
+  zmq::socket_t _sock;
   std::thread _thread;
   std::atomic<bool> _stopped{false};
 };

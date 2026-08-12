@@ -1,7 +1,7 @@
 /*
-    ____ _   _ ______     _______               _   _     
-  / ___| | | |  _ \ \   / / ____|   __ _ _   _| |_| |__  
- | |   | | | | |_) \ \ / /|  _|    / _` | | | | __| '_ \ 
+    ____ _   _ ______     _______               _   _
+  / ___| | | |  _ \ \   / / ____|   __ _ _   _| |_| |__
+ | |   | | | | |_) \ \ / /|  _|    / _` | | | | __| '_ \
  | |___| |_| |  _ < \ V / | |___  | (_| | |_| | |_| | | |
   \____|\___/|_| \_\ \_/  |_____|  \__,_|\__,_|\__|_| |_|
 
@@ -23,8 +23,9 @@ Copyright (C) 2025 Paolo Bosetti
 #include <vector>
 #include <filesystem>
 #include <fstream>
-#include <zmqpp/zmqpp.hpp>
-#include <zmqpp/curve.hpp>
+#include <zmq.hpp>
+
+#include "zap_auth.hpp"
 
 using namespace std;
 namespace fs = std::filesystem;
@@ -37,18 +38,18 @@ class CurveAuth {
 public:
   /**
    * @brief  Constructs a CurveAuth object for managing CURVE authentication.
-   * 
-   * @param context The zmqpp::context to use for authentication.
+   *
+   * @param context The zmq::context_t to use for authentication.
    **/
-  CurveAuth(zmqpp::context & context) : _authenticator(context) {}
+  CurveAuth(zmq::context_t & context) : _authenticator(context) {}
   ~CurveAuth() = default;
-  
-  /** 
+
+  /**
    * @brief Sets up ZAP authentication with the specified verbosity.
-   * 
+   *
    * Also setups the allowed IP addresses for authentication, reading from
    * the allowed_ips member variable.
-   * 
+   *
    * @param verbose Whether to enable verbose logging.
   */
   void setup_auth(auth_verbose verbose = auth_verbose::off) {
@@ -60,14 +61,17 @@ public:
     for (const auto &ip : allowed_ips) {
       _authenticator.allow(ip);
     }
+    // Binds inproc://zeromq.zap.01 before returning, so no socket configured
+    // after this point can complete a handshake unauthenticated.
+    _authenticator.start();
   }
 
-  /** 
+  /**
    * @brief Fetches client public keys from the specified directory.
-   * 
+   *
    * Scans the given directory for files with .pub extension and stores
    * the client key names (without extension) in the _client_keys member variable.
-   * 
+   *
    * @param key_dir The directory to scan for client public keys.
    * @throws runtime_error if no client public keys are found.
   */
@@ -87,22 +91,22 @@ public:
     }
   }
 
-  /** 
+  /**
    * @brief Sets up CURVE security for a server socket.
-   * 
+   *
    * Reads the server's keypair from files and configures
    * the authenticator to accept clients with the given public keys.
-   * 
-   * @param socket The zmqpp::socket to secure.
+   *
+   * @param socket The zmq::socket_t to secure.
    * @param key_name The base name of the server key files (.key and .pub).
    * @throws runtime_error if key files cannot be opened or read.
   */
-  void setup_curve_server(zmqpp::socket &socket, string const &key_name) {
+  void setup_curve_server(zmq::socket_t &socket, string const &key_name) {
     if (_key_dir.empty()) {
       throw runtime_error("Key directory not set. Call fetch_public_keys() first.");
     }
     // We read the server certificates from files generated previously
-    zmqpp::curve::keypair server_keypair;
+    CurveKeypair server_keypair;
     string name = "";
     try {
       name = (_key_dir / (key_name + ".pub")).string();
@@ -134,24 +138,23 @@ public:
       client_pub_file.close();
       _authenticator.configure_curve(client_key);
     }
-    socket.set(zmqpp::socket_option::identity, "IDENT");
-    int as_server = 1;
-    socket.set(zmqpp::socket_option::curve_server, as_server);
-    socket.set(zmqpp::socket_option::curve_secret_key, server_keypair.secret_key);
+    socket.set(zmq::sockopt::routing_id, "IDENT");
+    socket.set(zmq::sockopt::curve_server, 1);
+    socket.set(zmq::sockopt::curve_secretkey, server_keypair.secret_key);
   }
 
-  /** 
+  /**
    * @brief Sets up CURVE security for a client socket.
-   * 
+   *
    * Reads the client's keypair from files and configures
    * the socket to use the server's public key.
-   * 
-   * @param socket The zmqpp::socket to secure.
+   *
+   * @param socket The zmq::socket_t to secure.
    * @param client_name The base name of the client key files (.key and .pub).
    * @param server_name The base name of the server public key file (.pub).
    * @throws runtime_error if key files cannot be opened or read.
   */
-  void setup_curve_client(zmqpp::socket &socket, string const &client_name, string const &server_name) {
+  void setup_curve_client(zmq::socket_t &socket, string const &client_name, string const &server_name) {
     // We load the certificates from files generated previously
     try {
       string name = (_key_dir / (client_name + ".pub")).string();
@@ -180,24 +183,24 @@ public:
     } catch (const std::exception &e) {
       throw runtime_error(e.what());
     }
-    
+
     setup_curve_client(socket);
   }
 
-  /** 
+  /**
    * @brief Sets up CURVE security for a client socket using raw keys.
-   * 
+   *
    * Configures the socket to use the provided public and secret keys.
-   * 
-   * @param socket The zmqpp::socket to secure.
+   *
+   * @param socket The zmq::socket_t to secure.
    */
-  void setup_curve_client(zmqpp::socket &socket) {
+  void setup_curve_client(zmq::socket_t &socket) {
     if (_client_keypair.public_key.empty() || _client_keypair.secret_key.empty() || _server_public_key.empty()) {
       throw runtime_error("Client or server keys not set. Call setup_curve_client() or set them individually first.");
     }
-    socket.set(zmqpp::socket_option::curve_public_key, _client_keypair.public_key);
-    socket.set(zmqpp::socket_option::curve_secret_key, _client_keypair.secret_key);
-    socket.set(zmqpp::socket_option::curve_server_key, _server_public_key);
+    socket.set(zmq::sockopt::curve_publickey, _client_keypair.public_key);
+    socket.set(zmq::sockopt::curve_secretkey, _client_keypair.secret_key);
+    socket.set(zmq::sockopt::curve_serverkey, _server_public_key);
   }
 
   void set_key_dir(fs::path const &key_dir) {
@@ -231,14 +234,14 @@ public:
     return _server_public_key;
   }
 
-  // zmqpp::auth &get_authenticator() { return _authenticator; }
-  
+  // ZapAuth &get_authenticator() { return _authenticator; }
+
   vector<string> allowed_ips{};
 private:
-  zmqpp::auth _authenticator;
+  ZapAuth _authenticator;
   vector<string> _client_keys{};
   fs::path _key_dir;
-  zmqpp::curve::keypair _client_keypair = {"", ""};
+  CurveKeypair _client_keypair = {"", ""};
   string _server_public_key = "";
 };
 
