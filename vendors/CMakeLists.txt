@@ -148,6 +148,13 @@ FetchContent_Declare(
 )
 
 FetchContent_Declare(
+  cppzmq
+  GIT_REPOSITORY https://github.com/zeromq/cppzmq.git
+  GIT_TAG v4.11.0
+  GIT_SHALLOW TRUE
+)
+
+FetchContent_Declare(
   inja
   GIT_REPOSITORY https://github.com/pantor/inja.git
   GIT_TAG v3.4.0
@@ -410,6 +417,23 @@ if(ANDROID)
     endif()
   endforeach()
 endif()
+# cppzmq is header-only (zmq.hpp + zmq_addon.hpp). Its own CMake project insists
+# on find_package(ZeroMQ), which would not see the in-tree libzmq target above,
+# so populate the sources and expose the headers directly instead of configuring
+# it. MADS_CPPZMQ_INCLUDE_DIR is consumed by the top-level CMakeLists.
+FetchContent_GetProperties(cppzmq)
+if(NOT cppzmq_POPULATED)
+  FetchContent_Populate(cppzmq)
+endif()
+set(MADS_CPPZMQ_INCLUDE_DIR "${cppzmq_SOURCE_DIR}" CACHE PATH "" FORCE)
+install(
+  FILES
+    "${cppzmq_SOURCE_DIR}/zmq.hpp"
+    "${cppzmq_SOURCE_DIR}/zmq_addon.hpp"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  COMPONENT MadsCore
+)
+
 add_vendor(snappy)
 if(TARGET snappy)
   install(

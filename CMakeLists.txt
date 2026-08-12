@@ -279,6 +279,10 @@ endif()
 if(DEFINED _zmqpp_binary_dir AND _zmqpp_binary_dir)
   target_include_directories(${LIB_NAME} PRIVATE "${_zmqpp_binary_dir}")
 endif()
+# cppzmq is header-only; vendors/ populates it without configuring its project.
+if(MADS_CPPZMQ_INCLUDE_DIR)
+  target_include_directories(${LIB_NAME} PRIVATE "${MADS_CPPZMQ_INCLUDE_DIR}")
+endif()
 link_first_available(${LIB_NAME} CANDIDATES inja::inja inja)
 link_first_available(${LIB_NAME} CANDIDATES Snappy::snappy snappy)
 if(MADS_ENABLE_MONGOCXX)
@@ -370,6 +374,13 @@ if(DEFINED _zmqpp_binary_dir AND _zmqpp_binary_dir)
     MadsMainDeps
     INTERFACE
       "${_zmqpp_binary_dir}"
+  )
+endif()
+if(MADS_CPPZMQ_INCLUDE_DIR)
+  target_include_directories(
+    MadsMainDeps
+    INTERFACE
+      "${MADS_CPPZMQ_INCLUDE_DIR}"
   )
 endif()
 
