@@ -288,7 +288,7 @@ Status as executed on macOS (AppleClang 21, libzmq 4.3.5, cppzmq 4.11.0).
 | 5 | **Plugins** — scaffold, build and run under the loaders | **PASS** via the smoke suite (`plugin_gen`, `plugin_run_*`). |
 | 6 | **Installed SDK + C/C++/Python agents** | **PASS — 32/32 smoke tests** against a fresh `cmake --install` prefix. The install tree now carries `zmq.hpp`/`zmq_addon.hpp`/`zmqpp_compat.hpp` and no longer has an `include/zmqpp/` directory. |
 | 7 | **Compat shim** | **PASS.** `test_zmqpp_compat.cpp` is written entirely in the old idiom, including an `Agent` subclass building a socket from `_context` and passing `_publisher` as a `zmqpp::socket&`. Deprecation warnings verified to fire outside the MADS build. |
-| 8 | **Default build configuration** (`MADS_ENABLE_MONGOCXX=ON`, `MADS_DIRECTOR=ON`) | see below |
+| 8 | **Default build configuration** (`MADS_ENABLE_MONGOCXX=ON`, `MADS_DIRECTOR=ON`) | **PASS.** Clean configure + build of all 1010 targets, then **384/384 tests pass**. The seven MongoDB cases skipped in the lighter configuration run and pass here; the single skip is the one that only applies to a build *without* driver support. |
 
 **Not verified here — must pass in CI before merge:**
 - **Windows/MSVC.** Two things need the Windows job specifically: that the
@@ -297,8 +297,9 @@ Status as executed on macOS (AppleClang 21, libzmq 4.3.5, cppzmq 4.11.0).
   leave a clean exit. That removal is deliberately its own commit so it can be
   reverted alone if the job disagrees.
 - **Linux x86_64 and arm64**, and the coverage job.
-- **Rust plugin crate** — unaffected by design (pure C ABI over `agent_c.h`), but
-  not built as part of this verification.
+- ~~Rust plugin crate~~ — **verified**: the crate builds, and the example filter
+  plugin was run end-to-end under `mads-rfilter` against a migrated broker,
+  exercising the C ABI (`agent_c.h`) path.
 
 ### Reproducing the out-of-tree checks
 
