@@ -158,10 +158,17 @@ Roughly 200 LOC, header-only, covering only the ~10 options / ~11 socket methods
    does not fix it. It is fixed separately, and now regression-tested.
 5. **Compile-time-checked socket options** (`zmq::sockopt::*` carries the option's type)
    instead of zmqpp's runtime-typed `socket_option` enum.
-6. **Access to the full modern libzmq surface** zmqpp never exposed — notably
-   `ZMQ_ONLY_FIRST_SUBSCRIBE`, directly relevant to the topic byte-prefix pitfalls
-   documented in `CONTEXT.md` and worked around in `src/topic_match.hpp`; plus
-   `zmq::poller_t` and socket monitoring for future `mads doctor`/`mads top` work.
+6. **Access to the full modern libzmq surface** zmqpp never exposed — socket
+   monitoring (`zmq_socket_monitor`), ZMTP heartbeats, `ZMQ_XPUB_NODROP`, XPUB
+   subscription visibility, and the `zmq_proxy_steerable()` capture socket, all
+   of which are useful for `mads doctor`/`mads top`. See `ZMQ_DEVELOPMENT.md`
+   for the surveyed list.
+   (An earlier revision of this document cited `ZMQ_ONLY_FIRST_SUBSCRIBE` here as
+   being "directly relevant to the topic byte-prefix pitfalls" of
+   `src/topic_match.hpp`. That was wrong: per `zmq_setsockopt(3)`, the option
+   governs how many subscribe/unsubscribe *commands* are processed inside one
+   multipart message on XSUB/XPUB. It has nothing to do with SUB prefix matching
+   and does not help the wildcard problem.)
 7. **Leaner crypto path.** Today `Agent::setup_crypto()` spawns a zmqpp actor thread in
    *every* crypto-enabled agent, though only the broker needs a ZAP authenticator.
    Owning the handler lets it be created lazily and joined deterministically.
