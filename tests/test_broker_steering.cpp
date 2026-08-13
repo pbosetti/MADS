@@ -82,6 +82,22 @@ struct ProxyHarness {
     backend.close();
   }
 
+  // Publishes exactly `n` two-frame messages ("t" + a 10-byte body) and
+  // returns how many came back, so a test can predict the counters exactly.
+  int pump_exactly(int n) {
+    int received = 0;
+    for (int i = 0; i < n; ++i) {
+      zmq::multipart_t out;
+      out.addstr("t");
+      out.addstr("0123456789");
+      out.send(pub);
+      zmq::multipart_t in;
+      if (in.recv(sub)) received++;
+      std::this_thread::sleep_for(30ms);
+    }
+    return received;
+  }
+
   // Publishes for `ms` and returns how many messages made it through.
   int pump(int ms) {
     int received = 0;
@@ -144,5 +160,42 @@ TEST_CASE("STATISTICS returns the eight counter frames the broker prints",
   REQUIRE(stats.size() == 8);
   for (size_t i = 0; i < stats.size(); ++i) {
     REQUIRE(stats.at(i).size() == sizeof(uint64_t));
+  }
+}
+
+// The counters are NATIVE-endian uint64_t. Reading them with a byte-order
+// conversion applied (as broker.cpp did briefly during the cppzmq migration,
+// where a leftover htonll() no longer had zmqpp's ntohll() to cancel it)
+// turns a count of 14 into 1008806316530991104. Pinning plausible magnitudes
+// catches that class of bug, which asserting on frame *sizes* alone does not.
+TEST_CASE("STATISTICS counters are native-endian and plausibly sized",
+          "[broker_steering]") {
+  ProxyHarness h(43907, 43908);
+
+  // Each message is two frames ("t" + a 10-byte body) = 11 bytes.
+  const int sent = h.pump_exactly(7);
+  REQUIRE(sent == 7);
+
+  auto stats = steer(h.controller, "STATISTICS");
+  REQUIRE(stats.size() == 8);
+
+  auto counter = [&](size_t i) {
+    uint64_t v = 0;
+    std::memcpy(&v, stats.at(i).data(), sizeof(v));
+    return v;
+  };
+
+  // Frontend messages-in counts frames, not messages: 7 x 2 parts.
+  const uint64_t frontend_msgs_in = counter(0);
+  const uint64_t frontend_bytes_in = counter(1);
+  REQUIRE(frontend_msgs_in == 14);
+  REQUIRE(frontend_bytes_in == 7 * 11);
+
+  // Every counter must stay in a range a human would recognise. A byte-swapped
+  // small number lands astronomically high, so this is the assertion that
+  // fails loudly if a conversion ever creeps back in.
+  for (size_t i = 0; i < stats.size(); ++i) {
+    INFO("counter " << i << " = " << counter(i));
+    REQUIRE(counter(i) < 1000000u);
   }
 }

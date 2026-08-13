@@ -190,18 +190,9 @@ string timestamp() {
   return ss.str();
 }
 
-#ifdef __linux__
-#include <algorithm> // std::reverse()
-#include <endian.h>  // __BYTE_ORDER __LITTLE_ENDIAN
-
-template <typename T> constexpr unsigned long long htonll(T value) noexcept {
-#if __BYTE_ORDER == __LITTLE_ENDIAN
-  char *ptr = reinterpret_cast<char *>(&value);
-  std::reverse(ptr, ptr + sizeof(T));
-#endif
-  return (unsigned long long)value;
-}
-#endif
+// (A local htonll() used to live here, for Linux only, where the platform
+// headers do not provide one. Nothing byte-swaps the proxy statistics any
+// more -- see the STATISTICS handler below -- so it has no callers left.)
 
 // INVARIANT: the broker is payload-opaque. It forwards frames verbatim between
 // the XSUB frontend and XPUB backend and never inspects, parses, or rewrites
@@ -711,31 +702,39 @@ int main(int argc, char **argv) {
       case 'i':
       case 'I': {
         msg = steer(controller, "STATISTICS");
+        // zmq_proxy_steerable() writes each counter as a NATIVE-endian
+        // uint64_t, so these are read straight out with no byte-order
+        // conversion. (Until the cppzmq migration this went through zmqpp's
+        // message::get<uint64_t>(), which applied ntohll() to every integer
+        // part it read; the htonll() that used to wrap each value here was
+        // undoing that, not converting anything. Both are gone -- applying
+        // only one of the two swaps prints 19-digit garbage.)
         vector<uint64_t> stats;
         for (size_t i = 0; i < msg.size(); i++) {
-          // Each counter arrives as a raw uint64_t frame. Not std::min():
-          // <algorithm> is only included on Linux here, and on Windows
-          // <windows.h> would turn min into a macro.
           uint64_t v = 0;
           const size_t n =
               msg.at(i).size() < sizeof(v) ? msg.at(i).size() : sizeof(v);
           std::memcpy(&v, msg.at(i).data(), n);
           stats.push_back(v);
         }
-        cout << setw(13) << " " << style::bold << setw(13) << "FRONTEND"
-             << setw(13) << "BACKEND" << style::reset << endl;
-        cout << fg::green << setw(13) << "Messages in:" << setw(13)
-             << htonll(stats[0]) << setw(13) << htonll(stats[4]) << fg::reset
-             << endl;
-        cout << fg::green << setw(13) << "Bytes in:" << setw(13)
-             << htonll(stats[1]) << setw(13) << htonll(stats[5]) << fg::reset
-             << endl;
-        cout << fg::yellow << setw(13) << "Messages out:" << setw(13)
-             << htonll(stats[2]) << setw(13) << htonll(stats[6]) << fg::reset
-             << endl;
-        cout << fg::yellow << setw(13) << "Bytes out:" << setw(13)
-             << htonll(stats[3]) << setw(13) << htonll(stats[7]) << fg::reset
-             << endl;
+        if (stats.size() < 8) {
+          cerr << fg::red << "Broker returned " << stats.size()
+               << " statistics counters, expected 8" << fg::reset << endl;
+          break;
+        }
+        // Wide enough for a 20-digit uint64_t, so two large counters can
+        // never run together into one unreadable number.
+        constexpr int STAT_W = 22;
+        cout << setw(13) << " " << style::bold << setw(STAT_W) << "FRONTEND"
+             << setw(STAT_W) << "BACKEND" << style::reset << endl;
+        cout << fg::green << setw(13) << "Messages in:" << setw(STAT_W)
+             << stats[0] << setw(STAT_W) << stats[4] << fg::reset << endl;
+        cout << fg::green << setw(13) << "Bytes in:" << setw(STAT_W)
+             << stats[1] << setw(STAT_W) << stats[5] << fg::reset << endl;
+        cout << fg::yellow << setw(13) << "Messages out:" << setw(STAT_W)
+             << stats[2] << setw(STAT_W) << stats[6] << fg::reset << endl;
+        cout << fg::yellow << setw(13) << "Bytes out:" << setw(STAT_W)
+             << stats[3] << setw(STAT_W) << stats[7] << fg::reset << endl;
         break;
       }
       case 'n':
