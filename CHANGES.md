@@ -64,7 +64,30 @@ release version accordingly before tagging.
     `tcp_keepalive_intvl` and `sndbuf` / `rcvbuf`: can be set fleet-wide and
     overridden per agent, following the existing `wire_format`/`compression`
     precedent. The broker applies the fleet-wide value to its own sockets too.
+  - `[agents] heartbeat_ivl` / `heartbeat_ttl` / `heartbeat_timeout`: ZMTP
+    `PING`/`PONG` liveness, MADS's first transport-level detection of a
+    half-open connection (`ZMQ_DEVELOPMENT.md` §3.2). Off unless
+    `heartbeat_ivl` is set.
+  - `[agents] reconnect_ivl` / `reconnect_ivl_max`: exponential reconnect
+    backoff instead of libzmq's default flat 100ms retry forever (§3.3).
+  - `[agents] immediate`: refuse to queue toward a not-yet-connected peer
+    instead of buffering into a pipe that may never drain (§3.4).
+  - `[agents] max_msg_size`: reject oversized frames at the transport.
+    **Disconnects the offending peer** rather than dropping one frame --
+    different from a per-message filter, and worth knowing before enabling it
+    (§3.5). Unlimited (libzmq's own `-1`, not `0`) by default.
   See `man mads-broker` for details.
+
+- **ROUTER settings endpoint with a worker pool (`[broker] settings_workers`,
+  default `2`).** The settings socket was a single lockstep REP, and the
+  handler reads plugin attachments off disk inside the loop, so one agent
+  fetching a large attachment blocked every other agent's settings request
+  behind it (`ZMQ_DEVELOPMENT.md` §3.6). Replaced with a ROUTER (external,
+  CURVE-secured as before) proxied to a DEALER (inproc) that a small pool of
+  REP workers connect to -- each running the exact previous handler body, so
+  the wire is unchanged. REQ<->ROUTER is a standard pairing and DEALER<->REP
+  preserves the envelope transparently, so an unmigrated agent's plain REQ
+  settings request keeps working unchanged. See `man mads-broker`.
 
 - **Socket connection lifecycle monitoring (`Mads::SocketMonitor`).** Wraps
   `zmq_socket_monitor()`/`zmq::monitor_t` (`ZMQ_DEVELOPMENT.md` §2.1), purely

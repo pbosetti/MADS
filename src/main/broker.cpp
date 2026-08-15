@@ -583,18 +583,55 @@ int main(int argc, char **argv) {
                               "tcp://127.0.0.1:" + frontend_port, 1000ms);
   }
 
-  // Create Settings socket (Req/Rep)
-  zmq::socket_t settings(context, zmq::socket_type::rep);
+  // ZMQ_DEVELOPMENT.md §3.6: ROUTER (external, CURVE-secured) <-proxy-> DEALER
+  // (inproc) <- N worker REP sockets, replacing the single lockstep REP. The
+  // handler reads plugin attachments off disk inside the loop, so one agent
+  // fetching a large attachment used to block every other agent's settings
+  // request behind it on the single REP; a worker pool removes that
+  // head-of-line blocking. REQ<->ROUTER is a standard pairing and DEALER<->REP
+  // preserves the envelope transparently, so unmigrated REQ agents are
+  // unaffected -- the wire is identical to before.
+  //
+  // CURVE goes on the ROUTER only: the DEALER/REP hop is inproc, with no
+  // handshake to secure.
+  int settings_workers = config[name]["settings_workers"].value_or(2);
+  if (settings_workers < 1) {
+    cerr << fg::yellow << "Invalid [broker] settings_workers = "
+         << settings_workers << ", clamping to 1" << fg::reset << endl;
+    settings_workers = 1;
+  }
+  const string settings_workers_endpoint = "inproc://mads-broker-settings-workers";
+
+  zmq::socket_t settings_router(context, zmq::socket_type::router);
   if (crypto)
-    curve_auth_ptr->setup_curve_server(settings, key_name);
-  socket_options.apply(settings);
-  settings.bind(settings_address);
-  settings.set(zmq::sockopt::rcvtimeo, 1000);
-  cout << "Binding broker shared settings (REP) at " << style::bold
-       << settings_address << style::reset << endl;
+    curve_auth_ptr->setup_curve_server(settings_router, key_name);
+  socket_options.apply(settings_router);
+  settings_router.bind(settings_address);
+  cout << "Binding broker shared settings (ROUTER, " << settings_workers
+       << " worker" << (settings_workers == 1 ? "" : "s") << ") at "
+       << style::bold << settings_address << style::reset << endl;
+
+  zmq::socket_t settings_dealer(context, zmq::socket_type::dealer);
+  settings_dealer.bind(settings_workers_endpoint);
+
+  // Steerable so shutdown can TERMINATE it deterministically, exactly like
+  // the frontend/backend proxy() above.
+  zmq::socket_t settings_proxy_controlled(context, zmq::socket_type::rep);
+  settings_proxy_controlled.bind("inproc://mads-broker-settings-proxy-ctrl");
+  zmq::socket_t settings_proxy_controller(context, zmq::socket_type::req);
+  settings_proxy_controller.connect("inproc://mads-broker-settings-proxy-ctrl");
+  thread settings_proxy_thread(proxy, ref(settings_router), ref(settings_dealer),
+                               ref(settings_proxy_controlled), zmq::socket_ref());
+
   string ini_table = read_settings_file(settings_path);
   std::mutex ini_table_mutex;
-  thread settings_thread([&]() {
+
+  // Each worker's REP loop body is the pre-ROUTER handler verbatim: same
+  // commands, same frame layout, same check_version() handling.
+  auto settings_worker_body = [&]() {
+    zmq::socket_t settings(context, zmq::socket_type::rep);
+    settings.set(zmq::sockopt::rcvtimeo, 1000);
+    settings.connect(settings_workers_endpoint);
     while (running) {
       zmq::multipart_t msg;
       zmq::multipart_t content;
@@ -663,7 +700,13 @@ int main(int argc, char **argv) {
       }
     }
     settings.close();
-  });
+  };
+
+  vector<thread> settings_worker_threads;
+  settings_worker_threads.reserve(settings_workers);
+  for (int i = 0; i < settings_workers; ++i) {
+    settings_worker_threads.emplace_back(settings_worker_body);
+  }
 
   cout << "Timecode FPS: " << style::bold << timecode_fps << style::reset
        << endl;
@@ -795,17 +838,23 @@ int main(int argc, char **argv) {
       discovery_retry_thread.join();
     }
     discovery_service.stop_advertising();
-    // Stop the settings worker before terminating the context, otherwise its
-    // blocking receive() would throw "Context was terminated".
+    // Stop the settings workers before terminating the context, otherwise
+    // their blocking receive() would throw "Context was terminated".
     running = false;
-    settings_thread.join();
+    for (auto &t : settings_worker_threads) t.join();
+    steer(settings_proxy_controller, "TERMINATE");
+    settings_proxy_thread.join();
     settings_watcher.stop();
     settings_watcher_thread.join();
     controller.close();
     controlled.close();
+    settings_proxy_controller.close();
+    settings_proxy_controlled.close();
     if (subscription_table) subscription_table->stop();
     frontend.close();
     backend.close();
+    settings_router.close();
+    settings_dealer.close();
     context.close();
     exit(EXIT_SUCCESS);
   }
@@ -924,16 +973,22 @@ int main(int argc, char **argv) {
     discovery_service.stop_advertising();
     cout << fg::green << "Closing sockets..." << fg::reset << endl;
     running = false;
-    settings_thread.join();
+    for (auto &t : settings_worker_threads) t.join();
+    steer(settings_proxy_controller, "TERMINATE");
+    settings_proxy_thread.join();
     settings_watcher.stop();
     settings_watcher_thread.join();
     controller.close();
     controlled.close();
+    settings_proxy_controller.close();
+    settings_proxy_controlled.close();
     if (crypto)
       curve_auth_ptr = nullptr;
     if (subscription_table) subscription_table->stop();
     frontend.close();
     backend.close();
+    settings_router.close();
+    settings_dealer.close();
     context.close();
     if (reload) {
       cout << fg::yellow << "Restarting..." << fg::reset << endl;

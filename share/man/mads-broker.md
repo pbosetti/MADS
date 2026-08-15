@@ -63,6 +63,32 @@ unedited settings file behaves exactly as before they existed.
    `[agents]`-then-per-agent-override resolution as the keepalive settings
    above.
 
+**heartbeat_ivl**, **heartbeat_ttl**, **heartbeat_timeout** (`[agents]`, integer, milliseconds)
+:  Makes libzmq exchange ZMTP `PING`/`PONG` commands, the only
+   transport-level liveness MADS has -- without it, a half-open connection
+   (an unplugged cable, a NAT/firewall timeout) looks alive indefinitely.
+   Heartbeats stay off unless `heartbeat_ivl` is set. `heartbeat_ttl` is
+   internally in units of 100ms (libzmq caps it at 6553.5s); pass it here in
+   milliseconds like the other two, it is converted for you. Same
+   `[agents]`-then-per-agent-override resolution as the keepalive settings.
+
+**reconnect_ivl**, **reconnect_ivl_max** (`[agents]`, integer, milliseconds, defaults `100`/`0`)
+:  The default is a flat 100ms retry forever: a fleet hammering a downed
+   broker continuously, then thundering-herding on recovery. Setting
+   `reconnect_ivl_max` enables exponential backoff up to that ceiling; 30000
+   (30s) is a reasonable value.
+
+**immediate** (`[agents]`, boolean, default `false`)
+:  Refuses to queue messages toward a peer that is not connected yet, instead
+   of buffering them into a pipe that may never drain.
+
+**max_msg_size** (`[agents]`, integer, bytes, default unlimited)
+:  Rejects oversized frames at the transport instead of allocating for them.
+   **Disconnects the offending peer** rather than dropping just the one
+   oversized frame -- for a PUB/SUB agent that means the peer immediately
+   reconnects and retries, so this is a defensive limit against a
+   misconfigured or hostile publisher, not a per-message filter.
+
 **subscription_table** (`[broker]`, boolean, default `false`)
 :  When enabled, the broker publishes a live topic -> subscriber-count table
    on the `subscriptions` topic every second (an ordinary MADS message, e.g.
@@ -73,6 +99,16 @@ unedited settings file behaves exactly as before they existed.
    forwards, not just subscription frames. An unmigrated agent that happens
    to subscribe to `subscriptions` simply ignores the unrecognised topic; no
    settings-contract change is involved.
+
+**settings_workers** (`[broker]`, integer, default `2`)
+:  Number of worker threads answering settings requests behind a ROUTER
+   endpoint (previously a single lockstep REP). The handler reads plugin
+   attachments off disk inside the loop, so on a single REP, one agent
+   fetching a large attachment blocked every other agent's settings request
+   behind it; a worker pool removes that head-of-line blocking. REQ<->ROUTER
+   is a standard pairing, so this is invisible on the wire: an unmigrated
+   agent's plain REQ settings request works unchanged. A value below 1 is
+   clamped to 1 with a warning rather than refused.
 
 # BUGS
 
