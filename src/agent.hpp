@@ -1157,8 +1157,14 @@ protected:
   bool _last_value_only = false;
   bool _shutdown_done = false;
   SharedLatest<zmq::multipart_t> _latest_message;
-  std::thread _drain_thread;
-  std::thread _rc_thread;
+  // Owns _subscriber exclusively whenever LKV delivery and/or threaded
+  // remote control need to consume it off the application thread (started
+  // in connect_sub() iff _last_value_only || _rc_owns_socket). A single
+  // thread rather than one-per-feature: two threads calling recv() on the
+  // same (non-thread-safe) ZMQ socket is undefined behaviour, and with LKV
+  // and threaded remote control both enabled it also meant a message landed
+  // on whichever thread's recv() call won the race.
+  std::thread _io_thread;
   std::thread _watchdog_thread;
   // Delayed startup-event publisher: owned (not detached) so shutdown() can
   // wake it via _event_cv and join it before the sockets close.

@@ -121,6 +121,27 @@ release version accordingly before tagging.
   ordinary MADS-format frame too, without duplicating the encoding. Pure move,
   no behaviour change.
 
+- **`Agent`'s LKV drain thread and threaded-remote-control thread are now one
+  `zmq_poll()`-based I/O thread (`ZMQ_DEVELOPMENT.md` §4.1).** Previously
+  these were two independent threads, and nothing stopped both from being
+  active at once (LKV delivery plus `enable_remote_control(true)`) -- each
+  called `recv()` on the same non-thread-safe `_subscriber`, undefined
+  behaviour in principle and, in practice, a message landing on whichever
+  thread's `recv()` won the race: a "control" command could be silently
+  stored as an ordinary LKV value instead of reaching `remote_control()`, and
+  an ordinary message could be silently dropped by the remote-control thread
+  instead of reaching the LKV slot. A single thread now owns `_subscriber`
+  exclusively whenever either feature needs it, dispatching each message to
+  its one correct destination; an agent using neither is unaffected (the
+  application thread keeps calling `receive()` directly, as before). No
+  public API change; behaviour is identical from the outside, and an agent
+  using both features together now has one fewer thread than the sum of the
+  two it used to run. Socket connection monitoring (`Mads::SocketMonitor`,
+  above) stays on its own dedicated thread for now rather than sharing this
+  poll loop -- a possible further consolidation, not a correctness
+  requirement, since the monitor's PAIR socket is never shared with
+  `_subscriber`.
+
 ## Fixes
 
 - **Broker `p`/`r` keys now actually pause and resume.** The interactive

@@ -407,9 +407,8 @@ void Agent::shutdown() {
     _latest_message.cv.notify_all();
   }
 
-  // 3. Join background threads (bounded by their receive timeouts)
-  if (_drain_thread.joinable()) _drain_thread.join();
-  if (_rc_thread.joinable()) _rc_thread.join();
+  // 3. Join the I/O thread (bounded by its receive timeout)
+  if (_io_thread.joinable()) _io_thread.join();
 
   // 3b. Stop the socket monitors before the sockets they watch are closed
   //     below (SocketMonitor::stop() detaches while the socket is still
@@ -589,8 +588,7 @@ void Agent::disconnect() {
   // predicate) so the join is prompt.
   _event_cv.notify_all();
   if (_startup_event_thread.joinable()) _startup_event_thread.join();
-  if (_drain_thread.joinable()) _drain_thread.join();
-  if (_rc_thread.joinable()) _rc_thread.join();
+  if (_io_thread.joinable()) _io_thread.join();
 
   try {
     _publisher.disconnect(_pub_endpoint);
@@ -1065,37 +1063,11 @@ void Agent::enable_remote_control(bool threaded) {
   _remote_controlled = true;
   _sub_topic.push_back("control");
   if (threaded) {
-    // The drain thread owns the subscriber socket exclusively (§1.7).
+    // The unified I/O thread owns the subscriber socket exclusively (§1.7);
+    // it is actually started in connect_sub(), once _subscriber exists and
+    // is about to be connected. Flagging it here, before connect(), is what
+    // this method's precondition guarantees.
     _rc_owns_socket = true;
-    _rc_thread = thread([this]() {
-      _subscriber.set(zmq::sockopt::rcvtimeo, 500);
-      zmq::multipart_t msg;
-      while (keep_running()) {
-        if (!msg.recv(_subscriber))
-          continue;
-        const size_t parts = msg.size();
-        if (parts < 2)
-          continue;
-        string topic = msg.at(0).to_string();
-        if (topic != "control")
-          continue;
-        string j;
-        bool ok = false;
-        WireHeader hdr;
-        if (parse_wire_header(msg.at(1).to_string(), hdr) && !hdr.has_blob &&
-            parts >= 3) {
-          ok = decode_to_json_text(msg.at(2).to_string(), hdr.format,
-                                   hdr.compression, j);
-        } else if (parts == 2) {
-          string payload = msg.at(1).to_string();
-          ok = snappy::Uncompress(payload.data(), payload.size(), &j);
-        }
-        if (ok)
-          remote_control(j);
-        else
-          _dropped_messages++;
-      }
-    });
   }
 }
 
@@ -1203,22 +1175,63 @@ void Agent::connect_sub() {
       _subscriber.set(zmq::sockopt::subscribe, t);
     }
   }
-  // Drain thread
-  // this keeps the queue updated to the LKV when its size is 1
-  if (_last_value_only) {
-    _drain_thread = thread([this]() {
+  // Single I/O thread (§4.1): owns _subscriber exclusively whenever LKV
+  // delivery and/or threaded remote control need to consume it off the
+  // application thread. zmq_poll() (rather than a plain blocking recv()) is
+  // what leaves room to fold in more pollable sockets later without another
+  // restructuring.
+  if (_last_value_only || _rc_owns_socket) {
+    _io_thread = thread([this]() {
+      zmq::pollitem_t items[] = {
+          {_subscriber.handle(), 0, ZMQ_POLLIN, 0},
+      };
       zmq::multipart_t msg;
-      while(keep_running() && _connected) {
+      while (keep_running() && _connected) {
         try {
-          if (!msg.recv(_subscriber)) continue;
+          zmq::poll(items, 1, chrono::milliseconds(_receive_timeout));
+          if (!(items[0].revents & ZMQ_POLLIN)) continue;
+          if (!msg.recv(_subscriber, ZMQ_DONTWAIT)) continue;
+          if (msg.size() == 0) continue;
+          const string topic = msg.at(0).to_string();
           // Drop wildcard-subscribed messages that don't actually match
           // (the ZMQ-level subscribe above is only a broader prefix).
-          if (!_wildcard_sub_topic.empty() && msg.size() > 0 &&
-              !_topic_matches_subscription(msg.at(0).to_string()))
+          if (!_wildcard_sub_topic.empty() &&
+              !_topic_matches_subscription(topic))
             continue;
-          std::lock_guard<std::mutex> lock(_latest_message.mtx);
-          _latest_message.value = msg.clone();
-          _latest_message.cv.notify_one();
+
+          // "control" messages are a distinct channel: dispatched to
+          // remote_control(), never also stored as an LKV value. Decoding
+          // logic unchanged from the old dedicated remote-control thread.
+          if (_remote_controlled && topic == "control") {
+            if (msg.size() < 2) continue;
+            string j;
+            bool ok = false;
+            WireHeader hdr;
+            if (parse_wire_header(msg.at(1).to_string(), hdr) &&
+                !hdr.has_blob && msg.size() >= 3) {
+              ok = decode_to_json_text(msg.at(2).to_string(), hdr.format,
+                                       hdr.compression, j);
+            } else if (msg.size() == 2) {
+              string payload = msg.at(1).to_string();
+              ok = snappy::Uncompress(payload.data(), payload.size(), &j);
+            }
+            if (ok)
+              remote_control(j);
+            else
+              _dropped_messages++;
+            continue;
+          }
+
+          if (_last_value_only) {
+            std::lock_guard<std::mutex> lock(_latest_message.mtx);
+            _latest_message.value = msg.clone();
+            _latest_message.cv.notify_one();
+          }
+          // else: threaded remote control is active but LKV is not, and
+          // this wasn't a control message -- matches the old dedicated
+          // remote-control thread's behaviour of silently dropping ordinary
+          // traffic in that configuration (receive() is unusable there
+          // anyway; see its _rc_owns_socket guard).
         } catch (...) {}
       }
     });
