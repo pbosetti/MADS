@@ -51,6 +51,21 @@ release version accordingly before tagging.
   is deterministic rather than relying on zmqpp's process-lifetime actor state.
   `Mads::generate_keypair()` replaces `zmqpp::curve::generate_keypair()`.
 
+## New features
+
+- **`[broker] io_threads` and plain transport-tuning knobs.** Now that MADS
+  talks to libzmq directly through cppzmq, a few more socket options are
+  exposed as settings (`ZMQ_DEVELOPMENT.md` §1.2, §1.4). Every one of them
+  defaults to "unconfigured", which makes no `setsockopt()` call at all, so an
+  unedited `mads.ini` behaves exactly as before.
+  - `[broker] io_threads` (default `1`, libzmq's own default): number of I/O
+    threads on the broker's context, which forwards all fleet traffic.
+  - `[agents] tcp_keepalive` / `tcp_keepalive_idle` / `tcp_keepalive_cnt` /
+    `tcp_keepalive_intvl` and `sndbuf` / `rcvbuf`: can be set fleet-wide and
+    overridden per agent, following the existing `wire_format`/`compression`
+    precedent. The broker applies the fleet-wide value to its own sockets too.
+  See `man mads-broker` for details.
+
 ## Fixes
 
 - **Broker `p`/`r` keys now actually pause and resume.** The interactive

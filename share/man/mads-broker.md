@@ -38,6 +38,31 @@ Note that if you change broker's settings in the INI file, then you want to also
 **\-h**, **\-\-help**
 :  show summary of options.
 
+# SETTINGS
+
+These INI keys tune the underlying libzmq sockets and are all optional: an
+unedited settings file behaves exactly as before they existed.
+
+**io_threads** (`[broker]`, integer, default `1`)
+:  Number of libzmq I/O threads for the broker context. The broker forwards
+   *all* fleet traffic through this pool, so upstream's rule of thumb of
+   roughly one I/O thread per gigabit of sustained throughput applies. A
+   value below 1 is clamped to 1 with a warning rather than refused.
+
+**tcp_keepalive**, **tcp_keepalive_idle**, **tcp_keepalive_cnt**, **tcp_keepalive_intvl** (`[agents]`, integer)
+:  Enable and tune TCP keepalive probing on a socket, useful for detecting a
+   half-open connection (an unplugged cable, a NAT/firewall timeout) on a
+   long-lived plant-network link. Unset by default, which leaves the OS/libzmq
+   default untouched. May be set fleet-wide under `[agents]` and overridden in
+   an individual agent's section; the broker applies the fleet-wide value to
+   its own sockets too.
+
+**sndbuf**, **rcvbuf** (`[agents]`, integer, bytes)
+:  Kernel socket buffer size, useful for tuning high-rate sources. Unset by
+   default, which leaves the OS/libzmq default untouched. Same
+   `[agents]`-then-per-agent-override resolution as the keepalive settings
+   above.
+
 # BUGS
 
 The upstream bug tracker can be found at https://github.com/pbosetti/MADS/issues.

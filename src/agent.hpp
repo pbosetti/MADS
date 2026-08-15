@@ -1073,6 +1073,16 @@ protected:
 
   static std::tuple<std::string, std::string, std::string> split_URL(const std::string &url);
 
+  /**
+   * @brief Resolves the plain libzmq transport-tuning knobs (ZMQ_DEVELOPMENT.md
+   * §1.4: TCP keepalive, SNDBUF/RCVBUF, ...) from settings and applies them to
+   * both sockets. Called once from init(), after settings are parsed and
+   * before connect(). A key left unset in both [agents] and the agent's own
+   * section makes no setsockopt() call at all, so an unedited mads.ini is
+   * unaffected.
+   */
+  void _apply_socket_options();
+
   // Member variables
   std::string _hostname;
   std::string _name;

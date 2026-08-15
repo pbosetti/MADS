@@ -20,6 +20,7 @@ Author(s): Paolo Bosetti
 #include <winsock2.h>
 #include <windows.h>
 #endif
+#include "../detail/socket_options.hpp"
 #include "../exec_path.hpp"
 #include "../mads.hpp"
 #include "../watcher.hpp"
@@ -365,10 +366,25 @@ int main(int argc, char **argv) {
   service_info.prefer_loopback_for_local_services =
       config[name]["prefer_loopback_for_local_services"].value_or(true);
 
+  // ZMQ_DEVELOPMENT.md §1.2: one I/O thread is the libzmq default, so an
+  // unedited mads.ini creates the context exactly as before. A bad value in
+  // the ini file should not stop the broker from starting, so clamp rather
+  // than throw.
+  int io_threads = config[name]["io_threads"].value_or(1);
+  if (io_threads < 1) {
+    cerr << fg::yellow << "Invalid [broker] io_threads = " << io_threads
+         << ", clamping to 1" << fg::reset << endl;
+    io_threads = 1;
+  }
+  auto socket_options =
+      Mads::detail::SocketOptions::resolve(config["agents"], config[name]);
+
   // Create broker sockets
-  zmq::context_t context;
+  zmq::context_t context(io_threads);
   zmq::socket_t frontend(context, zmq::socket_type::xsub);
   zmq::socket_t backend(context, zmq::socket_type::xpub);
+  socket_options.apply(frontend);
+  socket_options.apply(backend);
   if (crypto) {
     auto whitelist = config[name]["ip_whitelist"].as_array();
     bool verbose = config[name]["auth_verbose"].value_or(false);
@@ -423,6 +439,7 @@ int main(int argc, char **argv) {
   zmq::socket_t settings(context, zmq::socket_type::rep);
   if (crypto)
     curve_auth_ptr->setup_curve_server(settings, key_name);
+  socket_options.apply(settings);
   settings.bind(settings_address);
   settings.set(zmq::sockopt::rcvtimeo, 1000);
   cout << "Binding broker shared settings (REP) at " << style::bold

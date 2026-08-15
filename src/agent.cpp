@@ -19,6 +19,7 @@
 #include <cstdlib>
 #include <mutex>
 #include "curve.hpp"
+#include "detail/socket_options.hpp"
 #include "exec_path.hpp"
 #include "mads.hpp"
 
@@ -469,6 +470,8 @@ void Agent::init(bool crypto, bool install_watchdog) {
   }
 
   set_high_watermark((int64_t)cfg["queue_size"].value_or<int>(1000));
+
+  _apply_socket_options();
 
   if (install_watchdog) {
     install_loop_watchdog();
@@ -1466,6 +1469,12 @@ void Agent::set_high_watermark(int i) {
 
 int Agent::high_watermark() {
   return _subscriber.get(zmq::sockopt::rcvhwm);
+}
+
+void Agent::_apply_socket_options() {
+  auto opts = Mads::detail::SocketOptions::resolve(_config["agents"], _config[_name]);
+  opts.apply(_publisher);
+  opts.apply(_subscriber);
 }
 
 void Agent::set_delivery(Delivery d) {

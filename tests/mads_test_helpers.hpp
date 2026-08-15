@@ -15,7 +15,12 @@ Conventions for test authors:
     test_echo_loopback                    42500-42599
     test_broker_probe                     42600-42699
     test_bag_roundtrip                    42700-42799
-    (spare)                               42800+
+    test_doctor_checks                    42700-42799 (shares with above)
+    test_zap_auth                         42800-42899
+    test_zmqpp_compat                     42900-42999
+    test_broker_steering                  43900-43999
+    test_socket_options                   44000-44099
+    (spare)                               44100+
 - Any test that touches Mads::Agent::loop() must instantiate RunningGuard,
   since Mads::running is a process-global atomic.
 */
