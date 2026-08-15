@@ -52,7 +52,11 @@ By default it checks, in order:
 5. **CURVE key files, if **\-\-crypto** is given, exist and are well-formed.** Checks
    `<key_client>.key`/`.pub` and `<key_broker>.pub` under **\-\-keys_dir** -- the same three files
    `Mads::CurveAuth::setup_curve_client()` reads -- exist and decode as valid Z85 CURVE keys.
-6. **Local port-availability sanity check.** Probes the settings file's `[broker]`
+6. **CURVE handshake actually succeeds, if **\-\-crypto** is given and check 5 passed.** Attempts a
+   real CURVE handshake against the broker URI from check 2, with a `Mads::SocketMonitor` attached so
+   a `ZMQ_EVENT_HANDSHAKE_FAILED_AUTH` rejection is reported as "the broker rejected this key" rather
+   than the bare timeout a rejection and an unreachable broker used to look identical as.
+7. **Local port-availability sanity check.** Probes the settings file's `[broker]`
    `frontend_address`/`backend_address`/`settings_address` ports on `127.0.0.1`; a port already
    answering is reported as a likely broker-already-running collision.
 

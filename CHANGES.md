@@ -66,6 +66,38 @@ release version accordingly before tagging.
     precedent. The broker applies the fleet-wide value to its own sockets too.
   See `man mads-broker` for details.
 
+- **Socket connection lifecycle monitoring (`Mads::SocketMonitor`).** Wraps
+  `zmq_socket_monitor()`/`zmq::monitor_t` (`ZMQ_DEVELOPMENT.md` §2.1), purely
+  local observation with no wire impact. Three uses:
+  - `Agent::connect()`'s blind slow-joiner sleep is replaced by waiting for a
+    real `ZMQ_EVENT_CONNECTED`/`HANDSHAKE_SUCCEEDED`, returning as soon as the
+    connection is confirmed instead of always waiting out the full delay. The
+    `delay` parameter is unchanged and still bounds the wait, so this stays a
+    drop-in replacement.
+  - New `Agent::wait_for_connection(timeout)` and `Agent::last_link_event()`
+    (additive public API) for callers that want to wait on demand or read
+    link state (e.g. for `mads top`-style reporting).
+  - `mads doctor --crypto` gained a new check: a live CURVE handshake against
+    the broker, distinguishing "the broker rejected this key"
+    (`ZMQ_EVENT_HANDSHAKE_FAILED_AUTH`) from "nothing answered" -- previously
+    both looked like an identical bare timeout. See `man mads-doctor`.
+
+- **Opt-in live subscription table on the broker (`[broker]
+  subscription_table`, default `false`).** When enabled, publishes a
+  topic -> subscriber-count table on the `subscriptions` topic every second,
+  derived from the XPUB backend's own subscribe/unsubscribe notifications
+  (`ZMQ_DEVELOPMENT.md` §2.2). Off by default: it requires wiring a capture
+  socket into the broker's proxy, which sees a copy of every message the
+  broker forwards, not just subscription frames -- a real cost while running.
+  See `man mads-broker`.
+
+  The wire-frame helpers `Agent` uses for its self-describing header
+  (`make_wire_header`/`encode_payload`, REFACTOR.md §1.3) were extracted from
+  `agent.cpp`'s anonymous namespace to `src/detail/wire_format.hpp` (internal,
+  not installed) so the broker's subscription-table publisher can emit an
+  ordinary MADS-format frame too, without duplicating the encoding. Pure move,
+  no behaviour change.
+
 ## Fixes
 
 - **Broker `p`/`r` keys now actually pause and resume.** The interactive

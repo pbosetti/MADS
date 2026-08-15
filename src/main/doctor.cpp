@@ -559,7 +559,15 @@ int main(int argc, char *argv[]) {
     curve_cfg.key_dir = parsed["keys_dir"].as<string>();
     curve_cfg.client_key_name = parsed["key_client"].as<string>();
     curve_cfg.server_key_name = parsed["key_broker"].as<string>();
-    print_result(Doctor::check_curve_keys(curve_cfg));
+    CheckResult curve_keys_result = Doctor::check_curve_keys(curve_cfg);
+    print_result(curve_keys_result);
+    // A live handshake only makes sense once the key files themselves check
+    // out; skip it otherwise so a missing/malformed key doesn't also print a
+    // redundant, less specific "rejected" or "timed out".
+    if (curve_keys_result.status != Status::Fail) {
+      print_result(
+          Doctor::check_curve_handshake(broker_uri, curve_cfg, timeout));
+    }
   }
 
   // --- 6. local port-availability sanity check -----------------------------

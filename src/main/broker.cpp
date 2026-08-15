@@ -21,6 +21,7 @@ Author(s): Paolo Bosetti
 #include <windows.h>
 #endif
 #include "../detail/socket_options.hpp"
+#include "../detail/wire_format.hpp"
 #include "../exec_path.hpp"
 #include "../mads.hpp"
 #include "../watcher.hpp"
@@ -28,6 +29,7 @@ Author(s): Paolo Bosetti
 #include "../keypress.hpp"
 #include "../goback.hpp"
 #include "../service_discovery.hpp"
+#include <atomic>
 #include <csignal>
 #include <cstring>
 #include <cxxopts.hpp>
@@ -36,11 +38,14 @@ Author(s): Paolo Bosetti
 #include <iostream>
 #include <vector>
 #include <map>
+#include <mutex>
+#include <nlohmann/json.hpp>
 #include <rang.hpp>
 #include <regex>
 #include <string>
 #include <string_view>
 #include <sys/stat.h>
+#include <thread>
 #include <toml++/toml.hpp>
 #include <zmq.hpp>
 #include <zmq_addon.hpp>
@@ -200,10 +205,15 @@ string timestamp() {
 // message payloads. This is what lets the wire payload format evolve (snappy,
 // MsgPack, new compression — see REFACTOR.md §4.1 / MSGPACK.md) with zero broker
 // changes. Do NOT add payload parsing here.
+//
+// `capture`, when given, is ZMQ_DEVELOPMENT.md §2.2's opt-in tap: it must be
+// a PUB socket, never PULL/PAIR -- a failed send on the proxy's capture
+// socket aborts zmq_proxy_steerable() entirely (libzmq's forward() does
+// `rc = capture(...); if (rc < 0) return -1`), and PUB is the one socket type
+// that drops silently instead of blocking or erroring.
 void proxy(zmq::socket_t &frontend, zmq::socket_t &backend,
-           zmq::socket_t &ctrl) {
-  // No capture socket: the broker never taps the stream it forwards.
-  zmq::proxy_steerable(frontend, backend, zmq::socket_ref(), ctrl);
+           zmq::socket_t &ctrl, zmq::socket_ref capture = zmq::socket_ref()) {
+  zmq::proxy_steerable(frontend, backend, capture, ctrl);
 }
 
 // Send one steering command (TERMINATE/PAUSE/RESUME/STATISTICS) to the proxy
@@ -215,6 +225,112 @@ zmq::multipart_t steer(zmq::socket_t &controller, std::string_view command) {
   reply.recv(controller);
   return reply;
 }
+
+// ZMQ_DEVELOPMENT.md §2.2: an opt-in, live view of which topics currently
+// have subscribers, derived from the XPUB backend's subscription
+// notifications and published as an ordinary MADS message on a new topic
+// ("subscriptions") -- ready for `mads-echo subscriptions` or a future `mads
+// doctor --graph` cross-check. Off by default: proxy()'s capture argument
+// receives a copy of every message the broker forwards, not just
+// subscription frames, so this has a real cost while running.
+//
+// Instantiated only when [broker] subscription_table = true, so the
+// zero-cost claim in ZMQ_DEVELOPMENT.md holds: with the setting off, this
+// class -- and the capture socket it owns -- never exist.
+class SubscriptionTable {
+public:
+  // Creates and binds the PUB capture socket. Must be called (and the
+  // returned ref passed as proxy()'s `capture` argument) before the proxy
+  // thread starts; start() may happen any time after.
+  zmq::socket_ref bind(zmq::context_t &context,
+                       std::string const &capture_endpoint) {
+    _capture = zmq::socket_t(context, zmq::socket_type::pub);
+    // Bounded on purpose (see proxy()'s comment above): this must never
+    // block, so a slow/absent reader just loses the oldest notifications.
+    _capture.set(zmq::sockopt::sndhwm, 1000);
+    _capture.bind(capture_endpoint);
+    return _capture;
+  }
+
+  // Starts the reader thread (decodes subscribe/unsubscribe notifications
+  // off the capture endpoint into a topic -> subscriber-count table) and the
+  // publisher thread (emits that table on the "subscriptions" topic every
+  // `publish_period`, through an ordinary PUB connected to the broker's own
+  // frontend -- the same path any agent publishes through).
+  void start(zmq::context_t &context, std::string const &capture_endpoint,
+            std::string const &frontend_address,
+            std::chrono::milliseconds publish_period) {
+    _running = true;
+    _reader_thread = thread([this, &context, capture_endpoint]() {
+      zmq::socket_t reader(context, zmq::socket_type::sub);
+      reader.set(zmq::sockopt::subscribe, "");
+      reader.set(zmq::sockopt::rcvtimeo, 300);
+      reader.connect(capture_endpoint);
+      while (_running) {
+        zmq::multipart_t msg;
+        if (!msg.recv(reader)) continue;
+        // A subscribe/unsubscribe notification is always exactly one frame:
+        // a 0x01/0x00 flag byte followed by the topic. Every ordinary MADS
+        // message the proxy also mirrors here has at least two frames
+        // (topic + payload), so frame count alone tells them apart without
+        // looking at payload content (the broker stays payload-opaque).
+        if (msg.size() != 1) continue;
+        const string part = msg.at(0).to_string();
+        if (part.empty()) continue;
+        const uint8_t flag = static_cast<uint8_t>(part[0]);
+        const string topic = part.substr(1);
+        std::lock_guard<std::mutex> lock(_mutex);
+        if (flag == 1) {
+          _counts[topic]++;
+        } else if (flag == 0) {
+          auto it = _counts.find(topic);
+          if (it != _counts.end() && --it->second <= 0)
+            _counts.erase(it);
+        }
+      }
+      reader.close();
+    });
+
+    _publish_thread = thread([this, &context, frontend_address, publish_period]() {
+      zmq::socket_t pub(context, zmq::socket_type::pub);
+      pub.connect(frontend_address);
+      while (_running) {
+        std::this_thread::sleep_for(publish_period);
+        if (!_running) break;
+        nlohmann::json j = nlohmann::json::object();
+        {
+          std::lock_guard<std::mutex> lock(_mutex);
+          for (auto const &[topic, count] : _counts)
+            j[topic] = count;
+        }
+        zmq::multipart_t out;
+        out.addstr("subscriptions");
+        out.addstr(Mads::detail::make_wire_header(
+            WireFormat::Json, Mads::detail::Comp::None, false));
+        out.addstr(Mads::detail::encode_payload(j, WireFormat::Json));
+        out.send(pub);
+      }
+      pub.close();
+    });
+  }
+
+  // Joins both threads. Must be called before the context is closed.
+  void stop() {
+    _running = false;
+    if (_reader_thread.joinable()) _reader_thread.join();
+    if (_publish_thread.joinable()) _publish_thread.join();
+    try { _capture.close(); } catch (...) {}
+  }
+
+  ~SubscriptionTable() { stop(); }
+
+private:
+  std::atomic<bool> _running{false};
+  std::thread _reader_thread, _publish_thread;
+  std::mutex _mutex;
+  std::map<std::string, int> _counts;
+  zmq::socket_t _capture;
+};
 
 // Install SIGINT/SIGTERM handlers that request a clean shutdown by stopping
 // the process-wide run flag. Used in daemon mode so a `kill`/`systemctl stop` (or CTRL-C)
@@ -379,12 +495,26 @@ int main(int argc, char **argv) {
   auto socket_options =
       Mads::detail::SocketOptions::resolve(config["agents"], config[name]);
 
+  // ZMQ_DEVELOPMENT.md §2.2: off by default. See SubscriptionTable's comment
+  // above for the cost this opts into.
+  const bool subscription_table_enabled =
+      config[name]["subscription_table"].value_or(false);
+
   // Create broker sockets
   zmq::context_t context(io_threads);
   zmq::socket_t frontend(context, zmq::socket_type::xsub);
   zmq::socket_t backend(context, zmq::socket_type::xpub);
   socket_options.apply(frontend);
   socket_options.apply(backend);
+  if (subscription_table_enabled) {
+    // VERBOSER, not just VERBOSE: VERBOSE only forwards every individual
+    // *subscribe*, still collapsing unsubscribes down to the topic's final
+    // 1->0 transition. That would silently under-decrement the refcount
+    // whenever one of several subscribers to the same topic leaves while
+    // others remain. VERBOSER forwards every individual subscribe AND
+    // unsubscribe, which is what per-subscriber accounting needs.
+    backend.set(zmq::sockopt::xpub_verboser, true);
+  }
   if (crypto) {
     auto whitelist = config[name]["ip_whitelist"].as_array();
     bool verbose = config[name]["auth_verbose"].value_or(false);
@@ -433,6 +563,24 @@ int main(int argc, char **argv) {
     cerr << fg::red << "ZMQ error, could not connect: " << e.what() << fg::reset
          << endl;
     std::exit(EXIT_FAILURE);
+  }
+
+  // ZMQ_DEVELOPMENT.md §2.2: bound (not just constructed) before the proxy
+  // thread starts below, so its socket_ref is ready wherever `proxy()` is
+  // invoked. subscription_table itself stays unconstructed -- no capture
+  // socket exists at all -- when the setting is off.
+  unique_ptr<SubscriptionTable> subscription_table;
+  zmq::socket_ref capture_ref;
+  if (subscription_table_enabled) {
+    // frontend_address is a bind address (e.g. "tcp://*:9090"), not
+    // connectable; the table's own publisher joins the frontend exactly like
+    // any agent does, via loopback on the same port.
+    const string frontend_port =
+        frontend_address.substr(frontend_address.find_last_of(":") + 1);
+    subscription_table = make_unique<SubscriptionTable>();
+    capture_ref = subscription_table->bind(context, "inproc://mads-broker-capture");
+    subscription_table->start(context, "inproc://mads-broker-capture",
+                              "tcp://127.0.0.1:" + frontend_port, 1000ms);
   }
 
   // Create Settings socket (Req/Rep)
@@ -631,7 +779,8 @@ int main(int argc, char **argv) {
     zmq::socket_t controller(context, zmq::socket_type::req);
     controller.connect("inproc://broker-ctrl");
 
-    thread proxy_thread(proxy, ref(frontend), ref(backend), ref(controlled));
+    thread proxy_thread(proxy, ref(frontend), ref(backend), ref(controlled),
+                        capture_ref);
 
     while (Mads::Runtime::process_running()) {
       this_thread::sleep_for(200ms);
@@ -654,6 +803,7 @@ int main(int argc, char **argv) {
     settings_watcher_thread.join();
     controller.close();
     controlled.close();
+    if (subscription_table) subscription_table->stop();
     frontend.close();
     backend.close();
     context.close();
@@ -670,7 +820,8 @@ int main(int argc, char **argv) {
     auto settings_url_list = settings_urls(settings_address);
     auto current_url = settings_url_list.begin();
 
-    thread(proxy, ref(frontend), ref(backend), ref(controlled)).detach();
+    thread(proxy, ref(frontend), ref(backend), ref(controlled), capture_ref)
+        .detach();
     print_instructions();
 
     while (running) {
@@ -780,6 +931,7 @@ int main(int argc, char **argv) {
     controlled.close();
     if (crypto)
       curve_auth_ptr = nullptr;
+    if (subscription_table) subscription_table->stop();
     frontend.close();
     backend.close();
     context.close();

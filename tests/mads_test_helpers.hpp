@@ -20,7 +20,9 @@ Conventions for test authors:
     test_zmqpp_compat                     42900-42999
     test_broker_steering                  43900-43999
     test_socket_options                   44000-44099
-    (spare)                               44100+
+    test_socket_monitor                   44100-44149
+    test_broker_subscriptions             44150-44199
+    (spare)                               44200+
 - Any test that touches Mads::Agent::loop() must instantiate RunningGuard,
   since Mads::running is a process-global atomic.
 */

@@ -63,6 +63,17 @@ unedited settings file behaves exactly as before they existed.
    `[agents]`-then-per-agent-override resolution as the keepalive settings
    above.
 
+**subscription_table** (`[broker]`, boolean, default `false`)
+:  When enabled, the broker publishes a live topic -> subscriber-count table
+   on the `subscriptions` topic every second (an ordinary MADS message, e.g.
+   readable with `mads-echo subscriptions`), derived from the XPUB backend's
+   own subscribe/unsubscribe notifications. **Off by default because it has a
+   real cost while running**: it requires wiring a capture socket into the
+   broker's proxy, which receives a copy of *every* message the broker
+   forwards, not just subscription frames. An unmigrated agent that happens
+   to subscribe to `subscriptions` simply ignores the unrecognised topic; no
+   settings-contract change is involved.
+
 # BUGS
 
 The upstream bug tracker can be found at https://github.com/pbosetti/MADS/issues.

@@ -29,6 +29,8 @@ Author(s): Paolo Bosetti
 #ifndef MADS_DOCTOR_CHECKS_HPP
 #define MADS_DOCTOR_CHECKS_HPP
 
+#include "broker_probe.hpp"
+
 #include <chrono>
 #include <filesystem>
 #include <optional>
@@ -150,6 +152,18 @@ CheckResult evaluate_port_available(const std::string &host, int port, bool in_u
 
 CheckResult check_port_available(const std::string &host, int port,
                                  std::chrono::milliseconds timeout);
+
+/* ---- 7. CURVE handshake actually succeeds ---------------------------------
+   The actual probe is Mads::probe_curve_handshake() (src/broker_probe.hpp,
+   from ZMQ_DEVELOPMENT.md §2.1); evaluate_curve_handshake() is split out so
+   the pass/fail wording is testable without a real socket, mirroring
+   check 2. Reuses CurveKeyCheck (check 5) for the key-file location. */
+
+CheckResult evaluate_curve_handshake(const std::string &uri,
+                                     CurveProbeResult result);
+
+CheckResult check_curve_handshake(const std::string &uri, const CurveKeyCheck &cfg,
+                                  std::chrono::milliseconds timeout);
 
 } // namespace Doctor
 } // namespace Mads

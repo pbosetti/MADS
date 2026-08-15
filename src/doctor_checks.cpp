@@ -286,5 +286,50 @@ CheckResult check_port_available(const std::string &host, int port,
   return evaluate_port_available(host, port, probe_tcp_port(host, port, timeout));
 }
 
+/* ---- 7. CURVE handshake actually succeeds ---------------------------------
+   Check 5 (check_curve_keys) only proves the key *files* are well-formed;
+   it says nothing about whether the broker will actually accept them. The
+   live probe is Mads::probe_curve_handshake() (src/broker_probe.hpp, driven
+   by a Mads::SocketMonitor -- ZMQ_DEVELOPMENT.md §2.1); this evaluator turns
+   its three-way outcome into a CheckResult, split out the same way check 2's
+   evaluate_broker_reachable() is. */
+
+CheckResult evaluate_curve_handshake(const std::string &uri,
+                                     CurveProbeResult result) {
+  CheckResult r;
+  r.name = "curve_handshake";
+  switch (result) {
+  case CurveProbeResult::Connected:
+    r.status = Status::Pass;
+    r.message = "CURVE handshake with " + uri + " succeeded.";
+    break;
+  case CurveProbeResult::RejectedAuth:
+    r.status = Status::Fail;
+    r.message = "The broker at " + uri +
+               " rejected this client's CURVE key (ZAP handshake failure).";
+    r.fix_hint = "Confirm this client's public key is in the broker's key "
+                "directory, and that --keys_dir/--key_client/--key_broker "
+                "name the same files on both sides.";
+    break;
+  case CurveProbeResult::Timeout:
+    r.status = Status::Fail;
+    r.message = "No response from " + uri +
+               " within the timeout -- broker unreachable, not listening "
+               "with CURVE, or an older libzmq that predates the "
+               "handshake-failure event.";
+    r.fix_hint = "Start the broker with --crypto, or check the [broker] "
+                "address/port in your settings file.";
+    break;
+  }
+  return r;
+}
+
+CheckResult check_curve_handshake(const std::string &uri, const CurveKeyCheck &cfg,
+                                  std::chrono::milliseconds timeout) {
+  return evaluate_curve_handshake(
+      uri, probe_curve_handshake(uri, cfg.key_dir, cfg.client_key_name,
+                                 cfg.server_key_name, timeout));
+}
+
 } // namespace Doctor
 } // namespace Mads

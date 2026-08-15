@@ -51,6 +51,7 @@ Author(s): Paolo Bosetti
 #include <memory>
 #include "curve.hpp"
 #include "exec_path.hpp"
+#include "socket_monitor.hpp"
 #include "topic_match.hpp"
 
 #ifndef HOST_NAME_MAX
@@ -359,6 +360,26 @@ public:
    */
   void connect(std::chrono::milliseconds delay = std::chrono::milliseconds(250));
 
+  /**
+   * @brief Blocks until the publisher socket's connection is confirmed by a
+   * real ZMQ_EVENT_CONNECTED/ZMQ_EVENT_HANDSHAKE_SUCCEEDED event, or
+   * `timeout` elapses (ZMQ_DEVELOPMENT.md §2.1). connect() uses this in place
+   * of a blind sleep whenever its `delay` argument is positive; exposed
+   * separately for callers that want to wait on demand instead.
+   *
+   * @param timeout upper bound on how long to wait.
+   * @return true if the connection was observed within the timeout.
+   */
+  bool wait_for_connection(std::chrono::milliseconds timeout);
+
+  /**
+   * @brief The most recent connectivity event observed on either socket
+   * (Mads::LinkEvent::None if neither monitor has seen one yet) -- e.g. a
+   * ZMQ_EVENT_HANDSHAKE_FAILED_AUTH turns a CURVE rejection into a fact
+   * instead of a bare receive timeout. Meant for `mads top`/`mads
+   * doctor`-style link-state reporting.
+   */
+  Mads::LinkEvent last_link_event() const;
 
   /**
    * @brief Disconnects the agent from the publish and subscribe endpoints.
@@ -1101,6 +1122,10 @@ protected:
   zmq::context_t _context;
   zmq::socket_t _publisher;
   zmq::socket_t _subscriber;
+  // Attached before each socket's connect()/bind() (ZMQ_DEVELOPMENT.md
+  // §2.1); stopped in shutdown() before the sockets are closed.
+  Mads::SocketMonitor _pub_monitor;
+  Mads::SocketMonitor _sub_monitor;
   // A single LazyPayload per message is shared between _last_message and
   // _status so the lazy text/object caches are shared and never duplicated.
   std::map<std::string, std::shared_ptr<LazyPayload>> _status;

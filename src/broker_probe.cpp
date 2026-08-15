@@ -24,7 +24,9 @@
 
 #include "broker_probe.hpp"
 
+#include "curve.hpp"
 #include "mads.hpp"
+#include "socket_monitor.hpp"
 
 #include <zmq.hpp>
 #include <zmq_addon.hpp>
@@ -157,6 +159,46 @@ bool probe_broker(const std::string &uri, std::chrono::milliseconds timeout) {
     return ok;
   } catch (const std::exception &) {
     return false;
+  }
+}
+
+CurveProbeResult
+probe_curve_handshake(const std::string &uri,
+                      const std::filesystem::path &key_dir,
+                      const std::string &client_key_name,
+                      const std::string &server_key_name,
+                      std::chrono::milliseconds timeout) {
+  try {
+    zmq::context_t context;
+    zmq::socket_t socket(context, zmq::socket_type::req);
+    socket.set(zmq::sockopt::linger, 0);
+
+    // CurveAuth's constructor takes a context only to hold an (unstarted --
+    // setup_auth() is never called) ZapAuth member; nothing here binds or
+    // listens on anything, it just reads the client's key files.
+    CurveAuth curve_auth(context);
+    curve_auth.set_key_dir(key_dir);
+    curve_auth.setup_curve_client(socket, client_key_name, server_key_name);
+
+    Mads::SocketMonitor monitor;
+    monitor.start(socket);
+    socket.connect(uri);
+
+    // Deliberately NOT wait_connected(): ZMQ_EVENT_CONNECTED fires at the
+    // TCP level before the CURVE/ZAP handshake is even attempted, so it
+    // would report success on a rejection just as readily as on a real one.
+    const bool succeeded = monitor.wait_handshake_succeeded(timeout);
+    const LinkEvent last = monitor.last_event();
+    monitor.stop();
+    socket.close();
+
+    if (succeeded)
+      return CurveProbeResult::Connected;
+    if (last == LinkEvent::HandshakeFailedAuth)
+      return CurveProbeResult::RejectedAuth;
+    return CurveProbeResult::Timeout;
+  } catch (const std::exception &) {
+    return CurveProbeResult::Timeout;
   }
 }
 
