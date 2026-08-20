@@ -53,94 +53,86 @@ release version accordingly before tagging.
 
 ## New features
 
-- **`[broker] io_threads` and plain transport-tuning knobs.** Now that MADS
-  talks to libzmq directly through cppzmq, a few more socket options are
-  exposed as settings (`ZMQ_DEVELOPMENT.md` §1.2, §1.4). Every one of them
-  defaults to "unconfigured", which makes no `setsockopt()` call at all, so an
-  unedited `mads.ini` behaves exactly as before.
-  - `[broker] io_threads` (default `1`, libzmq's own default): number of I/O
-    threads on the broker's context, which forwards all fleet traffic.
-  - `[agents] tcp_keepalive` / `tcp_keepalive_idle` / `tcp_keepalive_cnt` /
-    `tcp_keepalive_intvl` and `sndbuf` / `rcvbuf`: can be set fleet-wide and
-    overridden per agent, following the existing `wire_format`/`compression`
-    precedent. The broker applies the fleet-wide value to its own sockets too.
-  - `[agents] heartbeat_ivl` / `heartbeat_ttl` / `heartbeat_timeout`: ZMTP
-    `PING`/`PONG` liveness, MADS's first transport-level detection of a
-    half-open connection (`ZMQ_DEVELOPMENT.md` §3.2). Off unless
-    `heartbeat_ivl` is set.
-  - `[agents] reconnect_ivl` / `reconnect_ivl_max`: exponential reconnect
-    backoff instead of libzmq's default flat 100ms retry forever (§3.3).
-  - `[agents] immediate`: refuse to queue toward a not-yet-connected peer
-    instead of buffering into a pipe that may never drain (§3.4).
-  - `[agents] max_msg_size`: reject oversized frames at the transport.
-    **Disconnects the offending peer** rather than dropping one frame --
-    different from a per-message filter, and worth knowing before enabling it
-    (§3.5). Unlimited (libzmq's own `-1`, not `0`) by default.
-  See `man mads-broker` for details.
+Now that MADS talks to ZeroMQ directly (see "ZeroMQ C++ binding" above), a
+number of things that were previously locked away become available. All of
+the following are **off by default** — an existing `mads.ini` keeps behaving
+exactly as before until you opt in. Details and examples are in
+`man mads-broker` / `man mads-doctor`.
 
-- **ROUTER settings endpoint with a worker pool (`[broker] settings_workers`,
-  default `2`).** The settings socket was a single lockstep REP, and the
-  handler reads plugin attachments off disk inside the loop, so one agent
-  fetching a large attachment blocked every other agent's settings request
-  behind it (`ZMQ_DEVELOPMENT.md` §3.6). Replaced with a ROUTER (external,
-  CURVE-secured as before) proxied to a DEALER (inproc) that a small pool of
-  REP workers connect to -- each running the exact previous handler body, so
-  the wire is unchanged. REQ<->ROUTER is a standard pairing and DEALER<->REP
-  preserves the envelope transparently, so an unmigrated agent's plain REQ
-  settings request keeps working unchanged. See `man mads-broker`.
+- **New tuning options for demanding networks.** A handful of new settings
+  let you adapt MADS to networks that aren't a clean lab loopback:
+  - `heartbeat_ivl` (and friends) make agents notice a dead or half-open
+    connection — an unplugged cable, a firewall silently dropping a stale
+    link — instead of assuming everything is fine forever.
+  - `reconnect_ivl_max` spaces out reconnection attempts after a broker goes
+    down, instead of every agent hammering it with a retry every 100ms and
+    then all reconnecting in the same instant once it's back.
+  - `immediate` stops an agent from silently piling up messages toward a
+    broker it isn't actually connected to yet.
+  - `max_msg_size` lets you set a hard cap on incoming message size, as a
+    safety net against a misbehaving publisher. Note it disconnects the
+    sender rather than just dropping the one oversized message, so pick a
+    generous limit.
+  - `tcp_keepalive`, `sndbuf`/`rcvbuf` give finer control over long-lived
+    connections and high-rate data sources.
+  - `[broker] io_threads` lets a busy broker use more than one network
+    thread for higher sustained throughput.
 
-- **Socket connection lifecycle monitoring (`Mads::SocketMonitor`).** Wraps
-  `zmq_socket_monitor()`/`zmq::monitor_t` (`ZMQ_DEVELOPMENT.md` §2.1), purely
-  local observation with no wire impact. Three uses:
-  - `Agent::connect()`'s blind slow-joiner sleep is replaced by waiting for a
-    real `ZMQ_EVENT_CONNECTED`/`HANDSHAKE_SUCCEEDED`, returning as soon as the
-    connection is confirmed instead of always waiting out the full delay. The
-    `delay` parameter is unchanged and still bounds the wait, so this stays a
-    drop-in replacement.
-  - New `Agent::wait_for_connection(timeout)` and `Agent::last_link_event()`
-    (additive public API) for callers that want to wait on demand or read
-    link state (e.g. for `mads top`-style reporting).
-  - `mads doctor --crypto` gained a new check: a live CURVE handshake against
-    the broker, distinguishing "the broker rejected this key"
-    (`ZMQ_EVENT_HANDSHAKE_FAILED_AUTH`) from "nothing answered" -- previously
-    both looked like an identical bare timeout. See `man mads-doctor`.
+- **Fetching settings from the broker no longer waits in line.** Before this
+  change, if one agent was downloading a large plugin file from the broker,
+  every other agent asking for its settings at the same time had to wait its
+  turn. The broker can now field several settings requests at once
+  (`[broker] settings_workers`, 2 by default), so a slow request no longer
+  holds up everyone else.
 
-- **Opt-in live subscription table on the broker (`[broker]
-  subscription_table`, default `false`).** When enabled, publishes a
-  topic -> subscriber-count table on the `subscriptions` topic every second,
-  derived from the XPUB backend's own subscribe/unsubscribe notifications
-  (`ZMQ_DEVELOPMENT.md` §2.2). Off by default: it requires wiring a capture
-  socket into the broker's proxy, which sees a copy of every message the
-  broker forwards, not just subscription frames -- a real cost while running.
-  See `man mads-broker`.
+- **Agents know when they're actually connected, instead of guessing.**
+  Connecting to the broker used to mean "wait a fixed quarter of a second and
+  hope." Agents now find out the moment the connection is actually live, so
+  startup is both faster in the common case and no less safe in a slow one.
 
-  The wire-frame helpers `Agent` uses for its self-describing header
-  (`make_wire_header`/`encode_payload`, REFACTOR.md §1.3) were extracted from
-  `agent.cpp`'s anonymous namespace to `src/detail/wire_format.hpp` (internal,
-  not installed) so the broker's subscription-table publisher can emit an
-  ordinary MADS-format frame too, without duplicating the encoding. Pure move,
-  no behaviour change.
+- **`mads doctor --crypto` gives a real answer for CURVE problems.** Testing
+  an encrypted setup used to report the same generic timeout whether the
+  broker was down, misconfigured, or your key was simply rejected. It now
+  performs a real handshake and tells you plainly when the broker has
+  rejected your key, rather than leaving you to guess.
 
-- **`Agent`'s LKV drain thread and threaded-remote-control thread are now one
-  `zmq_poll()`-based I/O thread (`ZMQ_DEVELOPMENT.md` §4.1).** Previously
-  these were two independent threads, and nothing stopped both from being
-  active at once (LKV delivery plus `enable_remote_control(true)`) -- each
-  called `recv()` on the same non-thread-safe `_subscriber`, undefined
-  behaviour in principle and, in practice, a message landing on whichever
-  thread's `recv()` won the race: a "control" command could be silently
-  stored as an ordinary LKV value instead of reaching `remote_control()`, and
-  an ordinary message could be silently dropped by the remote-control thread
-  instead of reaching the LKV slot. A single thread now owns `_subscriber`
-  exclusively whenever either feature needs it, dispatching each message to
-  its one correct destination; an agent using neither is unaffected (the
-  application thread keeps calling `receive()` directly, as before). No
-  public API change; behaviour is identical from the outside, and an agent
-  using both features together now has one fewer thread than the sum of the
-  two it used to run. Socket connection monitoring (`Mads::SocketMonitor`,
-  above) stays on its own dedicated thread for now rather than sharing this
-  poll loop -- a possible further consolidation, not a correctness
-  requirement, since the monitor's PAIR socket is never shared with
-  `_subscriber`.
+- **Optional live view of who is subscribed to what.** Turn on
+  `[broker] subscription_table` and the broker publishes, once a second, a
+  running count of subscribers per topic — handy for seeing at a glance
+  whether the agents you expect are actually listening. Left off by default
+  because watching every subscription does add some overhead.
+
+- **`mads doctor --graph-live`: compare your settings against reality.**
+  `mads doctor --graph` has always drawn what `mads.ini` *declares*. Adding
+  `--graph-live` overlays what the fleet is *actually doing*, read from the
+  broker's live subscription table, so three situations that used to look
+  identical on the graph can be told apart at a glance:
+  - declared, and someone is really subscribed → `topic [live 2]`
+  - declared, but nobody is listening → `topic [offline]`
+  - **someone is listening to a topic nobody declared** → drawn as a separate
+    orange node, with arrows from whichever publishers that listener is
+    actually receiving from. This case was previously invisible: a
+    settings-only graph had no way to show it at all.
+
+  Two honest limits, both spelled out in `man mads-doctor`: the underlying
+  data is anonymous (it can say *how many* subscribers a topic has, never
+  *which* agents), and it says nothing about publishers, so a source is never
+  reported as offline. If the broker isn't running with
+  `subscription_table = true`, `--graph-live` fails with a clear error rather
+  than quietly drawing a declared-only graph — which would otherwise look
+  exactly like a successful live check. Plain `--graph` still works with no
+  broker at all.
+
+- **Bug fix: agents combining "last known value" delivery with remote
+  control could occasionally misroute messages.** An agent configured for
+  both LKV delivery (`queue_size = 1`) and remote control on its own thread
+  had a subtle race: a shutdown/restart command could, in rare cases, be
+  mistaken for ordinary data instead of acted on, or an ordinary message
+  could be dropped instead of updating the latest value. Both jobs are now
+  handled by a single, well-ordered thread, so this can no longer happen —
+  and every agent doing both now runs with one fewer background thread than
+  before, at no cost to correctness (verified with a fast producer/slow LKV
+  consumer under repeated load).
 
 ## Fixes
 

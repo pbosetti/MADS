@@ -22,6 +22,8 @@ Author(s): Paolo Bosetti
 
 #include <chrono>
 #include <filesystem>
+#include <map>
+#include <optional>
 #include <string>
 
 namespace Mads {
@@ -86,6 +88,33 @@ probe_curve_handshake(const std::string &uri,
                       const std::string &client_key_name,
                       const std::string &server_key_name,
                       std::chrono::milliseconds timeout);
+
+/**
+ * @brief Reads one live subscription table off a broker that was started
+ * with `[broker] subscription_table = true`, by subscribing to the
+ * `subscriptions` topic exactly as any ordinary agent would.
+ *
+ * The table is a topic -> live-subscriber-count map, built by the broker
+ * from its XPUB backend's own subscribe/unsubscribe notifications. It is
+ * deliberately *anonymous*: ZMQ subscription frames carry no peer identity,
+ * so this says how many sockets are subscribed to a prefix, never which
+ * agents they belong to. Keys are the prefixes actually passed to
+ * `zmq_setsockopt(ZMQ_SUBSCRIBE)`, i.e. a declared `sub_topic` entry after
+ * Mads::literal_prefix() -- a wildcard entry appears here as its literal
+ * prefix, not as the pattern.
+ *
+ * The broker republishes the table about once a second, so `timeout` must
+ * comfortably exceed that to be reliable; 2000 ms or more is sensible.
+ *
+ * @param sub_uri the broker's *backend* (subscribe) endpoint, i.e. where
+ * agents connect their SUB sockets.
+ * @param timeout how long to wait for one table to arrive.
+ * @return the decoded table, or nullopt if none arrived in time (broker
+ * down, or `subscription_table` not enabled). Never throws.
+ */
+std::optional<std::map<std::string, int>>
+fetch_subscription_table(const std::string &sub_uri,
+                         std::chrono::milliseconds timeout);
 
 } // namespace Mads
 

@@ -98,6 +98,10 @@ struct NodeState {
   // are left `true` -- nobody listening to a sink's defaulted topic is
   // normal, not a misconfiguration.
   bool pub_matched = true;
+  // Per sub_topic entry: how many live subscribers the broker currently
+  // reports for the prefix that entry subscribes. Left EMPTY when no live
+  // overlay was requested, which is what every render path tests on.
+  std::vector<int> sub_live;
   // Other sections reaching this one *only* through its subscribe-all entry,
   // i.e. the edges GraphOptions::expand_catch_all would draw and the default
   // rendering shows as a count on the `(all)` line instead.
@@ -168,6 +172,13 @@ std::string record_label(const std::string &name, const AgentTopicInfo &info,
   std::string label = top + "|{";
   for (std::size_t i = 0; i < info.sub_topic.size(); ++i) {
     label += pattern_text(info.sub_topic[i]);
+    // The live marker is orthogonal to the dangling one and both can show
+    // at once: "[!] [offline]" reads "nothing publishes here, and nobody is
+    // listening either".
+    if (!state.sub_live.empty()) {
+      const int n = state.sub_live[i];
+      label += n > 0 ? " [live " + std::to_string(n) + "]" : " [offline]";
+    }
     if (!state.sub_satisfied[i]) {
       label += " [!]";
     } else if (info.sub_topic[i].empty() && state.catch_all_pubs > 0) {
@@ -200,6 +211,23 @@ std::string edge_label(const Edge &edge) {
   return label;
 }
 
+// The prefix a declared sub_topic entry actually hands to
+// zmq_setsockopt(ZMQ_SUBSCRIBE) -- and therefore the exact key it appears
+// under in a live subscription table. A wildcard entry subscribes only its
+// literal prefix at the ZMQ layer (Agent::connect_sub()), so comparing raw
+// pattern strings against table keys would never match.
+std::string zmq_subscribe_key(const std::string &sub_entry) {
+  return Mads::has_wildcard(sub_entry) ? Mads::literal_prefix(sub_entry)
+                                       : sub_entry;
+}
+
+// Absent from the table means nobody is subscribed: the broker erases an
+// entry once its refcount reaches zero.
+int live_count(const LiveSubscriptions &live, const std::string &key) {
+  const auto it = live.find(key);
+  return it == live.end() ? 0 : it->second;
+}
+
 std::string pad(const std::string &s, std::size_t width) {
   std::string r = s;
   if (r.size() < width) {
@@ -209,6 +237,13 @@ std::string pad(const std::string &s, std::size_t width) {
 }
 
 } // namespace
+
+bool is_implicitly_subscribed_topic(const std::string &topic) {
+  // "control" is pushed onto _sub_topic by Agent::enable_remote_control(),
+  // never declared in mads.ini; "subscriptions" is the table's own topic, so
+  // whoever is reading the table shows up in it.
+  return topic == "control" || topic == "subscriptions";
+}
 
 std::string topology_graph(const std::map<std::string, AgentTopicInfo> &agents,
                            const GraphOptions &options) {
@@ -228,6 +263,13 @@ std::string topology_graph(const std::map<std::string, AgentTopicInfo> &agents,
     NodeState state;
     state.sub_satisfied.assign(info.sub_topic.size(), false);
     state.pub_matched = info.pub_topic.empty() || info.pub_implicit;
+    if (options.live) {
+      state.sub_live.reserve(info.sub_topic.size());
+      for (const auto &entry : info.sub_topic) {
+        state.sub_live.push_back(
+            live_count(*options.live, zmq_subscribe_key(entry)));
+      }
+    }
     states.emplace(name, std::move(state));
   }
 
@@ -281,6 +323,27 @@ std::string topology_graph(const std::map<std::string, AgentTopicInfo> &agents,
     }
   }
 
+  // Live subscriptions nobody declared: the one case a settings-only graph
+  // cannot show at all. A table key is "declared" when some section's
+  // sub_topic entry subscribes exactly that prefix; MADS's own programmatic
+  // subscriptions are excluded so they do not cry wolf on every run.
+  std::vector<std::string> undeclared_live;
+  if (options.live) {
+    std::set<std::string> declared_keys;
+    for (const auto &[name, info] : agents) {
+      for (const auto &entry : info.sub_topic) {
+        declared_keys.insert(zmq_subscribe_key(entry));
+      }
+    }
+    for (const auto &[topic, count] : *options.live) {
+      if (count <= 0 || declared_keys.count(topic) > 0 ||
+          is_implicitly_subscribed_topic(topic)) {
+        continue;
+      }
+      undeclared_live.push_back(topic);
+    }
+  }
+
   std::size_t node_name_width = 0;
   for (const auto &[name, info] : agents) {
     node_name_width = std::max(node_name_width, name.size());
@@ -304,6 +367,12 @@ std::string topology_graph(const std::map<std::string, AgentTopicInfo> &agents,
         << " into subscribe-all subscribers collapsed into the '(all)'\n"
         << "  // counts below; re-run with --graph-fanout to draw them.\n";
   }
+  if (options.live) {
+    out << "  // live overlay: [live N] = N subscriber(s) on the wire now,\n"
+        << "  // [offline] = declared but nobody subscribed. Counts are\n"
+        << "  // anonymous, so they name no agent; publishers leave no trace\n"
+        << "  // in a subscription table and are never marked offline.\n";
+  }
   out << "\n";
 
   for (const auto &[name, info] : agents) {
@@ -321,6 +390,38 @@ std::string topology_graph(const std::map<std::string, AgentTopicInfo> &agents,
       out << ", style=dashed";
     }
     out << "];\n";
+  }
+
+  // Synthetic nodes for live subscriptions with no declaration behind them.
+  // Deliberately not named after an agent: the table is anonymous, so all
+  // that can honestly be said is that *something* is listening.
+  if (!undeclared_live.empty()) {
+    out << "\n";
+    for (std::size_t i = 0; i < undeclared_live.size(); ++i) {
+      const std::string &topic = undeclared_live[i];
+      out << "  __live_" << i << " [label=\"" << pattern_text(topic)
+          << "\\lundeclared subscriber"
+          << (live_count(*options.live, topic) == 1 ? "" : "s") << " ["
+          << live_count(*options.live, topic) << "]\\l\""
+          << ", shape=note, color=darkorange, fontcolor=darkorange];\n";
+    }
+    // Context for each: which declared publisher(s) that listener is
+    // actually receiving from, inferred with the same matching rule the
+    // wire uses. Dotted and orange to keep them visibly distinct from the
+    // declared wiring.
+    for (std::size_t i = 0; i < undeclared_live.size(); ++i) {
+      for (const auto &[name, info] : agents) {
+        if (info.pub_topic.empty()) {
+          continue;
+        }
+        if (Mads::subscription_match(undeclared_live[i], info.pub_topic) ==
+            SubMatch::None) {
+          continue;
+        }
+        out << "  " << name << " -> __live_" << i
+            << " [style=dotted, color=darkorange];\n";
+      }
+    }
   }
 
   if (!edges.empty()) {

@@ -332,7 +332,8 @@ bool fix_missing_settings_file(const fs::path &path) {
 // --plan: does not touch the broker, plugins, or CURVE keys, and does not
 // affect overall_exit_code.
 int run_graph_check(const string &settings_path, const string &output_path,
-                    const Mads::GraphOptions &graph_options) {
+                    Mads::GraphOptions graph_options, bool live,
+                    chrono::milliseconds live_timeout) {
   toml::table config;
   try {
     config = toml::parse_file(settings_path);
@@ -377,6 +378,31 @@ int run_graph_check(const string &settings_path, const string &output_path,
     agents.emplace(section, std::move(info));
   }
 
+  if (live) {
+    // The table is published on the broker's *backend* -- where every agent
+    // connects its SUB socket -- not on the settings endpoint.
+    const string backend =
+        to_probe_uri(config["broker"]["backend_address"].value_or(
+            string(BROKER_BACKEND)));
+    cerr << style::italic << "Reading live subscriptions from " << backend
+        << " (up to " << live_timeout.count() << " ms)..." << style::reset
+        << endl;
+    auto table = Mads::fetch_subscription_table(backend, live_timeout);
+    if (!table) {
+      // Deliberately fatal rather than falling back to the declared graph: a
+      // silently-degraded live graph is byte-identical to a plain one, so it
+      // would read as confirmation that the fleet matches its settings when
+      // in fact nothing was measured at all.
+      cerr << fg::red << "Error: no subscription table arrived from " << backend
+          << fg::reset << endl
+          << "  -> start the broker with [broker] subscription_table = true, "
+             "and allow at least 2000 ms with --timeout (the broker "
+             "republishes the table about once a second)." << endl;
+      return 1;
+    }
+    graph_options.live = std::move(*table);
+  }
+
   const string dot = Mads::topology_graph(agents, graph_options);
 
   if (output_path.empty()) {
@@ -414,6 +440,7 @@ int main(int argc, char *argv[]) {
     ("plan", "Validate a director.toml deployment plan (like `mads up --dry-run`) and exit", value<string>())
     ("graph", "Emit a Graphviz DOT topology graph of the settings file's declared pub/sub topics to the given path (default: stdout) and exit", value<string>()->implicit_value(""))
     ("graph-fanout", "With --graph: draw one edge per publisher into every subscribe-all (sub_topic = [\"\"]) subscriber, instead of collapsing them into a count")
+    ("graph-live", "With --graph: overlay live subscriber counts read from the broker's subscription table (requires [broker] subscription_table = true) onto the declared graph")
     ("fix", "Attempt safe, non-destructive auto-fixes (currently: scaffold a missing settings file)")
     ("v,version", "Print version")
     ("h,help", "Print usage");
@@ -450,8 +477,15 @@ int main(int argc, char *argv[]) {
   if (parsed.count("graph")) {
     Mads::GraphOptions graph_options;
     graph_options.expand_catch_all = parsed.count("graph-fanout") > 0;
+    // Live mode needs to outlast the broker's ~1 s republish period; the
+    // shared --timeout default of 1000 ms is right on the edge, so give it a
+    // floor rather than letting it fail intermittently.
+    const auto live_timeout =
+        std::max(chrono::milliseconds(parsed["timeout"].as<int>()),
+                 chrono::milliseconds(2500));
     return run_graph_check(parsed["settings"].as<string>(),
-                           parsed["graph"].as<string>(), graph_options);
+                           parsed["graph"].as<string>(), graph_options,
+                           parsed.count("graph-live") > 0, live_timeout);
   }
 
   const auto timeout = chrono::milliseconds(parsed["timeout"].as<int>());

@@ -25,9 +25,11 @@
 #include "broker_probe.hpp"
 
 #include "curve.hpp"
+#include "detail/wire_format.hpp"
 #include "mads.hpp"
 #include "socket_monitor.hpp"
 
+#include <nlohmann/json.hpp>
 #include <zmq.hpp>
 #include <zmq_addon.hpp>
 
@@ -199,6 +201,61 @@ probe_curve_handshake(const std::string &uri,
     return CurveProbeResult::Timeout;
   } catch (const std::exception &) {
     return CurveProbeResult::Timeout;
+  }
+}
+
+std::optional<std::map<std::string, int>>
+fetch_subscription_table(const std::string &sub_uri,
+                         std::chrono::milliseconds timeout) {
+  try {
+    zmq::context_t context;
+    zmq::socket_t socket(context, zmq::socket_type::sub);
+    socket.set(zmq::sockopt::linger, 0);
+    socket.set(zmq::sockopt::subscribe, "subscriptions");
+    // Bounded per-recv wait so the deadline below stays honest even if the
+    // broker is up but silent (subscription_table switched off).
+    socket.set(zmq::sockopt::rcvtimeo, 200);
+    socket.connect(sub_uri);
+
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (std::chrono::steady_clock::now() < deadline) {
+      zmq::multipart_t msg;
+      if (!msg.recv(socket)) {
+        continue; // rcvtimeo expiry; re-check the deadline
+      }
+      // The broker publishes the table as an ordinary MADS frame:
+      // ["subscriptions"][header][json]. Anything else on this topic
+      // is not ours to interpret.
+      if (msg.size() < 3 || msg.at(0).to_string() != "subscriptions") {
+        continue;
+      }
+      Mads::detail::WireHeader hdr;
+      if (!Mads::detail::parse_wire_header(msg.at(1).to_string(), hdr) ||
+          hdr.has_blob) {
+        continue;
+      }
+      std::string json_text;
+      if (!Mads::detail::decode_to_json_text(msg.at(2).to_string(), hdr.format,
+                                             hdr.compression, json_text)) {
+        continue;
+      }
+      std::map<std::string, int> table;
+      const auto doc = nlohmann::json::parse(json_text);
+      if (!doc.is_object()) {
+        continue;
+      }
+      for (auto it = doc.begin(); it != doc.end(); ++it) {
+        if (it.value().is_number_integer()) {
+          table[it.key()] = it.value().get<int>();
+        }
+      }
+      socket.close();
+      return table;
+    }
+    socket.close();
+    return std::nullopt;
+  } catch (const std::exception &) {
+    return std::nullopt;
   }
 }
 

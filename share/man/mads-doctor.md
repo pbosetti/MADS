@@ -20,7 +20,7 @@
 
 **mads-doctor** **\-\-plan** *director.toml*
 
-**mads-doctor** **\-\-graph**\[=*file.dot*\] [**\-\-graph-fanout**]
+**mads-doctor** **\-\-graph**\[=*file.dot*\] [**\-\-graph-fanout**] [**\-\-graph-live**]
 
 # DESCRIPTION
 
@@ -125,6 +125,43 @@ wiring the graph is being read for. Nothing is lost: "receives everything" is ex
 `(all)` line says, and a DOT comment records how many arrows were collapsed. Pass **\-\-graph-fanout**
 to draw them all instead.
 
+## `--graph-live`
+
+By default **\-\-graph** describes what the settings file *declares*. **\-\-graph-live** additionally
+asks a running broker what is *actually* subscribed right now, and overlays the answer. It annotates,
+never replaces: nodes and edges still come from the settings file.
+
+Three situations, indistinguishable on a declared-only graph, become visible:
+
+| Situation | Rendering |
+|---|---|
+| Declared, and someone is subscribed | `topic [live 2]` on the subscriber's entry |
+| Declared, but nobody is subscribed | `topic [offline]` |
+| Subscribed, but nobody declared it | a separate orange `note` node, with dotted arrows from whichever declared publishers that listener is actually receiving from |
+
+The third is the one that is otherwise *invisible*: an agent subscribing to a topic no settings
+section mentions leaves no trace at all on a declared-only graph.
+
+This requires the broker to be running with `[broker] subscription_table = true`. If no table arrives,
+**mads-doctor** exits **1** with an error rather than falling back to a declared-only graph -- a
+silently degraded live graph is byte-identical to a plain one, so it would read as confirmation that
+the fleet matches its settings when in fact nothing was measured. Plain **\-\-graph** is unaffected and
+keeps working with no broker at all.
+
+Two limits follow from what a subscription table can express, and are worth keeping in mind:
+
+- **It is anonymous.** ZMQ subscription frames carry no peer identity, so a count says *how many*
+  sockets are subscribed to a prefix, never *which* agents. If two sections declare the same
+  `sub_topic` and only one is running, both are shown live.
+- **It says nothing about publishers.** A pure source leaves no trace in a subscription table, so it
+  is never marked offline -- only "nothing is listening to it", which the declared graph already
+  shows with `[!]`.
+
+Wildcard entries are looked up under the literal prefix they actually subscribe at the ZMQ layer
+(`sensors/+/raw` is subscribed as `sensors/`), matching what **mads**(1) agents do at runtime. MADS's
+own internal subscriptions (`control`, and the `subscriptions` topic this query itself joins) are
+never reported as undeclared.
+
 ## `--fix`
 
 **\-\-fix** attempts the one check with an unambiguous, non-destructive auto-fix: if the settings file
@@ -174,6 +211,12 @@ is missing, it is scaffolded from the same template `mads ini` renders. **\-\-fi
 :  With **\-\-graph**: draw one edge per publisher into every subscribe-all (`sub_topic = [""]`)
    subscriber, instead of collapsing them into a count on the subscriber's `(all)` line. Ignored
    without **\-\-graph**.
+
+**\-\-graph-live**
+:  With **\-\-graph**: overlay live subscriber counts read from the broker's subscription table onto
+   the declared graph; see above. Requires `[broker] subscription_table = true`, and waits at least
+   2500 ms (the broker republishes the table about once a second) regardless of a lower
+   **\-\-timeout**. Ignored without **\-\-graph**.
 
 **\-\-fix**
 :  Attempt safe, non-destructive auto-fixes; see above.

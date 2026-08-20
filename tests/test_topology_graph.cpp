@@ -414,3 +414,146 @@ TEST_CASE("topology_graph: imu/filter/logger/debug_sink worked example",
   CHECK(full.find("filter -> logger [label=\"sensors/imu/filtered\\lvia (all)\\l\", "
                   "style=dashed];") != std::string::npos);
 }
+
+// ---------------------------------------------------------------------------
+// Live subscription overlay (GraphOptions::live) -- ZMQ_DEVELOPMENT.md §2.2.
+//
+// The overlay annotates the declared graph with a topic -> subscriber-count
+// table read off a live broker. It is deliberately anonymous (ZMQ
+// subscription frames carry no peer identity), so every assertion below is
+// about a *prefix* being subscribed or not, never about which agent did it.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("topology_graph: no live overlay leaves every label untouched",
+          "[topology_graph]") {
+  AgentMap agents{{"src", agent("imu")}, {"sink", agent("", {"imu"})}};
+  // Same graph, once without and once with an overlay that reports the
+  // subscription as live: the no-overlay rendering must not gain a marker.
+  const std::string plain = topology_graph(agents, {});
+  REQUIRE(plain.find("[live") == std::string::npos);
+  REQUIRE(plain.find("[offline]") == std::string::npos);
+  REQUIRE(plain.find("live overlay:") == std::string::npos);
+}
+
+TEST_CASE("topology_graph: a declared sub_topic with subscribers is marked live",
+          "[topology_graph]") {
+  AgentMap agents{{"src", agent("imu")}, {"sink", agent("", {"imu"})}};
+  GraphOptions opts;
+  opts.live = Mads::LiveSubscriptions{{"imu", 2}};
+  const std::string dot = topology_graph(agents, opts);
+  REQUIRE(dot.find("sink [label=\"sink|{imu [live 2]\\l}\"") !=
+          std::string::npos);
+  // The legend is emitted only in live mode.
+  REQUIRE(dot.find("live overlay:") != std::string::npos);
+}
+
+TEST_CASE("topology_graph: a declared sub_topic nobody subscribes is offline",
+          "[topology_graph]") {
+  AgentMap agents{{"src", agent("imu")}, {"sink", agent("", {"imu"})}};
+  GraphOptions opts;
+  opts.live = Mads::LiveSubscriptions{}; // broker reports nothing subscribed
+  const std::string dot = topology_graph(agents, opts);
+  REQUIRE(dot.find("sink [label=\"sink|{imu [offline]\\l}\"") !=
+          std::string::npos);
+}
+
+TEST_CASE("topology_graph: a wildcard sub_topic is looked up under its "
+          "literal prefix, not its pattern",
+          "[topology_graph]") {
+  // Agent::connect_sub() subscribes literal_prefix() for a wildcard entry, so
+  // that -- and not the raw pattern -- is the key the broker's table carries.
+  // Matching on the pattern string would report a live subscriber as offline.
+  AgentMap agents{{"src", agent("sensors/imu/raw")},
+                  {"sink", agent("", {"sensors/+/raw"})}};
+  GraphOptions opts;
+  opts.live = Mads::LiveSubscriptions{{"sensors/", 1}};
+  const std::string dot = topology_graph(agents, opts);
+  // Asserted on the label form: the legend comment itself contains the bare
+  // text "[offline]", so a naive whole-document search always matches.
+  REQUIRE(dot.find("[label=\"sink|{sensors/+/raw [live 1]\\l}\"") !=
+          std::string::npos);
+  REQUIRE(dot.find("[offline]\\l") == std::string::npos);
+}
+
+TEST_CASE("topology_graph: a live subscription nobody declared is surfaced",
+          "[topology_graph]") {
+  // The case a settings-only graph cannot show at all.
+  AgentMap agents{{"src", agent("imu")}};
+  GraphOptions opts;
+  opts.live = Mads::LiveSubscriptions{{"mystery", 3}};
+  const std::string dot = topology_graph(agents, opts);
+  REQUIRE(dot.find("__live_0 [label=\"mystery\\lundeclared subscribers [3]\\l\"") !=
+          std::string::npos);
+  REQUIRE(dot.find("shape=note, color=darkorange") != std::string::npos);
+}
+
+TEST_CASE("topology_graph: an undeclared subscriber is linked to the "
+          "declared publishers it actually receives from",
+          "[topology_graph]") {
+  // "sensors" as a subscribe prefix catches "sensors/imu" by the same
+  // byte-prefix rule the wire uses, so the arrow is real information: it
+  // names who that unknown listener is hearing.
+  AgentMap agents{{"src", agent("sensors/imu")}, {"other", agent("unrelated")}};
+  GraphOptions opts;
+  opts.live = Mads::LiveSubscriptions{{"sensors", 1}};
+  const std::string dot = topology_graph(agents, opts);
+  REQUIRE(dot.find("src -> __live_0 [style=dotted, color=darkorange];") !=
+          std::string::npos);
+  REQUIRE(dot.find("other -> __live_0") == std::string::npos);
+}
+
+TEST_CASE("topology_graph: MADS's own programmatic subscriptions are never "
+          "reported as undeclared",
+          "[topology_graph]") {
+  // "control" is pushed on by Agent::enable_remote_control() and
+  // "subscriptions" is created by whoever reads the table, so both appear in
+  // every real table with no mads.ini section behind them. Reporting them
+  // would cry wolf on every single run.
+  REQUIRE(Mads::is_implicitly_subscribed_topic("control"));
+  REQUIRE(Mads::is_implicitly_subscribed_topic("subscriptions"));
+  REQUIRE_FALSE(Mads::is_implicitly_subscribed_topic("imu"));
+
+  AgentMap agents{{"src", agent("imu")}};
+  GraphOptions opts;
+  opts.live = Mads::LiveSubscriptions{{"control", 4}, {"subscriptions", 1}};
+  const std::string dot = topology_graph(agents, opts);
+  REQUIRE(dot.find("__live_") == std::string::npos);
+}
+
+TEST_CASE("topology_graph: a zero count is treated as nobody subscribed",
+          "[topology_graph]") {
+  // The broker erases an entry at refcount zero, but a table that still
+  // carries one must not be read as a live subscriber, nor surfaced as an
+  // undeclared one.
+  AgentMap agents{{"src", agent("imu")}, {"sink", agent("", {"imu"})}};
+  GraphOptions opts;
+  opts.live = Mads::LiveSubscriptions{{"imu", 0}, {"ghost", 0}};
+  const std::string dot = topology_graph(agents, opts);
+  REQUIRE(dot.find("imu [offline]") != std::string::npos);
+  REQUIRE(dot.find("__live_") == std::string::npos);
+}
+
+TEST_CASE("topology_graph: offline and dangling markers coexist on one entry",
+          "[topology_graph]") {
+  // Orthogonal facts: "nothing publishes here" ([!]) and "nobody is
+  // listening" ([offline]) can both be true, and a reader needs both.
+  AgentMap agents{{"sink", agent("", {"nobody_publishes_this"})}};
+  GraphOptions opts;
+  opts.live = Mads::LiveSubscriptions{};
+  const std::string dot = topology_graph(agents, opts);
+  REQUIRE(dot.find("nobody_publishes_this [offline] [!]") != std::string::npos);
+}
+
+TEST_CASE("topology_graph: a pure publisher is never marked offline",
+          "[topology_graph]") {
+  // A subscription table says nothing about publishers, so a source's
+  // liveness is simply not knowable this way -- and must not be guessed at.
+  AgentMap agents{{"src", agent("imu")}, {"sink", agent("", {"imu"})}};
+  GraphOptions opts;
+  opts.live = Mads::LiveSubscriptions{{"imu", 1}};
+  const std::string dot = topology_graph(agents, opts);
+  // src subscribes to nothing, so it carries no live marker of any kind --
+  // neither [live N] nor [offline].
+  REQUIRE(dot.find("[label=\"src\", color=darkred]") != std::string::npos);
+  REQUIRE(dot.find("[offline]\\l") == std::string::npos);
+}
