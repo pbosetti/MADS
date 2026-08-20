@@ -29,6 +29,11 @@ struct EventHarness {
     pub->init(false, false);
     pub->set_cross(true);
     pub->set_sub_endpoint(mads_test::loopback(port));
+    // set_cross(true) makes connect_sub() BIND using _pub_endpoint's port
+    // (src/agent.cpp Agent::connect_sub). Without this it would be the
+    // compiled-in default 9090 -- outside this file's declared range, and a
+    // collision with any real broker running on the machine.
+    pub->set_pub_endpoint(mads_test::loopback(port + 50));
     pub->connect(0ms);
 
     sub = std::make_unique<Mads::Agent>(name + "_sub", "none");
@@ -75,6 +80,7 @@ TEST_CASE("startup event registered then immediate shutdown joins promptly "
     a.init(false, false);
     a.set_cross(true);
     a.set_sub_endpoint(mads_test::loopback(42401));
+    a.set_pub_endpoint(mads_test::loopback(42451)); // see EventHarness
     a.connect(0ms);
     a.register_event(Mads::event_type::startup);
     // Destruction runs shutdown(), which must wake the delayed publisher
@@ -95,6 +101,7 @@ TEST_CASE("startup event registered then disconnect() joins the publisher "
   a.init(false, false);
   a.set_cross(true);
   a.set_sub_endpoint(mads_test::loopback(42402));
+  a.set_pub_endpoint(mads_test::loopback(42452)); // see EventHarness
   a.connect(0ms);
   a.register_event(Mads::event_type::startup);
   a.disconnect(); // joins the event thread before touching the sockets
