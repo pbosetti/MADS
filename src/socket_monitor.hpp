@@ -16,7 +16,9 @@ Author(s): Paolo Bosetti
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <zmq.hpp>
@@ -38,6 +40,38 @@ enum class LinkEvent {
   Disconnected,
 };
 
+/// Whether the link is usable *right now*. Where LinkEvent is a
+/// point-in-time observation, this is the state those observations add up
+/// to -- which is what a caller reporting "am I still talking to the
+/// broker?" actually needs.
+enum class LinkStatus {
+  Unknown, ///< no event has settled the question yet (also: inproc://, which
+           ///< libzmq does not report monitor events for at all)
+  Up,      ///< the ZMTP handshake completed and has not been undone since
+  Down,    ///< the peer went away, or the handshake was refused
+};
+
+/// Everything SocketMonitor knows about one link, taken atomically so the
+/// status, the counters and the event that caused them can never disagree.
+struct LinkState {
+  LinkStatus status = LinkStatus::Unknown;
+  /// The most recent event, kept alongside the status because it carries the
+  /// *reason*: Down says the link is unusable, HandshakeFailedAuth says the
+  /// peer rejected our key.
+  LinkEvent last_event = LinkEvent::None;
+  /// The peer address libzmq reported with that event ("" if none yet).
+  std::string last_event_address;
+  /// Up -> Down transitions. Counts transitions, not events, so a broker
+  /// that stays down through a hundred CONNECT_RETRIED reads as one drop.
+  uint64_t drops = 0;
+  /// Down -> Up transitions. A first connection is not a recovery, so this
+  /// stays 0 until a drop has actually been repaired.
+  uint64_t recoveries = 0;
+  /// When `status` last changed; empty while it is still Unknown. Callers
+  /// report "down for 12s" from this.
+  std::optional<std::chrono::steady_clock::time_point> changed_at;
+};
+
 /**
  * @brief One monitor per monitored socket. start() must be called before the
  * socket's connect()/bind(): libzmq lets a connection through -- and may fire
@@ -47,6 +81,12 @@ enum class LinkEvent {
  * The monitor runs its own background thread polling the inproc:// pair
  * zmq_socket_monitor() publishes to; nothing about it touches the monitored
  * socket itself, so it composes with any other use of that socket.
+ *
+ * state() assumes the monitored socket *connects* to a single peer. A bound
+ * socket gets ZMQ_EVENT_ACCEPTED (not CONNECTED/HANDSHAKE_SUCCEEDED) per
+ * arriving peer and ZMQ_EVENT_DISCONNECTED per departing one, so its events
+ * would add up to "down" the moment any one of several peers left; use
+ * last_event() there, or nothing at all.
  */
 class SocketMonitor {
 public:
@@ -66,6 +106,10 @@ public:
    * (`zmq_socket_monitor(socket, nullptr, 0)`). Must be called -- directly or
    * via the destructor -- before the monitored socket is closed. Safe to call
    * more than once and safe if start() was never called.
+   *
+   * This resets what state() reports back to Unknown with zeroed counters: a
+   * detached monitor has no link to describe, and a later start() begins a
+   * fresh observation rather than resuming a stale one.
    */
   void stop();
 
@@ -94,6 +138,18 @@ public:
 
   /// The most recent event observed (None if none yet).
   LinkEvent last_event() const;
+
+  /**
+   * @brief A consistent snapshot of the link's current status, the event
+   * that produced it, and how often it has dropped and recovered.
+   *
+   * Only ZMQ_EVENT_HANDSHAKE_SUCCEEDED raises the status to Up. A bare
+   * ZMQ_EVENT_CONNECTED deliberately does not: it fires as soon as TCP is
+   * established, before the ZMTP security mechanism has run, so a CURVE
+   * rejection would otherwise register as a connection immediately followed
+   * by a spurious drop.
+   */
+  LinkState state() const;
 
   /// The libzmq-reported peer address the most recent event carried (empty
   /// if none yet).

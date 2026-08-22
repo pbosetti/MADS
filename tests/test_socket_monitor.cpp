@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <memory>
 #include <string>
 #include <thread>
 
@@ -217,4 +218,208 @@ TEST_CASE("an authorised CURVE client observes HandshakeSucceeded",
   server_thread.join();
   server.close();
   zap.stop();
+}
+
+// --- state(): the events condensed into a link status (§2.1 remainder) ---
+//
+// last_event() answers "what happened last"; state() answers "is the link
+// usable right now, and how often has it dropped" -- which is what a caller
+// such as `mads top`'s status bar reports.
+
+TEST_CASE("state() starts Unknown and rises to Up on a real handshake",
+          "[socket_monitor]") {
+  zmq::context_t ctx;
+  zmq::socket_t client(ctx, zmq::socket_type::req);
+  client.set(zmq::sockopt::linger, 0);
+
+  Mads::SocketMonitor monitor;
+  REQUIRE(monitor.state().status == Mads::LinkStatus::Unknown);
+  REQUIRE_FALSE(monitor.state().changed_at.has_value());
+
+  monitor.start(client);
+  EchoServer server(ctx, mads_test::loopback(44106));
+  client.connect(mads_test::loopback(44106));
+
+  REQUIRE(mads_test::wait_for(
+      [&] { return monitor.state().status == Mads::LinkStatus::Up; }, 2000ms));
+  auto st = monitor.state();
+  REQUIRE(st.last_event == Mads::LinkEvent::HandshakeSucceeded);
+  REQUIRE(st.drops == 0);
+  REQUIRE(st.recoveries == 0); // a first connection is not a recovery
+  REQUIRE(st.changed_at.has_value());
+
+  monitor.stop();
+  client.close();
+}
+
+TEST_CASE("state() goes Down and counts a drop when the peer disappears",
+          "[socket_monitor]") {
+  zmq::context_t ctx;
+  auto server = std::make_unique<EchoServer>(ctx, mads_test::loopback(44107));
+
+  zmq::socket_t client(ctx, zmq::socket_type::req);
+  client.set(zmq::sockopt::linger, 0);
+  Mads::SocketMonitor monitor;
+  monitor.start(client);
+  client.connect(mads_test::loopback(44107));
+
+  REQUIRE(mads_test::wait_for(
+      [&] { return monitor.state().status == Mads::LinkStatus::Up; }, 2000ms));
+  const auto up_at = monitor.state().changed_at;
+
+  server.reset(); // the "broker" vanishes
+
+  REQUIRE(mads_test::wait_for(
+      [&] { return monitor.state().status == Mads::LinkStatus::Down; },
+      2000ms));
+  auto st = monitor.state();
+  REQUIRE(st.drops == 1);
+  REQUIRE(st.recoveries == 0);
+  REQUIRE(st.changed_at.has_value());
+  REQUIRE(*st.changed_at > *up_at); // the timestamp tracks the transition
+
+  monitor.stop();
+  client.close();
+}
+
+TEST_CASE("a peer that stays away is one drop, not one per retry",
+          "[socket_monitor]") {
+  // libzmq keeps retrying a dead endpoint every reconnect_ivl (100ms by
+  // default), firing ZMQ_EVENT_CONNECT_RETRIED each time. state() counts
+  // transitions, so all of those collapse into the single drop that
+  // actually happened.
+  zmq::context_t ctx;
+  auto server = std::make_unique<EchoServer>(ctx, mads_test::loopback(44108));
+
+  zmq::socket_t client(ctx, zmq::socket_type::req);
+  client.set(zmq::sockopt::linger, 0);
+  Mads::SocketMonitor monitor;
+  monitor.start(client);
+  client.connect(mads_test::loopback(44108));
+
+  REQUIRE(mads_test::wait_for(
+      [&] { return monitor.state().status == Mads::LinkStatus::Up; }, 2000ms));
+  server.reset();
+  REQUIRE(mads_test::wait_for(
+      [&] { return monitor.state().status == Mads::LinkStatus::Down; },
+      2000ms));
+
+  std::this_thread::sleep_for(700ms); // several reconnect intervals
+  auto st = monitor.state();
+  REQUIRE(st.status == Mads::LinkStatus::Down);
+  REQUIRE(st.drops == 1);
+
+  monitor.stop();
+  client.close();
+}
+
+TEST_CASE("state() counts a recovery when the peer comes back",
+          "[socket_monitor]") {
+  zmq::context_t ctx;
+  auto server = std::make_unique<EchoServer>(ctx, mads_test::loopback(44109));
+
+  zmq::socket_t client(ctx, zmq::socket_type::req);
+  client.set(zmq::sockopt::linger, 0);
+  Mads::SocketMonitor monitor;
+  monitor.start(client);
+  client.connect(mads_test::loopback(44109));
+
+  REQUIRE(mads_test::wait_for(
+      [&] { return monitor.state().status == Mads::LinkStatus::Up; }, 2000ms));
+  server.reset();
+  REQUIRE(mads_test::wait_for(
+      [&] { return monitor.state().status == Mads::LinkStatus::Down; },
+      2000ms));
+
+  // Same endpoint, back from the dead: libzmq reconnects on its own and the
+  // monitor observes it without anyone having to re-issue connect().
+  server = std::make_unique<EchoServer>(ctx, mads_test::loopback(44109));
+  REQUIRE(mads_test::wait_for(
+      [&] { return monitor.state().status == Mads::LinkStatus::Up; }, 4000ms));
+  auto st = monitor.state();
+  REQUIRE(st.drops == 1);
+  REQUIRE(st.recoveries == 1);
+
+  monitor.stop();
+  client.close();
+}
+
+TEST_CASE("a CURVE rejection reads as Down without a spurious drop",
+          "[socket_monitor]") {
+  // The reason state() ignores ZMQ_EVENT_CONNECTED: it fires at the TCP
+  // level before ZAP has seen the key, so counting it as Up would score
+  // every rejected connection attempt as a connection immediately followed
+  // by a drop -- turning a link that was never up into a flapping one.
+  zmq::context_t ctx;
+  auto server_kp = Mads::generate_keypair();
+  auto allowed_kp = Mads::generate_keypair();
+  auto rogue_kp = Mads::generate_keypair();
+
+  Mads::ZapAuth zap(ctx);
+  zap.configure_domain("*");
+  zap.configure_curve(allowed_kp.public_key);
+  zap.start();
+
+  zmq::socket_t server(ctx, zmq::socket_type::rep);
+  server.set(zmq::sockopt::linger, 0);
+  server.set(zmq::sockopt::rcvtimeo, 100);
+  server.set(zmq::sockopt::curve_server, 1);
+  server.set(zmq::sockopt::curve_secretkey, server_kp.secret_key);
+  server.bind(mads_test::loopback(44110));
+  std::atomic<bool> stopped{false};
+  std::thread server_thread([&] {
+    while (!stopped.load()) {
+      zmq::multipart_t m;
+      m.recv(server);
+    }
+  });
+
+  zmq::socket_t rogue(ctx, zmq::socket_type::req);
+  rogue.set(zmq::sockopt::linger, 0);
+  rogue.set(zmq::sockopt::curve_publickey, rogue_kp.public_key);
+  rogue.set(zmq::sockopt::curve_secretkey, rogue_kp.secret_key);
+  rogue.set(zmq::sockopt::curve_serverkey, server_kp.public_key);
+
+  Mads::SocketMonitor monitor;
+  monitor.start(rogue);
+  rogue.connect(mads_test::loopback(44110));
+
+  REQUIRE_FALSE(monitor.wait_handshake_succeeded(2000ms));
+  auto st = monitor.state();
+  REQUIRE(st.status == Mads::LinkStatus::Down);
+  REQUIRE(st.last_event == Mads::LinkEvent::HandshakeFailedAuth);
+  REQUIRE(st.drops == 0); // never up, so nothing was lost
+  REQUIRE(st.recoveries == 0);
+
+  monitor.stop();
+  rogue.close();
+  stopped.store(true);
+  server_thread.join();
+  server.close();
+  zap.stop();
+}
+
+TEST_CASE("stop() resets the reported state", "[socket_monitor]") {
+  // A detached monitor has no link to describe, so it must not keep
+  // reporting a status and counters from an observation that has ended.
+  zmq::context_t ctx;
+  EchoServer server(ctx, mads_test::loopback(44111));
+
+  zmq::socket_t client(ctx, zmq::socket_type::req);
+  client.set(zmq::sockopt::linger, 0);
+  Mads::SocketMonitor monitor;
+  monitor.start(client);
+  client.connect(mads_test::loopback(44111));
+
+  REQUIRE(mads_test::wait_for(
+      [&] { return monitor.state().status == Mads::LinkStatus::Up; }, 2000ms));
+  monitor.stop();
+
+  auto st = monitor.state();
+  REQUIRE(st.status == Mads::LinkStatus::Unknown);
+  REQUIRE(st.last_event == Mads::LinkEvent::None);
+  REQUIRE(st.drops == 0);
+  REQUIRE_FALSE(st.changed_at.has_value());
+
+  client.close();
 }

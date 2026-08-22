@@ -33,6 +33,26 @@ bytes/second (each averaged over a trailing sliding window, **\-\-window**), how
 last seen, and a short preview of its last payload. The table redraws every **\-\-sample-rate** seconds.
 Being read-only, it cannot desync a running system.
 
+The header line also carries a **link:** indicator, taken from the transport itself rather than inferred
+from traffic. This distinguishes the two reasons a table can go quiet -- nobody is publishing, or the
+broker is gone -- which otherwise look identical:
+
+**link: up**
+:  The connection to the broker is established (the ZMTP handshake completed).
+
+**link: up (2 drops)**
+:  Established now, but the connection has been lost and re-established 2 times since **mads-top**
+   started. Shown in yellow: at any single instant a link that keeps flapping looks exactly like one
+   that never dropped, and a flapping link is worth knowing about.
+
+**link: DOWN for 12.4s**
+:  The broker has gone away (or was never reachable). ZeroMQ keeps retrying underneath, and the
+   indicator returns to **up** by itself once it succeeds. If the broker refused the CURVE key, this
+   reads **DOWN ... (broker rejected our key)** instead of leaving you to guess.
+
+**link: ?**
+:  Nothing observed yet -- still connecting.
+
 Press **q** (or Ctrl-C) to quit.
 
 # OPTIONS

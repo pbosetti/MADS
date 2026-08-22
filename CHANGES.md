@@ -90,6 +90,22 @@ exactly as before until you opt in. Details and examples are in
   hope." Agents now find out the moment the connection is actually live, so
   startup is both faster in the common case and no less safe in a slow one.
 
+- **`mads top` now tells you whether the broker is still there.** An empty
+  table used to be ambiguous: it looks exactly the same whether nobody is
+  publishing or the broker has died. The header now carries a `link:`
+  indicator taken from the connection itself rather than guessed from
+  traffic, so you can tell those apart at a glance -- `link: up`,
+  `link: DOWN for 12.4s`, or, if the broker refused your encryption key,
+  `link: DOWN (broker rejected our key)`. A connection that keeps dropping
+  and coming back -- a flaky cable or an overloaded broker, which at any
+  single moment looks perfectly healthy -- shows as `link: up (2 drops)`.
+
+  Custom agents can read the same information through the new
+  `Agent::link_state()`, which reports whether the link is up, since when,
+  why it went down, and how many times it has dropped and recovered. (This
+  replaces `Agent::last_link_event()`, added earlier in this same unreleased
+  cycle and never part of a release.)
+
 - **`mads doctor --crypto` gives a real answer for CURVE problems.** Testing
   an encrypted setup used to report the same generic timeout whether the
   broker was down, misconfigured, or your key was simply rejected. It now

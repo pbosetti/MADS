@@ -1,6 +1,7 @@
 #include "socket_monitor.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
@@ -48,6 +49,11 @@ public:
   std::string last_event_address() const {
     std::lock_guard<std::mutex> lock(_mtx);
     return _last_address;
+  }
+
+  LinkState state() const {
+    std::lock_guard<std::mutex> lock(_mtx);
+    return _state;
   }
 
   bool wait_connected(std::chrono::milliseconds timeout) {
@@ -110,14 +116,57 @@ private:
   std::condition_variable _cv;
   LinkEvent _last_event = LinkEvent::None;
   std::string _last_address;
+  LinkState _state;
 
   void record(const zmq_event_t &ev, const char *addr) {
     {
       std::lock_guard<std::mutex> lock(_mtx);
       _last_event = to_link_event(ev.event);
       _last_address = addr ? addr : "";
+      _state.last_event = _last_event;
+      _state.last_event_address = _last_address;
+      apply_status(_last_event);
     }
     _cv.notify_all();
+  }
+
+  // Condenses the event stream into the two-state status callers act on.
+  // Called with _mtx held.
+  void apply_status(LinkEvent ev) {
+    LinkStatus next = _state.status;
+    switch (ev) {
+    case LinkEvent::HandshakeSucceeded:
+      // The only event that proves the link is *usable*. Connected is
+      // deliberately absent: it fires as soon as TCP is up, before the ZMTP
+      // mechanism has run, so treating it as Up would score a CURVE
+      // rejection as a connection plus an immediate spurious drop.
+      next = LinkStatus::Up;
+      break;
+    case LinkEvent::Disconnected:
+    case LinkEvent::ConnectRetried:
+    case LinkEvent::HandshakeFailedAuth:
+    case LinkEvent::HandshakeFailedProtocol:
+    case LinkEvent::HandshakeFailedNoDetail:
+      // A refused handshake leaves libzmq retrying against a peer that will
+      // not talk to us -- as unusable as a peer that went away, and worth
+      // reporting as such rather than sitting at Unknown forever.
+      next = LinkStatus::Down;
+      break;
+    case LinkEvent::Connected:
+    case LinkEvent::ConnectDelayed:
+    case LinkEvent::None:
+      // In flight, neither up nor conclusively down. last_event still
+      // records them for callers that want the finer detail.
+      break;
+    }
+    if (next == _state.status)
+      return; // repeated retries collapse into the one transition
+    if (_state.status == LinkStatus::Up)
+      ++_state.drops;
+    else if (_state.status == LinkStatus::Down && next == LinkStatus::Up)
+      ++_state.recoveries; // Unknown -> Up is a first connect, not a recovery
+    _state.status = next;
+    _state.changed_at = std::chrono::steady_clock::now();
   }
 };
 
@@ -174,6 +223,8 @@ bool SocketMonitor::wait_handshake_succeeded(std::chrono::milliseconds timeout) 
 }
 
 LinkEvent SocketMonitor::last_event() const { return _impl->last_event(); }
+
+LinkState SocketMonitor::state() const { return _impl->state(); }
 
 std::string SocketMonitor::last_event_address() const {
   return _impl->last_event_address();

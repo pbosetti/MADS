@@ -67,9 +67,45 @@ string human_bytes(double bytes_per_sec) {
   return os.str();
 }
 
+// The transport's own view of the broker connection, which is the one thing
+// the topic table below cannot tell you: an empty table means "nobody is
+// publishing" when the link is up, and "we lost the broker" when it is not
+// (ZMQ_DEVELOPMENT.md §2.1).
+void render_link(const LinkState &link,
+                chrono::steady_clock::time_point now) {
+  cout << "  link: ";
+  switch (link.status) {
+  case LinkStatus::Up:
+    // Drops are worth showing even while up: at any single instant a link
+    // that keeps flapping looks exactly like one that never dropped.
+    if (link.drops > 0) {
+      cout << fg::yellow << "up (" << link.drops << " drop"
+          << (link.drops == 1 ? "" : "s") << ")" << fg::reset;
+    } else {
+      cout << fg::green << "up" << fg::reset;
+    }
+    break;
+  case LinkStatus::Down:
+    cout << fg::red << style::bold << "DOWN" << style::reset << fg::red;
+    if (link.changed_at) {
+      cout << " for " << fixed << setprecision(1)
+          << chrono::duration<double>(now - *link.changed_at).count() << "s";
+    }
+    if (link.last_event == LinkEvent::HandshakeFailedAuth)
+      cout << " (broker rejected our key)";
+    cout << fg::reset;
+    break;
+  case LinkStatus::Unknown:
+    // No monitor event yet -- still connecting, or a transport libzmq does
+    // not report on (inproc://).
+    cout << style::dim << "?" << style::reset;
+    break;
+  }
+}
+
 void render(const vector<TopicStat> &stats,
            chrono::steady_clock::time_point now,
-           const vector<string> &sub_topic) {
+           const vector<string> &sub_topic, const LinkState &link) {
   string filter_desc = "(all)";
   if (!sub_topic.empty() && !(sub_topic.size() == 1 && sub_topic[0].empty())) {
     filter_desc.clear();
@@ -84,8 +120,9 @@ void render(const vector<TopicStat> &stats,
   cout << "\x1b[H\x1b[J";
   cout << style::bold << fg::green << "mads top" << fg::reset << style::reset
        << "  " << stats.size() << " active topic(s)"
-       << "  filter: " << style::italic << filter_desc << style::reset
-       << "   (press q to quit)\n\n";
+       << "  filter: " << style::italic << filter_desc << style::reset;
+  render_link(link, now);
+  cout << "   (press q to quit)\n\n";
 
   constexpr size_t kTopicMinW = 5;
   constexpr size_t kTopicMaxW = 40;
@@ -103,6 +140,10 @@ void render(const vector<TopicStat> &stats,
   if (stats.empty()) {
     cout << style::italic << "(no messages received yet)" << style::reset
         << "\n";
+    // Flush here too, not just at the end: a broker that has gone away
+    // produces exactly this empty table, and the link indicator above is
+    // then the only thing still changing.
+    cout.flush();
     return;
   }
 
@@ -230,7 +271,7 @@ int main(int argc, char *argv[]) {
 
     if (last_draw == chrono::steady_clock::time_point::min() ||
         now - last_draw >= redraw_every) {
-      render(stats.snapshot(now), now, sub_topic);
+      render(stats.snapshot(now), now, sub_topic, top.link_state());
       last_draw = now;
     }
 

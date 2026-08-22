@@ -373,13 +373,24 @@ public:
   bool wait_for_connection(std::chrono::milliseconds timeout);
 
   /**
-   * @brief The most recent connectivity event observed on either socket
-   * (Mads::LinkEvent::None if neither monitor has seen one yet) -- e.g. a
-   * ZMQ_EVENT_HANDSHAKE_FAILED_AUTH turns a CURVE rejection into a fact
-   * instead of a bare receive timeout. Meant for `mads top`/`mads
-   * doctor`-style link-state reporting.
+   * @brief The current state of this agent's link to the broker: up or down,
+   * why (`last_event` -- e.g. a ZMQ_EVENT_HANDSHAKE_FAILED_AUTH turns a CURVE
+   * rejection into a fact instead of a bare receive timeout), since when, and
+   * how often it has dropped and recovered.
+   *
+   * Reported from the subscriber socket, since that is the one over which an
+   * agent would otherwise silently stop hearing from a departed broker;
+   * publish-only agents (no `sub_topic`, so no subscriber connection) fall
+   * back to the publisher's. Both connect to the same broker, so in practice
+   * they rise and fall together.
+   *
+   * A `set_cross()` agent binds rather than connects, and gets one
+   * ZMQ_EVENT_DISCONNECTED per departing peer with no matching handshake
+   * event on arrival -- events that would add up to "down" as soon as any one
+   * peer left. There is no broker link to describe in that topology, so this
+   * reports Mads::LinkStatus::Unknown throughout.
    */
-  Mads::LinkEvent last_link_event() const;
+  Mads::LinkState link_state() const;
 
   /**
    * @brief Disconnects the agent from the publish and subscribe endpoints.

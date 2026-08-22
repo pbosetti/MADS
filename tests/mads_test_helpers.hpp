@@ -24,7 +24,8 @@ Conventions for test authors:
     test_broker_subscriptions             44150-44199
     test_broker_settings_pool             44200-44249
     test_agent_io_thread                  44250-44299
-    (spare)                               44300+
+    test_agent_link_state                 44300-44349
+    (spare)                               44350+
 - Any test that touches Mads::Agent::loop() must instantiate RunningGuard,
   since Mads::running is a process-global atomic.
 */

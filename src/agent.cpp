@@ -1140,15 +1140,20 @@ bool Agent::wait_for_connection(chrono::milliseconds timeout) {
   return _pub_monitor.wait_connected(timeout);
 }
 
-Mads::LinkEvent Agent::last_link_event() const {
+Mads::LinkState Agent::link_state() const {
+  // Bound sockets report per-peer departures and no per-peer arrivals, so
+  // their events cannot be condensed into one link status; see the header.
+  if (_cross)
+    return {};
   // The subscriber is the socket over which an agent would actually notice
   // "the broker is gone" (missing traffic), so it takes priority; the
   // publisher is consulted only when the subscriber's monitor has not seen
-  // anything link-relevant yet.
-  auto sub_event = _sub_monitor.last_event();
-  if (sub_event != Mads::LinkEvent::None)
-    return sub_event;
-  return _pub_monitor.last_event();
+  // anything link-relevant yet -- which for a publish-only agent is always,
+  // since connect_sub() (and with it _sub_monitor.start()) never runs.
+  auto sub = _sub_monitor.state();
+  if (sub.status != Mads::LinkStatus::Unknown)
+    return sub;
+  return _pub_monitor.state();
 }
 
 void Agent::connect_sub() {
