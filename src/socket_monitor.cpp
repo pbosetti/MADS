@@ -40,6 +40,16 @@ class SocketMonitor::Impl : public zmq::monitor_t {
 public:
   std::atomic<bool> stop_requested{false};
   std::thread thread;
+  // Published separately from monitor_socket() so a driving thread can read
+  // it without racing the attach() that sets it.
+  std::atomic<void *> pollable{nullptr};
+
+  // process_event() and monitor_socket() are protected in zmq::monitor_t;
+  // this is the derived class, so it can hand them out. ZMQ_POLLIN is the
+  // only thing the base looks at, and the caller has just seen it on the
+  // monitor's own socket.
+  void pump() { process_event(ZMQ_POLLIN); }
+  void *pollable_handle() { return monitor_socket().handle(); }
 
   LinkEvent last_event() const {
     std::lock_guard<std::mutex> lock(_mtx);
@@ -174,9 +184,9 @@ SocketMonitor::SocketMonitor() : _impl(std::make_unique<Impl>()) {}
 
 SocketMonitor::~SocketMonitor() { stop(); }
 
-void SocketMonitor::start(zmq::socket_t &socket, int events) {
-  if (_impl->thread.joinable())
-    return; // already started
+void SocketMonitor::attach(zmq::socket_t &socket, int events) {
+  if (_impl->pollable.load() != nullptr)
+    return; // already attached
 
   // A private, process-unique inproc:// endpoint per instance -- two
   // monitors (e.g. an Agent's publisher and subscriber) must not share one.
@@ -185,6 +195,14 @@ void SocketMonitor::start(zmq::socket_t &socket, int events) {
       "inproc://mads-socket-monitor-" + std::to_string(++counter);
 
   _impl->init(socket, endpoint, events);
+  _impl->pollable.store(_impl->pollable_handle(), std::memory_order_release);
+}
+
+void SocketMonitor::start(zmq::socket_t &socket, int events) {
+  if (_impl->thread.joinable())
+    return; // already started
+
+  attach(socket, events);
   _impl->stop_requested.store(false);
   _impl->thread = std::thread([impl = _impl.get()] {
     try {
@@ -198,11 +216,31 @@ void SocketMonitor::start(zmq::socket_t &socket, int events) {
   });
 }
 
-void SocketMonitor::stop() {
-  if (!_impl->thread.joinable())
+zmq::socket_ref SocketMonitor::pollable() const {
+  void *handle = _impl->pollable.load(std::memory_order_acquire);
+  return handle ? zmq::socket_ref(zmq::from_handle, handle) : zmq::socket_ref();
+}
+
+void SocketMonitor::process_pending() {
+  if (_impl->pollable.load(std::memory_order_acquire) == nullptr)
     return;
-  _impl->stop_requested.store(true);
-  _impl->thread.join();
+  try {
+    _impl->pump();
+  } catch (const zmq::error_t &) {
+    // Context torn down mid-drain; nothing left to observe.
+  }
+}
+
+void SocketMonitor::stop() {
+  // An attach()ed monitor has no thread of its own but still holds the PAIR
+  // socket that must be released here, so joinability alone is not the test
+  // for "there is nothing to stop".
+  if (!_impl->thread.joinable() && _impl->pollable.load() == nullptr)
+    return;
+  if (_impl->thread.joinable()) {
+    _impl->stop_requested.store(true);
+    _impl->thread.join();
+  }
   // Replacing _impl destroys the old one, running zmq::monitor_t's
   // destructor: it detaches from the monitored socket
   // (zmq_socket_monitor(socket, nullptr, 0), while the socket is still open

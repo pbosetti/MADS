@@ -118,6 +118,27 @@ exactly as before until you opt in. Details and examples are in
   whether the agents you expect are actually listening. Left off by default
   because watching every subscription does add some overhead.
 
+- **Agents run fewer threads.** Every connected agent used to spend one
+  background thread per socket it watched, on top of the one it may already
+  use to receive. Those are now a single thread that watches everything at
+  once. Measured on a real publish-and-subscribe agent: 6 threads before, 5
+  after -- and 7 before, 5 after for one using last-value delivery. Nothing
+  changes in what an agent does; it just costs less to run a lot of them on
+  one machine.
+
+- **A worker with nothing to do no longer ignores everything else.** A
+  `mads-worker` waiting for jobs used to wait *only* for jobs: while its
+  queue was empty it stopped reading anything else, so a fleet-wide
+  shutdown or restart sent through the broker simply never reached it, and
+  neither did the topics it had subscribed to. It now checks its job queue
+  with a deadline and gets back to its other duties in between.
+
+  **If you have written your own agent on top of `Mads::Worker`:** `pull()`
+  can now return an empty object, meaning "no job this time", instead of
+  waiting forever for one. Skip the rest of your loop body when it does.
+  `pull(timeout)` lets you choose the wait yourself; `pull(0ms)` never
+  blocks at all.
+
 - **`mads doctor --graph-live`: compare your settings against reality.**
   `mads doctor --graph` has always drawn what `mads.ini` *declares*. Adding
   `--graph-live` overlays what the fleet is *actually doing*, read from the

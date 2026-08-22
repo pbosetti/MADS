@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <string>
 #include <thread>
@@ -422,4 +423,91 @@ TEST_CASE("stop() resets the reported state", "[socket_monitor]") {
   REQUIRE_FALSE(st.changed_at.has_value());
 
   client.close();
+}
+
+// --- attach()/pollable()/process_pending(): one caller's poll loop can
+// drive several monitors, instead of each running a thread (§4.1). ---
+
+namespace {
+
+// Drives an attached monitor the way Agent::_start_io_thread() does, until
+// `predicate` holds or the deadline passes.
+bool pump_until(Mads::SocketMonitor &monitor,
+                const std::function<bool()> &predicate,
+                std::chrono::milliseconds timeout) {
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (predicate()) return true;
+    auto ref = monitor.pollable();
+    if (ref.handle() == nullptr) continue;
+    zmq::pollitem_t item;
+    item = zmq::pollitem_t{ref.handle(), 0, ZMQ_POLLIN, 0};
+    zmq::poll(&item, 1, 50ms);
+    if (item.revents & ZMQ_POLLIN) monitor.process_pending();
+  }
+  return predicate();
+}
+
+} // namespace
+
+TEST_CASE("attach() lets a caller drive the monitor from its own poll loop",
+          "[socket_monitor]") {
+  zmq::context_t ctx;
+  EchoServer server(ctx, mads_test::loopback(44112));
+
+  zmq::socket_t client(ctx, zmq::socket_type::req);
+  client.set(zmq::sockopt::linger, 0);
+
+  Mads::SocketMonitor monitor;
+  REQUIRE(monitor.pollable().handle() == nullptr); // nothing to poll yet
+  monitor.attach(client);
+  REQUIRE(monitor.pollable().handle() != nullptr);
+  client.connect(mads_test::loopback(44112));
+
+  // No thread of its own: nothing advances until the caller pumps it.
+  REQUIRE(pump_until(
+      monitor, [&] { return monitor.state().status == Mads::LinkStatus::Up; },
+      3000ms));
+  REQUIRE(monitor.last_event() == Mads::LinkEvent::HandshakeSucceeded);
+
+  monitor.stop();
+  REQUIRE(monitor.pollable().handle() == nullptr); // and nothing after stop()
+  client.close();
+}
+
+TEST_CASE("an attached monitor still releases its socket on stop()",
+          "[socket_monitor]") {
+  // Same deadlock this file already pins for start(), on the path that has
+  // no thread: stop() used to bail out early when the monitor had none, so
+  // the PAIR socket stayed open and zmq_ctx_term() would block forever.
+  zmq::context_t ctx;
+  zmq::socket_t client(ctx, zmq::socket_type::req);
+  client.set(zmq::sockopt::linger, 0);
+
+  Mads::SocketMonitor monitor;
+  monitor.attach(client);
+  client.connect(mads_test::loopback(44113)); // unreachable is fine here
+  monitor.stop();
+  client.close();
+
+  REQUIRE_NOTHROW(ctx.close());
+}
+
+TEST_CASE("attach() is a no-op on an already-attached monitor",
+          "[socket_monitor]") {
+  // A reconnecting caller calls it again; re-arming zmq_socket_monitor()
+  // would replace the PAIR socket and orphan the old one.
+  zmq::context_t ctx;
+  zmq::socket_t client(ctx, zmq::socket_type::req);
+  client.set(zmq::sockopt::linger, 0);
+
+  Mads::SocketMonitor monitor;
+  monitor.attach(client);
+  void *first = monitor.pollable().handle();
+  monitor.attach(client);
+  REQUIRE(monitor.pollable().handle() == first);
+
+  monitor.stop();
+  client.close();
+  REQUIRE_NOTHROW(ctx.close());
 }

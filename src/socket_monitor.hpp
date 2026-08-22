@@ -98,14 +98,52 @@ public:
   /**
    * @brief Starts monitoring `socket` on a private inproc:// endpoint and a
    * dedicated thread. A second call before stop() is a no-op.
+   *
+   * Equivalent to attach() plus a thread that does nothing but drive it. Use
+   * attach() instead when there is already a poll loop to fold this into.
    */
   void start(zmq::socket_t &socket, int events = ZMQ_EVENT_ALL);
 
   /**
-   * @brief Stops the monitoring thread and detaches from the socket
-   * (`zmq_socket_monitor(socket, nullptr, 0)`). Must be called -- directly or
-   * via the destructor -- before the monitored socket is closed. Safe to call
-   * more than once and safe if start() was never called.
+   * @brief Attaches to `socket` without starting any thread, leaving the
+   * caller to drive the monitor: include pollable() in a `zmq::poll()` and
+   * call process_pending() whenever it reports `ZMQ_POLLIN`.
+   *
+   * This is what lets several monitors -- or a monitor and the application's
+   * own sockets -- share one poll loop instead of one thread each
+   * (ZMQ_DEVELOPMENT.md §4.1). Same ordering contract as start(): call it
+   * before the socket's connect()/bind().
+   *
+   * A second call before stop() is a no-op, so a caller that reconnects can
+   * call it again without re-arming zmq_socket_monitor().
+   */
+  void attach(zmq::socket_t &socket, int events = ZMQ_EVENT_ALL);
+
+  /**
+   * @brief The monitor's own PAIR socket, for inclusion in the caller's
+   * `zmq::poll()`. Its handle() is null until attach()/start() has run, and
+   * null again after stop() -- so a driving loop can simply re-read it every
+   * iteration and pick up a monitor that was attached later.
+   */
+  zmq::socket_ref pollable() const;
+
+  /**
+   * @brief Consumes the events pollable() has signalled, updating
+   * last_event()/state() and waking the wait_*() calls.
+   *
+   * Call only from the thread that polls pollable(), and only when that poll
+   * reported `ZMQ_POLLIN` -- like the socket it drains, this is not
+   * thread-safe. A monitor driven this way must not be stop()ped until that
+   * thread has been joined.
+   */
+  void process_pending();
+
+  /**
+   * @brief Stops the monitoring thread (if start() created one) and detaches
+   * from the socket (`zmq_socket_monitor(socket, nullptr, 0)`). Must be
+   * called -- directly or via the destructor -- before the monitored socket
+   * is closed. Safe to call more than once and safe if neither start() nor
+   * attach() was ever called.
    *
    * This resets what state() reports back to Unknown with zeroed counters: a
    * detached monitor has no link to describe, and a later start() begins a

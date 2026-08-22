@@ -1,0 +1,13 @@
+# Fixture for test_worker_pull.cpp. The addresses point at ports nothing is
+# expected to be listening on (the PULL socket's peer is bound by the test
+# itself); Agent::connect() does not require a live peer.
+
+[agents]
+frontend_address = "tcp://localhost:44350"
+backend_address = "tcp://localhost:44351"
+timecode_fps = 25
+
+[pulltest]
+pub_topic = "pulltest_out"
+sub_topic = ["pulltest_in"]
+dealer_address = "tcp://localhost:44352"

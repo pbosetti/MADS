@@ -37,23 +37,59 @@ public:
     out << "  Dealer Address:   " << style::bold << _dealer_address << style::reset << endl;
   }
 
-  json pull() {
-    string payload;
-    zmq::multipart_t msg;
+  /**
+   * @brief Waits up to `timeout` for one work item from the dealer, and
+   * returns an empty object if none arrives.
+   *
+   * The PULL socket is polled rather than recv()'d blindly
+   * (ZMQ_DEVELOPMENT.md §4.1). It used to be an unbounded blocking recv(),
+   * so an idle worker -- one whose dealer simply had no work -- sat inside
+   * pull() indefinitely and never got back to its subscriber socket: a
+   * fleet-wide `control` shutdown/restart from the broker never arrived,
+   * and neither did ordinary subscribed traffic. (A local Ctrl-C did get
+   * through, but only because the signal interrupted the blocking recv()
+   * with EINTR, which surfaced as an exception out of the agent's loop.)
+   *
+   * Returning empty on a timeout is the same contract receive() already
+   * has, and callers already had to handle an empty result -- a zero-part
+   * message produced one.
+   *
+   * Polled here on the application thread rather than moved into Agent's
+   * _io_thread: that thread exists to take a socket *off* the application
+   * thread when the application cannot poll it (LKV delivery, threaded
+   * remote control). A worker's whole job is to block on its own work
+   * queue, so draining it elsewhere would only add a queue and a handover
+   * in front of the queue ZMQ already provides.
+   *
+   * @param timeout how long to wait; 0 polls without blocking.
+   */
+  json pull(chrono::milliseconds timeout) {
     json j;
+    zmq::pollitem_t item;
+    item = zmq::pollitem_t{_receiver.handle(), 0, ZMQ_POLLIN, 0};
+    try {
+      zmq::poll(&item, 1, timeout);
+    } catch (const zmq::error_t &) {
+      return j; // context terminating under us: no work, and none coming
+    }
+    if (!(item.revents & ZMQ_POLLIN)) return j;
 
-    msg.recv(_receiver);
+    zmq::multipart_t msg;
+    if (!msg.recv(_receiver, ZMQ_DONTWAIT)) return j;
     if (msg.size() == 0) return j;
 
-    payload = msg.at(0).to_string();
     try {
-      j = json::parse(payload);
+      j = json::parse(msg.at(0).to_string());
     } catch (const std::exception &e) {
       cerr << fg::red << "Error parsing JSON: " << e.what() << fg::reset << endl;
       j["error"] = e.what();
     }
     return j;
   }
+
+  /// As pull(timeout), bounded by the agent's own receive timeout so the
+  /// PULL and SUB sockets stay on the same cadence.
+  json pull() { return pull(chrono::milliseconds(receive_timeout())); }
 
 
 private: 

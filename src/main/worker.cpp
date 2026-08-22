@@ -167,11 +167,16 @@ int main(int argc, char *argv[]) {
   agent.loop([&]() -> chrono::milliseconds {
     json payload = agent.pull();
     return_type rt;
-    if (payload.empty() && !agent.runtime()->running()) return 0ms;
+    // Drained on every tick, idle ones included: pull() is bounded now
+    // (§4.1), so this is the first time an idle worker gets back here at all
+    // rather than sitting in pull() until work arrives.
     // TODO: verify if we need to check return type
     // message_type type = agent.receive();
     agent.receive();
     // agent.remote_control();
+    // No work this tick -- pull() timed out. Nothing to feed the plugin, and
+    // publishing an empty result would be noise on the bus.
+    if (payload.empty()) return 0ms;
     json out;
     rt = filter->load_data(payload, agent.last_topic());
     if (rt != return_type::success) {

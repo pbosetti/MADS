@@ -1115,6 +1115,14 @@ protected:
    */
   void _apply_socket_options();
 
+  /**
+   * @brief Brings up _io_thread if it is not already running. Called from
+   * whichever of connect_pub()/connect_sub() runs first, since a
+   * publish-only agent never reaches the latter and a subscribe-only agent
+   * never reaches the former.
+   */
+  void _start_io_thread();
+
   // Member variables
   std::string _hostname;
   std::string _name;
@@ -1168,14 +1176,19 @@ protected:
   bool _last_value_only = false;
   bool _shutdown_done = false;
   SharedLatest<zmq::multipart_t> _latest_message;
-  // Owns _subscriber exclusively whenever LKV delivery and/or threaded
-  // remote control need to consume it off the application thread (started
-  // in connect_sub() iff _last_value_only || _rc_owns_socket). A single
-  // thread rather than one-per-feature: two threads calling recv() on the
-  // same (non-thread-safe) ZMQ socket is undefined behaviour, and with LKV
-  // and threaded remote control both enabled it also meant a message landed
-  // on whichever thread's recv() call won the race.
+  // The agent's one socket thread (ZMQ_DEVELOPMENT.md §4.1). It always polls
+  // both socket monitors' PAIR sockets -- which used to cost a thread each --
+  // and additionally owns _subscriber exclusively whenever LKV delivery
+  // and/or threaded remote control need it consumed off the application
+  // thread. A single thread rather than one per feature: two threads calling
+  // recv() on the same (non-thread-safe) ZMQ socket is undefined behaviour,
+  // and with LKV and threaded remote control both enabled it also meant a
+  // message landed on whichever thread's recv() call won the race.
   std::thread _io_thread;
+  // Whether _io_thread polls _subscriber at all. Set by connect_sub() only
+  // once the socket is fully subscribed, and read by _io_thread, so it must
+  // be atomic even though it never changes after that.
+  std::atomic<bool> _io_reads_subscriber{false};
   std::thread _watchdog_thread;
   // Delayed startup-event publisher: owned (not detached) so shutdown() can
   // wake it via _event_cv and join it before the sockets close.

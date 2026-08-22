@@ -1,4 +1,5 @@
 #include "agent.hpp"
+#include <algorithm>
 #include <nlohmann/json.hpp>
 #include <toml++/toml.hpp>
 #include <zmq.hpp>
@@ -1115,8 +1116,13 @@ void Agent::save_settings(const string path) {
 
 void Agent::connect_pub(chrono::milliseconds delay) {
   // Must be attached before connect()/bind(), or libzmq may fire (and this
-  // miss) the very first lifecycle event.
-  _pub_monitor.start(_publisher);
+  // miss) the very first lifecycle event. attach() rather than start(): the
+  // agent's own _io_thread drives both monitors (§4.1), so neither needs a
+  // thread of its own.
+  _pub_monitor.attach(_publisher);
+  // Started here, not after connect(): wait_for_connection() below needs
+  // something draining the monitor before it can observe anything.
+  _start_io_thread();
   if (_cross) {
     string port = _sub_endpoint.substr(_sub_endpoint.find_last_of(":") + 1);
     _sub_endpoint = "tcp://*:" + port;
@@ -1157,7 +1163,7 @@ Mads::LinkState Agent::link_state() const {
 }
 
 void Agent::connect_sub() {
-  _sub_monitor.start(_subscriber);
+  _sub_monitor.attach(_subscriber);
   _subscriber.set(zmq::sockopt::rcvtimeo, _receive_timeout);
   if (_cross) {
     string port = _pub_endpoint.substr(_pub_endpoint.find_last_of(":") + 1);
@@ -1180,67 +1186,108 @@ void Agent::connect_sub() {
       _subscriber.set(zmq::sockopt::subscribe, t);
     }
   }
-  // Single I/O thread (§4.1): owns _subscriber exclusively whenever LKV
-  // delivery and/or threaded remote control need to consume it off the
-  // application thread. zmq_poll() (rather than a plain blocking recv()) is
-  // what leaves room to fold in more pollable sockets later without another
-  // restructuring.
-  if (_last_value_only || _rc_owns_socket) {
-    _io_thread = thread([this]() {
-      zmq::pollitem_t items[] = {
-          {_subscriber.handle(), 0, ZMQ_POLLIN, 0},
-      };
-      zmq::multipart_t msg;
-      while (keep_running() && _connected) {
-        try {
-          zmq::poll(items, 1, chrono::milliseconds(_receive_timeout));
-          if (!(items[0].revents & ZMQ_POLLIN)) continue;
-          if (!msg.recv(_subscriber, ZMQ_DONTWAIT)) continue;
-          if (msg.size() == 0) continue;
-          const string topic = msg.at(0).to_string();
-          // Drop wildcard-subscribed messages that don't actually match
-          // (the ZMQ-level subscribe above is only a broader prefix).
-          if (!_wildcard_sub_topic.empty() &&
-              !_topic_matches_subscription(topic))
-            continue;
+  // Hand _subscriber over to the I/O thread iff LKV delivery and/or threaded
+  // remote control need it consumed off the application thread. Published
+  // only now, with release ordering, so the thread cannot start polling a
+  // socket this function is still subscribing on.
+  _io_reads_subscriber.store(_last_value_only || _rc_owns_socket,
+                             std::memory_order_release);
+  // A subscribe-only agent never went through connect_pub(), so this may be
+  // the first chance to bring the thread up; it is a no-op if it is running.
+  _start_io_thread();
+}
 
-          // "control" messages are a distinct channel: dispatched to
-          // remote_control(), never also stored as an LKV value. Decoding
-          // logic unchanged from the old dedicated remote-control thread.
-          if (_remote_controlled && topic == "control") {
-            if (msg.size() < 2) continue;
-            string j;
-            bool ok = false;
-            WireHeader hdr;
-            if (parse_wire_header(msg.at(1).to_string(), hdr) &&
-                !hdr.has_blob && msg.size() >= 3) {
-              ok = decode_to_json_text(msg.at(2).to_string(), hdr.format,
-                                       hdr.compression, j);
-            } else if (msg.size() == 2) {
-              string payload = msg.at(1).to_string();
-              ok = snappy::Uncompress(payload.data(), payload.size(), &j);
-            }
-            if (ok)
-              remote_control(j);
-            else
-              _dropped_messages++;
-            continue;
-          }
-
-          if (_last_value_only) {
-            std::lock_guard<std::mutex> lock(_latest_message.mtx);
-            _latest_message.value = msg.clone();
-            _latest_message.cv.notify_one();
-          }
-          // else: threaded remote control is active but LKV is not, and
-          // this wasn't a control message -- matches the old dedicated
-          // remote-control thread's behaviour of silently dropping ordinary
-          // traffic in that configuration (receive() is unusable there
-          // anyway; see its _rc_owns_socket guard).
-        } catch (...) {}
+void Agent::_start_io_thread() {
+  if (_io_thread.joinable())
+    return;
+  // One thread for every pollable socket this agent owns (§4.1): the
+  // subscriber, when LKV/threaded remote control put it under this thread's
+  // exclusive ownership, plus both socket monitors' PAIR sockets, which used
+  // to cost a thread each. The loop condition is keep_running() alone --
+  // _connected is written by connect() *after* this thread is spawned, so
+  // reading it here would be both a data race and a startup race the thread
+  // could lose, exiting immediately.
+  _io_thread = thread([this]() {
+    zmq::pollitem_t items[3];
+    zmq::multipart_t msg;
+    while (keep_running()) {
+      // Rebuilt every iteration: connect_pub() starts this thread, and
+      // connect_sub() may attach the subscriber's monitor -- and hand over
+      // the subscriber itself -- only afterwards. Three cheap loads.
+      int n = 0, sub_slot = -1, pub_mon_slot = -1, sub_mon_slot = -1;
+      if (_io_reads_subscriber.load(std::memory_order_acquire)) {
+        sub_slot = n;
+        items[n++] = {_subscriber.handle(), 0, ZMQ_POLLIN, 0};
       }
-    });
-  }
+      auto pub_mon = _pub_monitor.pollable();
+      if (pub_mon.handle() != nullptr) {
+        pub_mon_slot = n;
+        items[n++] = {pub_mon.handle(), 0, ZMQ_POLLIN, 0};
+      }
+      auto sub_mon = _sub_monitor.pollable();
+      if (sub_mon.handle() != nullptr) {
+        sub_mon_slot = n;
+        items[n++] = {sub_mon.handle(), 0, ZMQ_POLLIN, 0};
+      }
+      // Capped independently of _receive_timeout, which an application may
+      // set to seconds: a monitor event (and this thread's own exit) should
+      // not have to wait that long.
+      const auto wait = chrono::milliseconds(std::min(_receive_timeout, 100));
+      try {
+        if (n == 0) {
+          this_thread::sleep_for(wait);
+          continue;
+        }
+        zmq::poll(items, n, wait);
+        if (pub_mon_slot >= 0 && (items[pub_mon_slot].revents & ZMQ_POLLIN))
+          _pub_monitor.process_pending();
+        if (sub_mon_slot >= 0 && (items[sub_mon_slot].revents & ZMQ_POLLIN))
+          _sub_monitor.process_pending();
+
+        if (sub_slot < 0 || !(items[sub_slot].revents & ZMQ_POLLIN)) continue;
+        if (!msg.recv(_subscriber, ZMQ_DONTWAIT)) continue;
+        if (msg.size() == 0) continue;
+        const string topic = msg.at(0).to_string();
+        // Drop wildcard-subscribed messages that don't actually match
+        // (the ZMQ-level subscribe is only a broader prefix).
+        if (!_wildcard_sub_topic.empty() && !_topic_matches_subscription(topic))
+          continue;
+
+        // "control" messages are a distinct channel: dispatched to
+        // remote_control(), never also stored as an LKV value.
+        if (_remote_controlled && topic == "control") {
+          if (msg.size() < 2) continue;
+          string j;
+          bool ok = false;
+          WireHeader hdr;
+          if (parse_wire_header(msg.at(1).to_string(), hdr) &&
+              !hdr.has_blob && msg.size() >= 3) {
+            ok = decode_to_json_text(msg.at(2).to_string(), hdr.format,
+                                     hdr.compression, j);
+          } else if (msg.size() == 2) {
+            string payload = msg.at(1).to_string();
+            ok = snappy::Uncompress(payload.data(), payload.size(), &j);
+          }
+          if (ok)
+            remote_control(j);
+          else
+            _dropped_messages++;
+          continue;
+        }
+
+        if (_last_value_only) {
+          std::lock_guard<std::mutex> lock(_latest_message.mtx);
+          _latest_message.value = msg.clone();
+          _latest_message.cv.notify_one();
+        }
+        // else: threaded remote control is active but LKV is not, and this
+        // wasn't a control message -- matches the old dedicated
+        // remote-control thread's behaviour of silently dropping ordinary
+        // traffic in that configuration (receive() is unusable there anyway;
+        // see its _rc_owns_socket guard).
+      } catch (...) {}
+    }
+  });
 }
 
 bool Agent::_topic_matches_subscription(const string &topic) const {
