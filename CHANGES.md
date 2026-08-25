@@ -1,4 +1,6 @@
-# Unreleased
+# Release 2.4.2
+
+This document summarizes what changed between `v2.4.1` and `v2.4.2`.
 
 **Breaking for downstream C++ agents that touch ZMQ sockets directly; the wire
 protocol is unchanged.** `MadsCore` is a shared library whose class layout
