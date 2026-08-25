@@ -26,9 +26,10 @@ compose format: develop and tune an agent set interactively in the Director GUI,
 (`Type=simple`) with **mads-up**.
 
 **mads-up** parses and validates `director.toml` itself (no dependency on the Director GUI or its GLFW
-build requirement), expands `scale` into numbered instances and `${PWD}`/`${ID}` templating in `command`,
-and orders startup so every process named in another process's `after` key starts (and, if it declares a
-`ready` probe, becomes ready) before its dependents. Startup order and validation is available without
+build requirement), expands `scale` into numbered instances and `${PWD}`/`${ID}` templating in `command`
+(with `${ID}` offset by the section's `base_instance_id`, as Director does), and orders startup so every
+process named in another process's `after` key starts (and, if it declares a `ready` probe, becomes
+ready) before its dependents. Startup order and validation is available without
 spawning anything via **\-\-dry-run**.
 
 Processes are started via a shell by default (matching Director's own behaviour: `$SHELL -lc "<command>"`
@@ -40,10 +41,29 @@ stdout/stderr, prefixed with `[name]`, unless **\-\-quiet** is given.
 **SIGINT**/**SIGTERM** tear down every managed process (in reverse start order) and this process then
 exits -- exactly what `systemd Type=simple`, Docker, and CI runners expect.
 
+## Scaling and instance IDs
+
+`scale = N` expands a process section into *N* instances named `base[1]` .. `base[N]` (the bare section
+name when `N` is 1), and `${ID}` in `command` expands to that instance's index. By default the index is
+0-based, so `scale = 3` yields `${ID}` 0, 1, 2. The optional `base_instance_id = <int >= 0>` key (default
+`0`) shifts that numbering:
+
+```toml
+[perf_assess]
+command = 'mads-perf_assess -p10 -id="perf_assess_${ID}"'
+base_instance_id = 10
+scale = 3
+```
+
+expands `${ID}` to 10, 11 and 12. It offsets `${ID}` only: the instance *names* stay `perf_assess[1]`,
+`perf_assess[2]`, `perf_assess[3]`, so `after` targets and the `[name]` output prefixes are unaffected.
+This is Director's own key and behaviour (added in `mads_director` v2.4.2), not a **mads-up** extension --
+the same file scales identically in the GUI and here. A negative value is rejected at load time.
+
 ## The ready key
 
 Beyond the schema Director already defines (`command`, `after`, `workdir`, `enabled`, `scale`,
-`relaunch`, `tty`), **mads-up** adds one new, optional, per-process key:
+`base_instance_id`, `relaunch`, `tty`), **mads-up** adds one new, optional, per-process key:
 
 ```toml
 ready = "broker" | "broker:<uri>" | "port:<n>" | "log:<regex>" | "delay:<duration>"

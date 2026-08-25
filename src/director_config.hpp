@@ -56,7 +56,7 @@ enum class ReadyKind { Broker, Port, Log, Delay };
  * Grammar (see NEW_FEATURES.md P5): `"broker"` | `"broker:<uri>"` |
  * `"port:<n>"` | `"log:<regex>"` | `"delay:<dur>"`. This key is additive and
  * silently ignored by Director's own parser (it never validates unknown keys
- * inside a process table -- confirmed against mads_director v2.2.0's
+ * inside a process table -- confirmed against mads_director v2.4.2's
  * src/config.cpp, see the comment at the top of director_config.cpp).
  */
 struct ReadySpec {
@@ -92,7 +92,10 @@ struct ProcessConfig {
   bool enabled = true;
   bool relaunch = false;
   bool tty = false; // parsed for fidelity; headless mads-up ignores it
-  int instance_id = 0; // 0-based, matches Director's ${ID} substitution
+  // The value `${ID}` expanded to: `base_instance_id + <0-based index>`,
+  // matching Director's own substitution. Plain 0-based when the section
+  // leaves `base_instance_id` at its 0 default.
+  int instance_id = 0;
   // Resolved dependency instance names (a base process with scale>1 that
   // another depends on via `after` expands to *all* of its instances, exactly
   // as mads_director's ProcessManager::build_process_definitions does).

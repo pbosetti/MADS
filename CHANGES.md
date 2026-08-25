@@ -173,6 +173,18 @@ exactly as before until you opt in. Details and examples are in
   before, at no cost to correctness (verified with a fast producer/slow LKV
   consumer under repeated load).
 
+- **`mads up` honours `director.toml`'s `base_instance_id`.** `mads-up` now
+  supports the per-process `base_instance_id` key that `mads_director` v2.4.2
+  added (the version this repo pins), with identical semantics: it offsets the
+  value `${ID}` expands to in `command`, so a section with `scale = 3` and
+  `base_instance_id = 10` starts three instances whose `${ID}` is 10, 11 and
+  12 instead of 0, 1 and 2. It shifts `${ID}` only -- the instance names stay
+  `name[1]`..`name[3]`, so `after` targets and the `[name]` output prefixes are
+  unchanged. The key is optional and defaults to `0`, so every existing
+  `director.toml` expands exactly as before; a negative value is rejected at
+  load time. The same file therefore scales identically under the Director GUI
+  and under `mads up` / `mads doctor --plan`.
+
 ## Fixes
 
 - **Broker `p`/`r` keys now actually pause and resume.** The interactive

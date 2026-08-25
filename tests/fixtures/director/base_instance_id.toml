@@ -1,0 +1,15 @@
+# Exercises `base_instance_id` (mads_director v2.4.2): it offsets what `${ID}`
+# expands to, without touching the 1-based `base[N]` instance names.
+[broker]
+command = "mads-broker --id=${ID}"
+
+[perf_assess]
+command = "mads-perf_assess -p10 -id=\"perf_assess_${ID}\""
+base_instance_id = 10
+after = "broker"
+scale = 3
+
+[worker]
+command = "mads-worker --id=${ID}"
+base_instance_id = 7
+after = "broker"

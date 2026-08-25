@@ -10,7 +10,7 @@
 format already owned by mads_director (https://github.com/mads-net/mads_director).
 Parses/validates/expands the file itself (src/director_config.hpp -- see that
 file's top comment for exactly what was verified against Director's pinned
-v2.2.0 tag), then starts, supervises and tears down the described processes
+v2.4.2 tag), then starts, supervises and tears down the described processes
 via src/up_supervisor.hpp. Foreground-only by design: no daemonization, no PID
 file, no `mads down` -- SIGINT/SIGTERM tears everything down and this process
 exits, exactly what systemd Type=simple / Docker / CI expect.

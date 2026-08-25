@@ -1,9 +1,9 @@
-// Reference: mads_director tag v2.2.0 (this repo pins that exact tag in the
+// Reference: mads_director tag v2.4.2 (this repo pins that exact tag in the
 // top-level CMakeLists.txt, `FetchContent_Declare(mads-director ... GIT_TAG
-// v2.2.0 ...)`). Verified by shallow-cloning that tag and reading
+// v2.4.2 ...)`). Verified by shallow-cloning that tag and reading
 // src/config.cpp, src/process_manager.cpp and src/platform_process_{posix,
 // windows}.cpp directly (not the README on `main`, which can drift). Summary
-// of what v2.2.0 actually does, so a future reader knows what to re-check if
+// of what v2.4.2 actually does, so a future reader knows what to re-check if
 // Director moves:
 //
 //  - Schema: a `[director]` table (optional; keys `terminal` string and
@@ -14,7 +14,8 @@
 //    not a general DAG), `workdir` (string, optional, resolved against the
 //    config file's directory when relative or absent), `enabled` (bool,
 //    default true), `scale` (int >= 1, default 1), `relaunch` (bool, default
-//    false), `tty` (bool, default false).
+//    false), `tty` (bool, default false), `base_instance_id` (int >= 0,
+//    default 0).
 //  - `command` is SHELL-INTERPRETED, not tokenized/exec'd directly:
 //      * POSIX (platform_process_posix.cpp, exec_child_command()): runs
 //        `$SHELL -lc "<command>"`, falling back to `/bin/sh -lc`/`-c` if
@@ -24,9 +25,12 @@
 //    NEW_FEATURES.md flagged this as unverified; it is shell-out, confirmed.
 //  - `scale = N` expands a process into N instances named `base`, `base[2]`,
 //    ... `base[N]` (1-based suffix; the bare name with no suffix when N==1),
-//    see process_manager.cpp scaled_name(). `${ID}` in `command` is the
-//    0-based instance index (`expand_command_template()`); `${PWD}` is the
-//    instance's resolved working directory.
+//    see process_manager.cpp scaled_name(). `${ID}` in `command` is
+//    `base_instance_id + <0-based instance index>` (expand_command_template()
+//    takes the base as its 4th argument and adds it in); `${PWD}` is the
+//    instance's resolved working directory. `base_instance_id` shifts only
+//    `${ID}`, never the `base[N]` instance names, which stay 1-based.
+//    Added in v2.4.2; a config without the key behaves as before (base 0).
 //  - `after = "x"` on a process with scale M expands to a dependency on
 //    *all* M instances of `x` (build_process_definitions()): a dependent
 //    only starts once every instance of its declared dependency has
@@ -36,7 +40,7 @@
 //    keys inside a process table (it only looks up the keys it knows about
 //    via `table["key"]`), so an extra key such as our own `ready = "..."` is
 //    silently ignored by Director's parser -- confirming NEW_FEATURES.md's
-//    assumption that `ready` is safely additive. The one place v2.2.0 is
+//    assumption that `ready` is safely additive. The one place v2.4.2 is
 //    NOT lenient: a top-level entry that isn't a TOML table (e.g. a bare
 //    top-level key) is a hard parse error ("All top-level entries must be
 //    process tables..."). This module deliberately does NOT match that
@@ -46,7 +50,7 @@
 //  - `terminal`/`tty` are GUI-only (attach windows); headless execution
 //    ignores them, matching NEW_FEATURES.md.
 //
-// If mads_director's pinned tag moves past v2.2.0, re-diff its src/config.cpp
+// If mads_director's pinned tag moves past v2.4.2, re-diff its src/config.cpp
 // and src/process_manager.cpp against the summary above.
 
 #include "director_config.hpp"
@@ -89,6 +93,7 @@ struct RawProcess {
   std::optional<std::string> workdir;
   bool enabled = true;
   int scale = 1;
+  int base_instance_id = 0;
   bool relaunch = false;
   bool tty = false;
   std::optional<ReadySpec> ready;
@@ -187,8 +192,9 @@ bool parse_process(const std::string &section_name, const toml::table &table,
                    RawProcess *out_process, std::vector<std::string> *warnings,
                    std::string *out_error) {
   static const std::unordered_set<std::string> known{
-      "command", "after", "workdir", "enabled",
-      "scale",   "relaunch", "tty",  "ready"};
+      "command",  "after", "workdir", "enabled",
+      "scale",    "relaunch", "tty",  "ready",
+      "base_instance_id"};
   for (const auto &[key, node] : table) {
     if (!known.contains(std::string(key.str())) && warnings != nullptr) {
       warnings->push_back("director.toml: unknown key '" +
@@ -245,6 +251,16 @@ bool parse_process(const std::string &section_name, const toml::table &table,
 
   if (const auto tty = table["tty"].value<bool>(); tty.has_value()) {
     process.tty = *tty;
+  }
+
+  if (const auto base_instance_id = table["base_instance_id"].value<int64_t>();
+      base_instance_id.has_value()) {
+    if (*base_instance_id < 0) {
+      *out_error = "Process '" + process.name +
+                   "' has invalid 'base_instance_id'. Must be >= 0.";
+      return false;
+    }
+    process.base_instance_id = static_cast<int>(*base_instance_id);
   }
 
   if (const auto ready = table["ready"].value<std::string>();
@@ -534,7 +550,10 @@ load_director_config(const std::string &path, std::string *out_error,
         instance.enabled = process.enabled;
         instance.relaunch = process.relaunch;
         instance.tty = process.tty;
-        instance.instance_id = i;
+        // Director offsets ${ID} by the section's `base_instance_id`
+        // (default 0), so a scale=3 / base_instance_id=10 process expands to
+        // ${ID} 10, 11, 12 -- while the instance *names* stay base[1..3].
+        instance.instance_id = process.base_instance_id + i;
         instance.ready = process.ready;
 
         if (process.workdir.has_value()) {
@@ -546,8 +565,8 @@ load_director_config(const std::string &path, std::string *out_error,
         } else {
           instance.workdir = config.base_dir.string();
         }
-        instance.command =
-            expand_command_template(process.command, instance.workdir, i);
+        instance.command = expand_command_template(
+            process.command, instance.workdir, instance.instance_id);
 
         if (process.after.has_value()) {
           const int dep_scale = scale_of.at(*process.after);

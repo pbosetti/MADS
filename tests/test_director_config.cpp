@@ -2,11 +2,11 @@
 // expansion/ordering of director.toml, no ZMQ/processes involved. Covers:
 //   - parse_duration() / parse_ready_spec() as standalone pure functions
 //   - fixture conformance (tests/fixtures/director/*.toml) against the
-//     schema confirmed against mads_director v2.2.0 (see the top comment in
+//     schema confirmed against mads_director v2.4.2 (see the top comment in
 //     src/director_config.cpp)
-//   - scale expansion, ${PWD}/${ID} substitution, after-ordering, cycle
-//     detection, enabled=false, unknown-key leniency, malformed-file
-//     rejection.
+//   - scale expansion, ${PWD}/${ID} substitution (including the
+//     `base_instance_id` offset), after-ordering, cycle detection,
+//     enabled=false, unknown-key leniency, malformed-file rejection.
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
@@ -209,6 +209,70 @@ TEST_CASE("scale_templating.toml: ${PWD}/${ID} substitution per instance",
 
   std::vector<std::string> after = api1->after;
   REQUIRE(after == std::vector<std::string>{"db"});
+}
+
+TEST_CASE("base_instance_id.toml: ${ID} is offset by base_instance_id",
+         "[director_config]") {
+  std::string error;
+  std::vector<std::string> warnings;
+  auto config = Mads::load_director_config(
+      fixture("base_instance_id.toml").string(), &error, &warnings);
+  REQUIRE(config.has_value());
+  // The key is part of Director's own schema (v2.4.2), so it must not be
+  // reported as an unknown key.
+  REQUIRE(warnings.empty());
+
+  // No base_instance_id -> unchanged 0-based behaviour.
+  const auto *broker = find_proc(*config, "broker");
+  REQUIRE(broker != nullptr);
+  REQUIRE(broker->instance_id == 0);
+  REQUIRE(broker->command == "mads-broker --id=0");
+
+  // scale=3 with base_instance_id=10 -> ${ID} 10, 11, 12, while the instance
+  // names stay 1-based (perf_assess[1..3]).
+  const auto *p1 = find_proc(*config, "perf_assess[1]");
+  const auto *p2 = find_proc(*config, "perf_assess[2]");
+  const auto *p3 = find_proc(*config, "perf_assess[3]");
+  REQUIRE(p1 != nullptr);
+  REQUIRE(p2 != nullptr);
+  REQUIRE(p3 != nullptr);
+  REQUIRE(p1->instance_id == 10);
+  REQUIRE(p2->instance_id == 11);
+  REQUIRE(p3->instance_id == 12);
+  REQUIRE(p1->command == "mads-perf_assess -p10 -id=\"perf_assess_10\"");
+  REQUIRE(p2->command == "mads-perf_assess -p10 -id=\"perf_assess_11\"");
+  REQUIRE(p3->command == "mads-perf_assess -p10 -id=\"perf_assess_12\"");
+
+  // base_instance_id applies to an unscaled process too (scale defaults to 1).
+  const auto *worker = find_proc(*config, "worker");
+  REQUIRE(worker != nullptr);
+  REQUIRE(worker->instance_id == 7);
+  REQUIRE(worker->command == "mads-worker --id=7");
+}
+
+TEST_CASE("base_instance_id defaults to 0 when omitted", "[director_config]") {
+  auto path = write_temp_toml(
+      "[api]\ncommand = \"./api --id=${ID}\"\nscale = 2\n", "no_base_id");
+  std::string error;
+  auto config = Mads::load_director_config(path.string(), &error);
+  REQUIRE(config.has_value());
+  REQUIRE(find_proc(*config, "api[1]")->instance_id == 0);
+  REQUIRE(find_proc(*config, "api[2]")->instance_id == 1);
+  REQUIRE(find_proc(*config, "api[1]")->command == "./api --id=0");
+  REQUIRE(find_proc(*config, "api[2]")->command == "./api --id=1");
+  fs::remove(path);
+}
+
+TEST_CASE("a negative base_instance_id is rejected", "[director_config]") {
+  auto path = write_temp_toml(
+      "[api]\ncommand = \"echo hi\"\nbase_instance_id = -1\n",
+      "negative_base_id");
+  std::string error;
+  auto config = Mads::load_director_config(path.string(), &error);
+  REQUIRE_FALSE(config.has_value());
+  REQUIRE(error.find("base_instance_id") != std::string::npos);
+  REQUIRE(error.find("api") != std::string::npos);
+  fs::remove(path);
 }
 
 TEST_CASE("with_ready.toml: ready key parsed for all four kinds",

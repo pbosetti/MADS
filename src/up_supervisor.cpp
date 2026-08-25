@@ -91,7 +91,7 @@ std::vector<std::string> tokenize_command(const std::string &command) {
 }
 
 // Candidate argvs to try, in order, for shelling out to `command`. Mirrors
-// mads_director v2.2.0's exec_child_command() (see director_config.cpp's
+// mads_director v2.4.2's exec_child_command() (see director_config.cpp's
 // top-of-file comment): try $SHELL first, fall back to /bin/sh -lc, then
 // finally plain /bin/sh -c. On Windows, Director always uses
 // `cmd.exe /S /C "<command>"` (no fallback chain needed/possible).
