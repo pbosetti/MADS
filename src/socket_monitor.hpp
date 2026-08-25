@@ -55,10 +55,17 @@ enum class LinkStatus {
 /// status, the counters and the event that caused them can never disagree.
 struct LinkState {
   LinkStatus status = LinkStatus::Unknown;
-  /// The most recent event, kept alongside the status because it carries the
-  /// *reason*: Down says the link is unusable, HandshakeFailedAuth says the
-  /// peer rejected our key.
+  /// The most recent event, whatever it was.
   LinkEvent last_event = LinkEvent::None;
+  /// How the most recent ZMTP handshake ended: HandshakeSucceeded, one of
+  /// the three HandshakeFailed* events, or None if none has completed yet.
+  ///
+  /// This -- not last_event -- is what carries the *reason* a link is down.
+  /// libzmq follows a rejected handshake with ZMQ_EVENT_DISCONNECTED and
+  /// then a stream of ZMQ_EVENT_CONNECT_RETRIED, so by the time anything
+  /// asks, last_event has almost always moved on and "the broker rejected
+  /// our key" would have been lost. Only the next handshake replaces it.
+  LinkEvent last_handshake = LinkEvent::None;
   /// The peer address libzmq reported with that event ("" if none yet).
   std::string last_event_address;
   /// Up -> Down transitions. Counts transitions, not events, so a broker
@@ -164,12 +171,16 @@ public:
   bool wait_connected(std::chrono::milliseconds timeout);
 
   /**
-   * @brief Blocks until ZMQ_EVENT_HANDSHAKE_SUCCEEDED specifically is
-   * observed, or `timeout` elapses. Unlike wait_connected(), this does not
-   * also accept a bare Connected event, so it is not fooled by a CURVE/ZAP
-   * rejection: TCP connects immediately regardless of the mechanism, but the
-   * handshake only succeeds once the security layer has actually accepted
-   * the peer.
+   * @brief Blocks until a ZMTP handshake completes one way or the other, or
+   * `timeout` elapses. Unlike wait_connected(), this does not accept a bare
+   * Connected event, so it is not fooled by a CURVE/ZAP rejection: TCP
+   * connects immediately regardless of the mechanism, but the handshake only
+   * succeeds once the security layer has actually accepted the peer.
+   *
+   * Decided on state().last_handshake rather than the newest event, so the
+   * DISCONNECTED that libzmq fires straight after a rejection cannot make
+   * this report a timeout instead of a refusal.
+   *
    * @return true if the handshake succeeded within the timeout.
    */
   bool wait_handshake_succeeded(std::chrono::milliseconds timeout);

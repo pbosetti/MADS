@@ -78,7 +78,7 @@ TEST_CASE("link_state() reports Up once a subscriber reaches its peer",
       [&] { return sub->link_state().status == Mads::LinkStatus::Up; },
       3000ms));
   auto st = sub->link_state();
-  REQUIRE(st.last_event == Mads::LinkEvent::HandshakeSucceeded);
+  REQUIRE(st.last_handshake == Mads::LinkEvent::HandshakeSucceeded);
   REQUIRE(st.drops == 0);
   REQUIRE(st.changed_at.has_value());
 }
@@ -149,4 +149,5 @@ TEST_CASE("link_state() is Unknown before connect()", "[agent][link_state]") {
   set_endpoints(a, 44309, 44308);
   REQUIRE(a.link_state().status == Mads::LinkStatus::Unknown);
   REQUIRE(a.link_state().last_event == Mads::LinkEvent::None);
+  REQUIRE(a.link_state().last_handshake == Mads::LinkEvent::None);
 }

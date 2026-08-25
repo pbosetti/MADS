@@ -91,7 +91,9 @@ void render_link(const LinkState &link,
       cout << " for " << fixed << setprecision(1)
           << chrono::duration<double>(now - *link.changed_at).count() << "s";
     }
-    if (link.last_event == LinkEvent::HandshakeFailedAuth)
+    // last_handshake rather than last_event, which by now is almost always
+    // the DISCONNECTED libzmq fires right after a rejection.
+    if (link.last_handshake == LinkEvent::HandshakeFailedAuth)
       cout << " (broker rejected our key)";
     cout << fg::reset;
     break;

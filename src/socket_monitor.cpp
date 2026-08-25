@@ -69,8 +69,11 @@ public:
   bool wait_connected(std::chrono::milliseconds timeout) {
     std::unique_lock<std::mutex> lock(_mtx);
     return _cv.wait_for(lock, timeout, [this] {
-      return _last_event == LinkEvent::Connected ||
-             _last_event == LinkEvent::HandshakeSucceeded;
+      // status is the sticky form of "the handshake got through", so this
+      // still reports a connection that has already been followed by other
+      // events; _last_event keeps the earlier, TCP-level signal.
+      return _state.status == LinkStatus::Up ||
+             _last_event == LinkEvent::Connected;
     });
   }
 
@@ -78,14 +81,13 @@ public:
     std::unique_lock<std::mutex> lock(_mtx);
     // Wakes as soon as the handshake resolves either way -- success or one
     // of the failure events -- rather than always waiting out the full
-    // timeout on a rejection the monitor already knows about.
-    _cv.wait_for(lock, timeout, [this] {
-      return _last_event == LinkEvent::HandshakeSucceeded ||
-             _last_event == LinkEvent::HandshakeFailedAuth ||
-             _last_event == LinkEvent::HandshakeFailedProtocol ||
-             _last_event == LinkEvent::HandshakeFailedNoDetail;
-    });
-    return _last_event == LinkEvent::HandshakeSucceeded;
+    // timeout on a rejection the monitor already knows about. Tested
+    // against the sticky outcome, never the newest event: libzmq fires
+    // DISCONNECTED immediately after a rejection, which would otherwise
+    // race the predicate and turn a refusal into a timeout.
+    _cv.wait_for(lock, timeout,
+                 [this] { return _state.last_handshake != LinkEvent::None; });
+    return _state.last_handshake == LinkEvent::HandshakeSucceeded;
   }
 
 protected:
@@ -135,6 +137,18 @@ private:
       _last_address = addr ? addr : "";
       _state.last_event = _last_event;
       _state.last_event_address = _last_address;
+      switch (_last_event) {
+      case LinkEvent::HandshakeSucceeded:
+      case LinkEvent::HandshakeFailedAuth:
+      case LinkEvent::HandshakeFailedProtocol:
+      case LinkEvent::HandshakeFailedNoDetail:
+        // Sticky: survives the DISCONNECTED/CONNECT_RETRIED stream that
+        // follows a rejection, and is replaced only by the next handshake.
+        _state.last_handshake = _last_event;
+        break;
+      default:
+        break;
+      }
       apply_status(_last_event);
     }
     _cv.notify_all();

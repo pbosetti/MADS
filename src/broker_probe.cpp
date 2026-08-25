@@ -190,13 +190,17 @@ probe_curve_handshake(const std::string &uri,
     // TCP level before the CURVE/ZAP handshake is even attempted, so it
     // would report success on a rejection just as readily as on a real one.
     const bool succeeded = monitor.wait_handshake_succeeded(timeout);
-    const LinkEvent last = monitor.last_event();
+    // last_handshake, not last_event: libzmq fires DISCONNECTED straight
+    // after a rejection, so the newest event is usually that rather than the
+    // refusal -- which would report a bare Timeout and lose the whole point
+    // of this probe.
+    const LinkEvent handshake = monitor.state().last_handshake;
     monitor.stop();
     socket.close();
 
     if (succeeded)
       return CurveProbeResult::Connected;
-    if (last == LinkEvent::HandshakeFailedAuth)
+    if (handshake == LinkEvent::HandshakeFailedAuth)
       return CurveProbeResult::RejectedAuth;
     return CurveProbeResult::Timeout;
   } catch (const std::exception &) {

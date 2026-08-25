@@ -374,9 +374,9 @@ public:
 
   /**
    * @brief The current state of this agent's link to the broker: up or down,
-   * why (`last_event` -- e.g. a ZMQ_EVENT_HANDSHAKE_FAILED_AUTH turns a CURVE
-   * rejection into a fact instead of a bare receive timeout), since when, and
-   * how often it has dropped and recovered.
+   * why (`last_handshake` -- e.g. a ZMQ_EVENT_HANDSHAKE_FAILED_AUTH turns a
+   * CURVE rejection into a fact instead of a bare receive timeout), since
+   * when, and how often it has dropped and recovered.
    *
    * Reported from the subscriber socket, since that is the one over which an
    * agent would otherwise silently stop hearing from a departed broker;

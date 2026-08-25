@@ -165,7 +165,11 @@ TEST_CASE("an unauthorised CURVE client raises HandshakeFailedAuth",
   // signal that the handshake itself succeeded. wait_handshake_succeeded()
   // is the one that must see through the rejection.
   REQUIRE_FALSE(monitor.wait_handshake_succeeded(2000ms));
-  REQUIRE(monitor.last_event() == Mads::LinkEvent::HandshakeFailedAuth);
+  // last_handshake, not last_event: libzmq fires DISCONNECTED straight after
+  // the rejection and then retries, so which event is "last" here is a race
+  // -- one this assertion lost on Linux until the outcome became sticky.
+  REQUIRE(monitor.state().last_handshake ==
+          Mads::LinkEvent::HandshakeFailedAuth);
 
   monitor.stop();
   rogue.close();
@@ -211,7 +215,8 @@ TEST_CASE("an authorised CURVE client observes HandshakeSucceeded",
   client.connect(mads_test::loopback(44105));
 
   REQUIRE(monitor.wait_handshake_succeeded(2000ms));
-  REQUIRE(monitor.last_event() == Mads::LinkEvent::HandshakeSucceeded);
+  REQUIRE(monitor.state().last_handshake ==
+          Mads::LinkEvent::HandshakeSucceeded);
 
   monitor.stop();
   client.close();
@@ -388,9 +393,25 @@ TEST_CASE("a CURVE rejection reads as Down without a spurious drop",
   REQUIRE_FALSE(monitor.wait_handshake_succeeded(2000ms));
   auto st = monitor.state();
   REQUIRE(st.status == Mads::LinkStatus::Down);
-  REQUIRE(st.last_event == Mads::LinkEvent::HandshakeFailedAuth);
+  REQUIRE(st.last_handshake == Mads::LinkEvent::HandshakeFailedAuth);
   REQUIRE(st.drops == 0); // never up, so nothing was lost
   REQUIRE(st.recoveries == 0);
+
+  // The reason must outlive the events that bury it. libzmq disconnects and
+  // then retries after a refusal, so wait for last_event to move on and
+  // check that the diagnosis is still there -- this is what `mads top`'s
+  // "(broker rejected our key)" and `mads doctor --crypto`'s RejectedAuth
+  // both read. (On a platform that fires no follow-up event the wait simply
+  // times out and the assertion below still holds.)
+  mads_test::wait_for(
+      [&] {
+        return monitor.state().last_event !=
+               Mads::LinkEvent::HandshakeFailedAuth;
+      },
+      2000ms);
+  REQUIRE(monitor.state().last_handshake ==
+          Mads::LinkEvent::HandshakeFailedAuth);
+  REQUIRE(monitor.state().status == Mads::LinkStatus::Down);
 
   monitor.stop();
   rogue.close();
@@ -419,6 +440,7 @@ TEST_CASE("stop() resets the reported state", "[socket_monitor]") {
   auto st = monitor.state();
   REQUIRE(st.status == Mads::LinkStatus::Unknown);
   REQUIRE(st.last_event == Mads::LinkEvent::None);
+  REQUIRE(st.last_handshake == Mads::LinkEvent::None);
   REQUIRE(st.drops == 0);
   REQUIRE_FALSE(st.changed_at.has_value());
 
