@@ -20,6 +20,7 @@ Author(s): Paolo Bosetti
 #ifndef MADS_UP_SUPERVISOR_HPP
 #define MADS_UP_SUPERVISOR_HPP
 
+#include "broker_probe.hpp"
 #include "director_config.hpp"
 
 #include <atomic>
@@ -47,6 +48,15 @@ struct UpOptions {
   // has no per-key timeout), applies uniformly to every `ready = "..."`.
   std::chrono::milliseconds ready_timeout{10000};
   bool quiet = false; // suppress multiplexed [name] stdout/stderr passthrough
+  // CURVE credentials for `ready = "broker"` probes, from mads-up's own
+  // --crypto/--keys_dir/--key_client/--key_broker flags. Unset means "probe
+  // in the clear", which reaches only an unencrypted broker: a CURVE-secured
+  // one drops a plain peer during the ZMTP handshake, so the probe would
+  // never come back and the gate would wait out its full ready_timeout with
+  // a perfectly healthy broker running. Not a director.toml key: the plan
+  // format is shared with Director's GUI, and every process already names
+  // its own --crypto flags inside `command`.
+  std::optional<ProbeCurveKeys> curve;
 };
 
 enum class RunOutcome {

@@ -26,6 +26,7 @@
 #include <zmq.hpp>
 #include <zmq_addon.hpp>
 
+#include "curve.hpp"
 #include "zap_auth.hpp"
 
 #include "doctor_checks.hpp"
@@ -70,6 +71,48 @@ private:
   }
   zmq::context_t _ctx;
   zmq::socket_t _sock;
+  std::thread _thread;
+  std::atomic<bool> _stopped{false};
+};
+
+// The same fake broker behind a real CURVE server socket, with a live ZAP
+// authenticator accepting the client key it is handed -- i.e. exactly what a
+// `mads broker --crypto` settings endpoint looks like from outside. Needed
+// because an unencrypted probe against one of these is dropped during the
+// ZMTP handshake, which is indistinguishable from a broker that is down
+// unless the probe carries CURVE credentials of its own.
+class FakeCurveBroker {
+public:
+  FakeCurveBroker(uint16_t port, const fs::path &key_dir)
+      : _ctx(), _sock(_ctx, zmq::socket_type::rep), _auth(_ctx) {
+    _auth.setup_auth(Mads::auth_verbose::off);
+    _auth.fetch_public_keys(key_dir);
+    _auth.setup_curve_server(_sock, "broker");
+    _sock.set(zmq::sockopt::rcvtimeo, 100);
+    _sock.bind(mads_test::loopback(port));
+  }
+  ~FakeCurveBroker() { stop(); }
+
+  void start() { _thread = std::thread([this] { run(); }); }
+  void stop() {
+    if (_stopped.exchange(true)) return;
+    if (_thread.joinable()) _thread.join();
+  }
+
+private:
+  void run() {
+    while (!_stopped) {
+      zmq::multipart_t msg;
+      if (!msg.recv(_sock)) continue;
+      zmq::multipart_t reply;
+      reply.addstr(std::string("v0.0"));
+      reply.addstr(std::string("{}"));
+      reply.send(_sock);
+    }
+  }
+  zmq::context_t _ctx;
+  zmq::socket_t _sock;
+  Mads::CurveAuth _auth;
   std::thread _thread;
   std::atomic<bool> _stopped{false};
 };
@@ -181,6 +224,69 @@ TEST_CASE("check_broker_reachable fails against an unreachable broker",
          "[doctor][broker]") {
   const uint16_t port = 42701; // intentionally nothing bound here
   auto r = Mads::Doctor::check_broker_reachable(mads_test::loopback(port), 300ms);
+  REQUIRE(r.status == Status::Fail);
+}
+
+// Regression: `mads doctor --crypto` used to probe a CURVE-secured broker
+// with a plain REQ socket, which libzmq drops during the ZMTP handshake. A
+// perfectly healthy encrypted broker was therefore reported as "did not
+// respond" -- two lines above a passing CURVE handshake check against the
+// very same URI.
+TEST_CASE("check_broker_reachable reaches a CURVE broker only when given keys",
+         "[doctor][broker][curve]") {
+  const uint16_t port = 42704;
+  TempDir dir("broker_curve");
+  auto client_kp = Mads::generate_keypair();
+  auto server_kp = Mads::generate_keypair();
+  write_keypair(dir.path, "client", client_kp);
+  write_keypair(dir.path, "broker", server_kp);
+
+  FakeCurveBroker broker(port, dir.path);
+  broker.start();
+  const std::string uri = mads_test::loopback(port);
+
+  Mads::Doctor::CurveKeyCheck cfg;
+  cfg.key_dir = dir.path;
+  auto encrypted = Mads::Doctor::check_broker_reachable(uri, 2000ms, cfg);
+  REQUIRE(encrypted.status == Status::Pass);
+  REQUIRE(encrypted.message.find("(CURVE)") != std::string::npos);
+
+  auto plain = Mads::Doctor::check_broker_reachable(uri, 500ms);
+  REQUIRE(plain.status == Status::Fail);
+  // The hint has to name the encryption mismatch: the address it would
+  // otherwise send the user off to check is not what is wrong here.
+  REQUIRE(plain.fix_hint.find("--crypto") != std::string::npos);
+}
+
+// The mirror image: a CURVE-configured probe against an unencrypted broker
+// must fail too, and say which way round the mismatch is.
+TEST_CASE("check_broker_reachable with keys fails against a plain broker",
+         "[doctor][broker][curve]") {
+  const uint16_t port = 42705;
+  TempDir dir("broker_plain_vs_curve");
+  auto client_kp = Mads::generate_keypair();
+  auto server_kp = Mads::generate_keypair();
+  write_keypair(dir.path, "client", client_kp);
+  write_keypair(dir.path, "broker", server_kp);
+
+  FakeBroker broker(port);
+  broker.start();
+
+  Mads::Doctor::CurveKeyCheck cfg;
+  cfg.key_dir = dir.path;
+  auto r = Mads::Doctor::check_broker_reachable(mads_test::loopback(port), 500ms, cfg);
+  REQUIRE(r.status == Status::Fail);
+  REQUIRE(r.message.find("(CURVE)") != std::string::npos);
+  REQUIRE(r.fix_hint.find("drop --crypto") != std::string::npos);
+}
+
+// Unreadable key files must not escape as an exception: a probe that could
+// not even be configured is a probe that got no answer.
+TEST_CASE("check_broker_reachable reports missing key files as no response",
+         "[doctor][broker][curve]") {
+  Mads::Doctor::CurveKeyCheck cfg;
+  cfg.key_dir = "/no/such/curve/key/dir/at/all";
+  auto r = Mads::Doctor::check_broker_reachable(mads_test::loopback(42706), 300ms, cfg);
   REQUIRE(r.status == Status::Fail);
 }
 

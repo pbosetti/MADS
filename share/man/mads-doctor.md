@@ -40,7 +40,11 @@ By default it checks, in order:
    reported **[PASS]** with a note pointing at the broker-reachable check below.
 2. **Broker reachable.** Probes the broker's settings endpoint (from **\-\-broker**, else the
    `[broker]` section's `settings_address`, else `tcp://localhost:9092`) the same way `mads up`'s
-   `ready = "broker"` does.
+   `ready = "broker"` does. With **\-\-crypto** the probe is CURVE-encrypted, and the endpoint is
+   reported as `... (CURVE) is reachable`. The encryption mode has to match the broker's: a
+   CURVE-secured broker drops a plain peer during the ZMTP handshake, and a plain broker drops an
+   encrypted one, so either mismatch looks exactly like a broker that is down. When this check
+   fails, its hint names that as a possible cause.
 3. **Declared plugin(s) resolve and load.** Every `attachment` key found in the settings file (or
    every **\-\-plugin** path given explicitly, which then takes priority) is dry-run loaded through
    the same `pugg::Kernel` path **mads-source**/**mads-filter**/**mads-sink** use -- loaded, its
@@ -142,7 +146,8 @@ Three situations, indistinguishable on a declared-only graph, become visible:
 The third is the one that is otherwise *invisible*: an agent subscribing to a topic no settings
 section mentions leaves no trace at all on a declared-only graph.
 
-This requires the broker to be running with `[broker] subscription_table = true`. If no table arrives,
+This requires the broker to be running with `[broker] subscription_table = true`, and -- against an
+encrypted broker -- **\-\-crypto** on the **mads-doctor** side too. If no table arrives,
 **mads-doctor** exits **1** with an error rather than falling back to a declared-only graph -- a
 silently degraded live graph is byte-identical to a plain one, so it would read as confirmation that
 the fleet matches its settings when in fact nothing was measured. Plain **\-\-graph** is unaffected and
@@ -188,7 +193,10 @@ is missing, it is scaffolded from the same template `mads ini` renders. **\-\-fi
    location.
 
 **\-\-crypto**
-:  Also run the CURVE key-file check (check 5). Off by default, since CURVE is opt-in.
+:  Run the CURVE key-file check (check 5) and the handshake check (check 6), *and* speak CURVE in
+   every probe that talks to the broker -- checks 2 and 6, and **\-\-graph-live**'s subscription-table
+   read. Off by default, since CURVE is opt-in; pass it whenever the broker runs with `--crypto`,
+   and leave it off when the broker does not.
 
 **\-\-keys_dir** *dir*
 :  Directory to look for CURVE key files in. Default: `<exec_dir>/../etc`, same as every other
@@ -216,7 +224,9 @@ is missing, it is scaffolded from the same template `mads ini` renders. **\-\-fi
 :  With **\-\-graph**: overlay live subscriber counts read from the broker's subscription table onto
    the declared graph; see above. Requires `[broker] subscription_table = true`, and waits at least
    2500 ms (the broker republishes the table about once a second) regardless of a lower
-   **\-\-timeout**. Ignored without **\-\-graph**.
+   **\-\-timeout**. Against an encrypted broker it also needs **\-\-crypto** (and **\-\-keys_dir** if the
+   keys are not in the default location), since it subscribes to the broker's backend for real.
+   Ignored without **\-\-graph**.
 
 **\-\-fix**
 :  Attempt safe, non-destructive auto-fixes; see above.

@@ -72,7 +72,9 @@ ready = "broker" | "broker:<uri>" | "port:<n>" | "log:<regex>" | "delay:<duratio
 It gates starting a process's dependents on an actual readiness signal instead of a fixed sleep:
 
 - **`broker`** / **`broker:<uri>`** -- probes a MADS broker's settings endpoint (default
-  `tcp://localhost:9092` if no URI is given) until it answers.
+  `tcp://localhost:9092` if no URI is given) until it answers. Against an encrypted broker, pass
+  **\-\-crypto** to **mads-up** itself (see *Encrypted fleets* below); the probe is a real client, so
+  it needs the same credentials any agent does.
 - **`port:<n>`** -- probes local TCP port *n* until something accepts a connection.
 - **`log:<regex>`** -- waits until a line matching *regex* appears on the process's stdout or stderr.
 - **`delay:<duration>`** -- waits a fixed duration (e.g. `500ms`, `2s`, `1.5s`, `3m`; a bare number means
@@ -80,6 +82,39 @@ It gates starting a process's dependents on an actual readiness signal instead o
 
 `ready` is additive and silently ignored by Director's own parser, so a `director.toml` carrying it still
 loads fine in the GUI.
+
+## Encrypted fleets
+
+`ready = "broker"` is the only part of **mads-up** that talks to the broker itself -- every managed
+process carries its own `--crypto` flags inside its `command` string, exactly as if you had started it
+by hand. That one probe needs credentials of its own, given as flags on **mads-up**:
+
+```sh
+mads up --crypto --keys_dir /etc/mads/keys
+```
+
+**\-\-crypto** takes no argument here and applies to every `ready = "broker"` probe in the plan; the key
+files follow the same convention as every other **mads-*** executable (`<key_client>.key` and
+`.pub` for this probe's own identity, `<key_broker>.pub` for the broker it encrypts toward). They are
+deliberately *not* `director.toml` keys: the plan format is shared with Director's GUI, where a
+top-level table that is not a process definition is a hard parse error, and a per-process key would be
+repeated on every process that gates on the broker.
+
+The encryption mode has to match the broker's, and a mismatch is indistinguishable from a broker that
+never started -- a CURVE-secured broker drops a plain peer during the ZMTP handshake, and a plain broker
+drops an encrypted one, in both cases before a single frame is exchanged. **mads-up** therefore names
+encryption as a possible cause whenever a broker probe times out:
+
+```
+mads up: process 'broker' did not become ready in time
+  (probed tcp://localhost:9092 in the clear; pass --crypto if the broker runs with CURVE encryption)
+```
+
+**\-\-dry-run** marks which probes will run encrypted, so the mode is visible before anything starts:
+
+```
+    ready   : broker:tcp://localhost:9092 (CURVE)
+```
 
 ## Teardown and relaunch
 
@@ -117,9 +152,24 @@ starting at 100ms and capped at 30s (reset once a restarted process has stayed u
 :  Tokenize each process's `command` and exec it directly instead of shelling out. Use this when a
    command must not be shell-interpreted (no globbing, no `$VAR` expansion, no `;`/`&&` chaining).
 
+**\-\-crypto**
+:  Speak CURVE in every `ready = "broker"` probe. Pass this whenever the broker in the plan runs with
+   `--crypto`, and leave it off when it does not -- either mismatch makes a healthy broker look absent.
+   Affects nothing else: managed processes carry their own encryption flags in their `command`.
+
+**\-\-keys_dir** *dir*
+:  Directory to look for the probe's CURVE key files in. Default: `<exec_dir>/../etc`, same as every
+   other **mads-*** executable's `--keys_dir`.
+
+**\-\-key_broker** *name*
+:  Base name (without `.pub`) of the broker/server CURVE public key file. Default `broker`.
+
+**\-\-key_client** *name*
+:  Base name (without `.key`/`.pub`) of the probe's own CURVE keypair. Default `client`.
+
 **\-\-dry-run**
-:  Print the fully expanded plan (templates resolved, `scale` expanded, start order, `ready` probes) and
-   exit without spawning anything.
+:  Print the fully expanded plan (templates resolved, `scale` expanded, start order, `ready` probes,
+   and whether each broker probe runs encrypted) and exit without spawning anything.
 
 **\-q**, **\-\-quiet**
 :  Suppress the multiplexed `[name]` stdout/stderr passthrough from managed processes.

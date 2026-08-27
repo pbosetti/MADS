@@ -98,7 +98,11 @@ unedited settings file behaves exactly as before they existed.
    broker's proxy, which receives a copy of *every* message the broker
    forwards, not just subscription frames. An unmigrated agent that happens
    to subscribe to `subscriptions` simply ignores the unrecognised topic; no
-   settings-contract change is involved.
+   settings-contract change is involved. Works the same with **\-\-crypto**: the
+   table's publisher rejoins the frontend over an internal `inproc` endpoint,
+   which carries no ZMTP handshake, so it needs no CURVE credentials of its
+   own. Subscribers still do -- read the topic exactly as any other encrypted
+   agent would, e.g. `mads-echo --crypto subscriptions`.
 
 **settings_workers** (`[broker]`, integer, default `2`)
 :  Number of worker threads answering settings requests behind a ROUTER

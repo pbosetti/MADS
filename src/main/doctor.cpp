@@ -329,11 +329,14 @@ bool fix_missing_settings_file(const fs::path &path) {
 // hand it to the pure Mads::topology_graph() builder (src/topology_graph.hpp,
 // no ZMQ/Agent/file I/O of its own), then write the resulting DOT text to
 // `output_path`, or stdout when it's empty. Read-only reporting mode, like
-// --plan: does not touch the broker, plugins, or CURVE keys, and does not
-// affect overall_exit_code.
+// --plan: it does not run the broker/plugin/CURVE checks and does not affect
+// overall_exit_code. `curve` is the one thing it does need from --crypto:
+// with --graph-live it subscribes to the broker's backend for real, so an
+// encrypted fleet needs the keys to read anything at all.
 int run_graph_check(const string &settings_path, const string &output_path,
                     Mads::GraphOptions graph_options, bool live,
-                    chrono::milliseconds live_timeout) {
+                    chrono::milliseconds live_timeout,
+                    const optional<Doctor::CurveKeyCheck> &curve) {
   toml::table config;
   try {
     config = toml::parse_file(settings_path);
@@ -387,7 +390,7 @@ int run_graph_check(const string &settings_path, const string &output_path,
     cerr << style::italic << "Reading live subscriptions from " << backend
         << " (up to " << live_timeout.count() << " ms)..." << style::reset
         << endl;
-    auto table = Mads::fetch_subscription_table(backend, live_timeout);
+    auto table = Mads::fetch_subscription_table(backend, live_timeout, curve);
     if (!table) {
       // Deliberately fatal rather than falling back to the declared graph: a
       // silently-degraded live graph is byte-identical to a plain one, so it
@@ -396,8 +399,9 @@ int run_graph_check(const string &settings_path, const string &output_path,
       cerr << fg::red << "Error: no subscription table arrived from " << backend
           << fg::reset << endl
           << "  -> start the broker with [broker] subscription_table = true, "
-             "and allow at least 2000 ms with --timeout (the broker "
-             "republishes the table about once a second)." << endl;
+             "allow at least 2000 ms with --timeout (the broker republishes "
+             "the table about once a second), and pass --crypto/--keys_dir "
+             "if the broker runs with CURVE encryption." << endl;
       return 1;
     }
     graph_options.live = std::move(*table);
@@ -433,7 +437,7 @@ int main(int argc, char *argv[]) {
     ("broker", "Broker settings endpoint to probe (default: derived from the [broker] section, else " + string(kDefaultBrokerUri) + ")", value<string>())
     ("timeout", "Timeout in ms for broker/port probes (default: 1000)", value<int>()->default_value("1000"))
     ("plugin", "Dry-run load this plugin file (repeatable; default: every 'attachment' key found in the settings file)", value<vector<string>>())
-    ("crypto", "Also check CURVE key files (same convention as other mads-* executables)")
+    ("crypto", "Check CURVE key files and speak CURVE in every broker probe (same convention as other mads-* executables); pass this whenever the broker runs with --crypto")
     ("keys_dir", "Directory where CURVE keys are stored", value<string>()->default_value(Mads::exec_dir("../etc")))
     ("key_broker", "Name of the broker/server key file (without .pub extension)", value<string>()->default_value("broker"))
     ("key_client", "Name of the client key file (without .key/.pub extension)", value<string>()->default_value("client"))
@@ -470,6 +474,20 @@ int main(int argc, char *argv[]) {
     return run_plan_check(parsed["plan"].as<string>());
   }
 
+  // Resolved before anything that talks to the broker: --crypto is not just
+  // an extra key-file check, it is the encryption mode every probe below has
+  // to speak. A CURVE-secured broker drops a plain peer during the ZMTP
+  // handshake, so probing it in the clear reports it as down (checks 2 and
+  // --graph-live both used to do exactly that).
+  optional<Doctor::CurveKeyCheck> curve_cfg;
+  if (parsed.count("crypto")) {
+    Doctor::CurveKeyCheck cfg;
+    cfg.key_dir = parsed["keys_dir"].as<string>();
+    cfg.client_key_name = parsed["key_client"].as<string>();
+    cfg.server_key_name = parsed["key_broker"].as<string>();
+    curve_cfg = std::move(cfg);
+  }
+
   // --graph is likewise a standalone, read-only reporting mode: it parses
   // the settings file (like check 1) but never probes the broker/plugins/
   // ports/CURVE keys, and always exits immediately after emitting the DOT
@@ -485,7 +503,8 @@ int main(int argc, char *argv[]) {
                  chrono::milliseconds(2500));
     return run_graph_check(parsed["settings"].as<string>(),
                            parsed["graph"].as<string>(), graph_options,
-                           parsed.count("graph-live") > 0, live_timeout);
+                           parsed.count("graph-live") > 0, live_timeout,
+                           curve_cfg);
   }
 
   const auto timeout = chrono::milliseconds(parsed["timeout"].as<int>());
@@ -531,7 +550,7 @@ int main(int argc, char *argv[]) {
         (*config)["broker"]["settings_address"].value_or(string(kDefaultBrokerUri));
     broker_uri = to_probe_uri(settings_address);
   }
-  print_result(Doctor::check_broker_reachable(broker_uri, timeout));
+  print_result(Doctor::check_broker_reachable(broker_uri, timeout, curve_cfg));
 
   // --- 3 & 4. declared plugin(s) resolve/load + protocol match ------------
   // Resolved up front (CLI --plugin resolves like plugin_loader.cpp's own
@@ -588,19 +607,15 @@ int main(int argc, char *argv[]) {
   }
 
   // --- 5. CURVE key files, if configured -----------------------------------
-  if (parsed.count("crypto")) {
-    Doctor::CurveKeyCheck curve_cfg;
-    curve_cfg.key_dir = parsed["keys_dir"].as<string>();
-    curve_cfg.client_key_name = parsed["key_client"].as<string>();
-    curve_cfg.server_key_name = parsed["key_broker"].as<string>();
-    CheckResult curve_keys_result = Doctor::check_curve_keys(curve_cfg);
+  if (curve_cfg) {
+    CheckResult curve_keys_result = Doctor::check_curve_keys(*curve_cfg);
     print_result(curve_keys_result);
     // A live handshake only makes sense once the key files themselves check
     // out; skip it otherwise so a missing/malformed key doesn't also print a
     // redundant, less specific "rejected" or "timed out".
     if (curve_keys_result.status != Status::Fail) {
       print_result(
-          Doctor::check_curve_handshake(broker_uri, curve_cfg, timeout));
+          Doctor::check_curve_handshake(broker_uri, *curve_cfg, timeout));
     }
   }
 

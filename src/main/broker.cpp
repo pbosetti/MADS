@@ -573,14 +573,23 @@ int main(int argc, char **argv) {
   zmq::socket_ref capture_ref;
   if (subscription_table_enabled) {
     // frontend_address is a bind address (e.g. "tcp://*:9090"), not
-    // connectable; the table's own publisher joins the frontend exactly like
-    // any agent does, via loopback on the same port.
-    const string frontend_port =
-        frontend_address.substr(frontend_address.find_last_of(":") + 1);
+    // connectable, so the table's publisher needs an endpoint of its own to
+    // join the frontend on. That used to be loopback TCP on the same port,
+    // which silently published nothing whenever --crypto was on: with CURVE
+    // the frontend is a CURVE *server*, and this publisher carries no client
+    // keys, so libzmq dropped it during the ZMTP handshake -- before a
+    // single frame was exchanged and without any error the broker could
+    // report. A second, inproc bind fixes that for good: libzmq wires inproc
+    // peers together as a direct pipe pair (socket_base_t::connect() creates
+    // them with no engine and therefore no security mechanism), so this path
+    // behaves identically with and without encryption, and skips a pointless
+    // encrypt/decrypt round through the loopback interface either way.
+    const string frontend_inproc = "inproc://mads-broker-frontend";
+    frontend.bind(frontend_inproc);
     subscription_table = make_unique<SubscriptionTable>();
     capture_ref = subscription_table->bind(context, "inproc://mads-broker-capture");
     subscription_table->start(context, "inproc://mads-broker-capture",
-                              "tcp://127.0.0.1:" + frontend_port, 1000ms);
+                              frontend_inproc, 1000ms);
   }
 
   // ZMQ_DEVELOPMENT.md §3.6: ROUTER (external, CURVE-secured) <-proxy-> DEALER

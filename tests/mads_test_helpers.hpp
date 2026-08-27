@@ -26,7 +26,8 @@ Conventions for test authors:
     test_agent_io_thread                  44250-44299
     test_agent_link_state                 44300-44349
     test_worker_pull                      44350-44399
-    (spare)                               44400+
+    test_up_supervisor (curve probes)     44400-44449
+    (spare)                               44450+
 - Any test that touches Mads::Agent::loop() must instantiate RunningGuard,
   since Mads::running is a process-global atomic.
 */

@@ -133,13 +133,36 @@ bool tcp_connect_once(const std::string &host, int port,
   return connected;
 }
 
+// Applies client-side CURVE credentials to a probe socket, if any were given.
+// CurveAuth's constructor takes a context only to hold a ZapAuth member that
+// is never started here (setup_auth() is not called), so nothing binds or
+// listens -- this only reads the three key files off disk and sets the three
+// socket options. Throws, like CurveAuth itself, when a key file is missing
+// or unreadable; every caller below already treats an exception as "no
+// answer", which is the honest result for a probe that could not even be
+// configured.
+void apply_curve(zmq::socket_t &socket, zmq::context_t &context,
+                 const std::optional<ProbeCurveKeys> &curve) {
+  if (!curve) {
+    return;
+  }
+  CurveAuth curve_auth(context);
+  curve_auth.set_key_dir(curve->key_dir);
+  curve_auth.setup_curve_client(socket, curve->client_key_name,
+                                curve->server_key_name);
+}
+
 } // namespace
 
-bool probe_broker(const std::string &uri, std::chrono::milliseconds timeout) {
+bool probe_broker(const std::string &uri, std::chrono::milliseconds timeout,
+                  const std::optional<ProbeCurveKeys> &curve) {
   try {
     zmq::context_t context;
     zmq::socket_t socket(context, zmq::socket_type::req);
     socket.set(zmq::sockopt::linger, 0);
+    // Before connect(): CURVE options are read when the connection is set
+    // up, so setting them afterwards would leave this peer talking NULL.
+    apply_curve(socket, context, curve);
     const int timeout_ms = static_cast<int>(
         std::max<std::chrono::milliseconds::rep>(0, timeout.count()));
     socket.set(zmq::sockopt::rcvtimeo, timeout_ms);
@@ -175,12 +198,8 @@ probe_curve_handshake(const std::string &uri,
     zmq::socket_t socket(context, zmq::socket_type::req);
     socket.set(zmq::sockopt::linger, 0);
 
-    // CurveAuth's constructor takes a context only to hold an (unstarted --
-    // setup_auth() is never called) ZapAuth member; nothing here binds or
-    // listens on anything, it just reads the client's key files.
-    CurveAuth curve_auth(context);
-    curve_auth.set_key_dir(key_dir);
-    curve_auth.setup_curve_client(socket, client_key_name, server_key_name);
+    apply_curve(socket, context,
+                ProbeCurveKeys{key_dir, client_key_name, server_key_name});
 
     Mads::SocketMonitor monitor;
     monitor.start(socket);
@@ -210,11 +229,13 @@ probe_curve_handshake(const std::string &uri,
 
 std::optional<std::map<std::string, int>>
 fetch_subscription_table(const std::string &sub_uri,
-                         std::chrono::milliseconds timeout) {
+                         std::chrono::milliseconds timeout,
+                         const std::optional<ProbeCurveKeys> &curve) {
   try {
     zmq::context_t context;
     zmq::socket_t socket(context, zmq::socket_type::sub);
     socket.set(zmq::sockopt::linger, 0);
+    apply_curve(socket, context, curve);
     socket.set(zmq::sockopt::subscribe, "subscriptions");
     // Bounded per-recv wait so the deadline below stays honest even if the
     // broker is up but silent (subscription_table switched off).

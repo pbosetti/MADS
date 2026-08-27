@@ -346,6 +346,25 @@ void reader_thread_main(UpManagedProcess *mp, REPROC_STREAM stream,
   }
 }
 
+// A `ready` probe that times out says only "nothing answered", which for a
+// broker probe has one cause that no amount of staring at the plan reveals:
+// the encryption mode did not match. A CURVE-secured broker drops a plain
+// peer during the ZMTP handshake, and a plain broker drops an encrypted one,
+// so either way a healthy broker looks exactly like an absent one. Name it
+// here, in the same words `mads doctor` uses for the same failure.
+std::string ready_failure_hint(const ReadySpec &spec, bool crypto) {
+  if (spec.kind != ReadyKind::Broker) {
+    return "";
+  }
+  return crypto
+             ? " (probed " + spec.broker_uri +
+                   " with CURVE; check --keys_dir/--key_client/--key_broker, "
+                   "or drop --crypto if the broker runs unencrypted)"
+             : " (probed " + spec.broker_uri +
+                   " in the clear; pass --crypto if the broker runs with "
+                   "CURVE encryption)";
+}
+
 } // namespace
 
 UpSupervisor::UpSupervisor(std::vector<ProcessConfig> processes,
@@ -472,7 +491,7 @@ bool UpSupervisor::wait_ready(UpManagedProcess &mp,
     std::this_thread::sleep_for(spec.delay);
     return true;
   case ReadyKind::Broker:
-    return probe_broker(spec.broker_uri, timeout);
+    return probe_broker(spec.broker_uri, timeout, _options.curve);
   case ReadyKind::Port:
     return probe_tcp_port("localhost", spec.port, timeout);
   case ReadyKind::Log: {
@@ -595,7 +614,8 @@ RunResult UpSupervisor::run() {
       result.outcome = RunOutcome::ReadyTimeout;
       result.exit_code = 1;
       result.message =
-          "process '" + mp.config.name + "' did not become ready in time";
+          "process '" + mp.config.name + "' did not become ready in time" +
+          ready_failure_hint(*mp.config.ready, _options.curve.has_value());
       startup_ok = false;
       break;
     }

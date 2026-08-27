@@ -69,25 +69,36 @@ CheckResult check_settings_file(const fs::path &path) {
 
 /* ---- 2. Broker reachable -------------------------------------------------- */
 
-CheckResult evaluate_broker_reachable(const std::string &uri, bool reachable) {
+CheckResult evaluate_broker_reachable(const std::string &uri, bool reachable,
+                                      bool crypto) {
   CheckResult r;
   r.name = "broker_reachable";
+  const std::string how = crypto ? " (CURVE)" : "";
   if (reachable) {
     r.status = Status::Pass;
-    r.message = "Broker settings endpoint " + uri + " is reachable.";
+    r.message = "Broker settings endpoint " + uri + how + " is reachable.";
   } else {
     r.status = Status::Fail;
-    r.message = "Broker settings endpoint " + uri + " did not respond.";
+    r.message = "Broker settings endpoint " + uri + how + " did not respond.";
+    // The encryption mode has to match on both ends, and a mismatch looks
+    // exactly like a broker that is down -- so name it in the hint rather
+    // than sending the user off to check an address that was never wrong.
     r.fix_hint =
-        "Start the broker (`mads broker`), or check the [broker] "
-        "address/port in your settings file.";
+        crypto ? "Start the broker (`mads broker --crypto`), check that its "
+                 "--keys_dir/--key_broker name the same keys as this probe, "
+                 "or drop --crypto here if the broker runs unencrypted."
+               : "Start the broker (`mads broker`), check the [broker] "
+                 "address/port in your settings file, or pass --crypto here "
+                 "if the broker runs with CURVE encryption.";
   }
   return r;
 }
 
 CheckResult check_broker_reachable(const std::string &uri,
-                                   std::chrono::milliseconds timeout) {
-  return evaluate_broker_reachable(uri, probe_broker(uri, timeout));
+                                   std::chrono::milliseconds timeout,
+                                   const std::optional<CurveKeyCheck> &curve) {
+  return evaluate_broker_reachable(uri, probe_broker(uri, timeout, curve),
+                                   curve.has_value());
 }
 
 /* ---- 3. Declared plugin(s) resolve and load ------------------------------ */

@@ -18,6 +18,7 @@ exits, exactly what systemd Type=simple / Docker / CI expect.
 Author(s): Paolo Bosetti
 */
 #include "../director_config.hpp"
+#include "../exec_path.hpp"
 #include "../mads.hpp"
 #include "../up_supervisor.hpp"
 
@@ -49,14 +50,16 @@ void install_signal_handlers() {
   signal(SIGTERM, handler);
 }
 
-string describe_ready(const ProcessConfig &p) {
+string describe_ready(const ProcessConfig &p, bool crypto) {
   if (!p.ready.has_value()) {
     return "-";
   }
   const ReadySpec &r = *p.ready;
   switch (r.kind) {
   case ReadyKind::Broker:
-    return "broker:" + r.broker_uri;
+    // The encryption mode is the one thing about a broker probe that is
+    // invisible in the plan file itself, so --dry-run has to say it.
+    return "broker:" + r.broker_uri + (crypto ? " (CURVE)" : "");
   case ReadyKind::Port:
     return "port:" + to_string(r.port);
   case ReadyKind::Log:
@@ -69,7 +72,7 @@ string describe_ready(const ProcessConfig &p) {
   return "-";
 }
 
-void print_plan(const DirectorConfig &config) {
+void print_plan(const DirectorConfig &config, bool crypto) {
   cout << style::bold << "Expanded plan (" << config.processes.size()
        << " process instance(s), start order):" << style::reset << endl;
   for (const auto &p : config.processes) {
@@ -91,7 +94,7 @@ void print_plan(const DirectorConfig &config) {
       cout << "\n";
     }
     if (p.ready.has_value()) {
-      cout << "    ready   : " << describe_ready(p) << "\n";
+      cout << "    ready   : " << describe_ready(p, crypto) << "\n";
     }
   }
 }
@@ -109,7 +112,11 @@ int main(int argc, char *argv[]) {
     ("grace", "SIGTERM -> SIGKILL grace period, e.g. '5s'", value<string>()->default_value("5s"))
     ("max-restarts", "Cap on relaunch attempts per process (default: unlimited)", value<int>())
     ("no-shell", "Tokenize 'command' and exec it directly instead of shelling out")
-    ("dry-run", "Print the fully expanded plan (templates resolved, scale expanded, start order) without spawning anything")
+    ("crypto", "Speak CURVE in `ready = \"broker\"` probes (same convention as other mads-* executables); pass this whenever the broker runs with --crypto")
+    ("keys_dir", "Directory where CURVE keys are stored", value<string>()->default_value(Mads::exec_dir("../etc")))
+    ("key_broker", "Name of the broker/server key file (without .pub extension)", value<string>()->default_value("broker"))
+    ("key_client", "Name of the client key file (without .key/.pub extension)", value<string>()->default_value("client"))
+    ("dry-run", "Print the fully expanded plan (templates resolved, scale expanded, start order, ready probes and their encryption mode) without spawning anything")
     ("q,quiet", "Suppress multiplexed [name] stdout/stderr passthrough")
     ("v,version", "Print version")
     ("h,help", "Print usage");
@@ -147,12 +154,25 @@ int main(int argc, char *argv[]) {
     return EXIT_FAILURE;
   }
 
+  // Built before the --dry-run early exit so the printed plan can say which
+  // mode each broker probe will run in. Only `ready = "broker"` uses this:
+  // the agents' own encryption is already in their `command` strings.
+  optional<Mads::ProbeCurveKeys> curve_cfg;
+  if (parsed.count("crypto")) {
+    Mads::ProbeCurveKeys cfg;
+    cfg.key_dir = parsed["keys_dir"].as<string>();
+    cfg.client_key_name = parsed["key_client"].as<string>();
+    cfg.server_key_name = parsed["key_broker"].as<string>();
+    curve_cfg = std::move(cfg);
+  }
+
   if (parsed.count("dry-run")) {
-    print_plan(*config);
+    print_plan(*config, curve_cfg.has_value());
     return 0;
   }
 
   UpOptions up_options;
+  up_options.curve = curve_cfg;
   if (parsed.count("until-exit")) {
     up_options.until_exit = parsed["until-exit"].as<string>();
   }

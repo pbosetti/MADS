@@ -56,6 +56,14 @@ struct CheckResult {
   bool fixable = false;
 };
 
+/// Mirrors AgentAppT::CryptoOptions (src/agent_app.hpp): the same
+/// key_dir/client/server naming convention every mads-* executable's
+/// --crypto/--keys_dir/--key_client/--key_broker flags configure. Declared up
+/// here rather than beside check 5, because checks 2 and 5 and 7 all need it:
+/// probing a CURVE-secured broker in the clear cannot tell it apart from a
+/// broker that is down (see Mads::ProbeCurveKeys).
+using CurveKeyCheck = Mads::ProbeCurveKeys;
+
 /* ---- 1. Settings file found and parses ---------------------------------- */
 
 /**
@@ -69,12 +77,19 @@ CheckResult check_settings_file(const std::filesystem::path &path);
 /* ---- 2. Broker reachable -------------------------------------------------
    The actual probe is Mads::probe_broker() (src/broker_probe.hpp, from P5);
    evaluate_broker_reachable() is split out so the pass/warn/fail wording is
-   testable without a real socket. */
+   testable without a real socket.
 
-CheckResult evaluate_broker_reachable(const std::string &uri, bool reachable);
+   `curve` must be set whenever the broker runs with --crypto: the probe is an
+   ordinary REQ round-trip, so an unencrypted one gets dropped in the ZMTP
+   handshake and times out indistinguishably from a broker that is not there.
+   `crypto` on the evaluator only selects the wording for that case. */
 
-CheckResult check_broker_reachable(const std::string &uri,
-                                   std::chrono::milliseconds timeout);
+CheckResult evaluate_broker_reachable(const std::string &uri, bool reachable,
+                                      bool crypto = false);
+
+CheckResult
+check_broker_reachable(const std::string &uri, std::chrono::milliseconds timeout,
+                       const std::optional<CurveKeyCheck> &curve = std::nullopt);
 
 /* ---- 3. Declared plugin(s) resolve and load (dry-run) -------------------- */
 
@@ -116,16 +131,9 @@ CheckResult evaluate_plugin_protocol(int loaded_version,
                                      std::optional<int> pinned_version,
                                      int min_supported = kMinSupportedPluginProtocol);
 
-/* ---- 5. CURVE key files exist and are well-formed ------------------------ */
-
-/// Mirrors AgentAppT::CryptoOptions (src/agent_app.hpp): the same
-/// key_dir/client/server naming convention every mads-* executable's
-/// --crypto/--keys_dir/--key_client/--key_broker flags configure.
-struct CurveKeyCheck {
-  std::filesystem::path key_dir;
-  std::string client_key_name = "client";
-  std::string server_key_name = "broker";
-};
+/* ---- 5. CURVE key files exist and are well-formed ------------------------
+   Uses CurveKeyCheck, declared at the top of this header because check 2
+   needs it too. */
 
 /// True if `key_line` (one file line, already trimmed of trailing
 /// CR/LF/whitespace) is a well-formed Z85-encoded CURVE key: exactly 40

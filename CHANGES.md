@@ -1,3 +1,39 @@
+# Release 2.4.3
+
+This is a bugfix release. Expect it to be fully compatible with previous `v2.4.x` releases.
+
+## Fixes
+
+- **Encryption no longer silently switches off the subscription table.** With
+  `[broker] subscription_table = true` and `--crypto` together, the
+  `subscriptions` topic was never published: the broker rejoined its own
+  frontend over loopback TCP without CURVE credentials, so libzmq dropped it
+  during the handshake -- no error anywhere, just a topic that never appeared.
+  The table's publisher now joins the frontend over an `inproc` endpoint,
+  which carries no handshake at all, so it behaves identically encrypted or
+  not (and saves a pointless trip through the loopback interface either way).
+
+- **`mads up` can gate on an encrypted broker.** `ready = "broker"` always
+  probed in the clear, so on a fleet started with `--crypto` the readiness gate
+  never opened: every dependent process waited out the full timeout behind a
+  broker that was up and healthy, and the run died with a bare *"did not become
+  ready in time"* that named nothing useful. **mads-up** now takes the same
+  `--crypto`/`--keys_dir`/`--key_client`/`--key_broker` flags as every other
+  `mads-*` executable, applying them to that probe (managed processes keep
+  carrying their own flags in their `command`, unchanged). A broker probe that
+  times out now names the encryption mismatch as a possible cause, and
+  `--dry-run` marks which probes will run encrypted. Nothing in `director.toml`
+  changes -- the plan format stays exactly what Director's GUI reads.
+
+- **`mads doctor --crypto` no longer reports a healthy encrypted broker as
+  dead.** The broker-reachability check probed with a plain socket regardless
+  of `--crypto`, and a CURVE broker drops a plain peer during the handshake --
+  so a perfectly working broker came back as *"did not respond"*, two lines
+  above a *passing* CURVE handshake check against the very same endpoint. The
+  probe now speaks CURVE when `--crypto` is given, `--graph-live` reads the
+  subscription table the same way, and when the check does fail its hint now
+  names the encryption mismatch as a possible cause in both directions.
+
 # Release 2.4.2
 
 This document summarizes what changed between `v2.4.1` and `v2.4.2`.
@@ -186,6 +222,7 @@ exactly as before until you opt in. Details and examples are in
   and under `mads up` / `mads doctor --plan`.
 
 ## Fixes
+
 
 - **Broker `p`/`r` keys now actually pause and resume.** The interactive
   broker's pause/resume keys had inverted effects. The cause is a bug in

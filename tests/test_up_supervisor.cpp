@@ -14,6 +14,7 @@
 // whole group was actually signaled.
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -23,12 +24,17 @@
 #include <thread>
 #include <vector>
 
+#include <zmq.hpp>
+#include <zmq_addon.hpp>
+
 #ifndef _WIN32
 #include <cerrno>
 #include <signal.h>
 #include <sys/types.h>
 #endif
 
+#include "curve.hpp"
+#include "mads_test_helpers.hpp"
 #include "up_supervisor.hpp"
 
 namespace fs = std::filesystem;
@@ -399,4 +405,158 @@ TEST_CASE("a ready probe that never succeeds fails startup", "[up_supervisor]") 
 
   REQUIRE(result.outcome == Mads::RunOutcome::ReadyTimeout);
   REQUIRE_FALSE(sup.any_running());
+}
+
+// ---------------------------------------------------------------------------
+// ready = "broker" against a CURVE-secured broker
+// ---------------------------------------------------------------------------
+
+// Regression: the broker readiness probe always ran in the clear, whatever
+// the fleet was configured for. A CURVE-secured broker drops a plain peer
+// during the ZMTP handshake, so a perfectly healthy encrypted broker never
+// answered the gate -- every dependent process waited out the full
+// ready_timeout and the run died with a bare "did not become ready in time",
+// naming nothing that would point at encryption.
+namespace {
+
+// A CURVE server that answers any request, standing in for `mads broker
+// --crypto`'s settings endpoint. Same shape as test_doctor_checks.cpp's
+// FakeCurveBroker.
+class ReadyCurveBroker {
+public:
+  ReadyCurveBroker(uint16_t port, const fs::path &key_dir)
+      : _ctx(), _sock(_ctx, zmq::socket_type::rep), _auth(_ctx) {
+    _auth.setup_auth(Mads::auth_verbose::off);
+    _auth.fetch_public_keys(key_dir);
+    _auth.setup_curve_server(_sock, "broker");
+    _sock.set(zmq::sockopt::rcvtimeo, 100);
+    _sock.bind(mads_test::loopback(port));
+    _thread = std::thread([this] {
+      while (!_stopped) {
+        zmq::multipart_t msg;
+        if (!msg.recv(_sock)) continue;
+        zmq::multipart_t reply;
+        reply.addstr(std::string("v0.0"));
+        reply.addstr(std::string("{}"));
+        reply.send(_sock);
+      }
+    });
+  }
+  ~ReadyCurveBroker() {
+    _stopped = true;
+    if (_thread.joinable()) _thread.join();
+  }
+
+private:
+  zmq::context_t _ctx;
+  zmq::socket_t _sock;
+  Mads::CurveAuth _auth;
+  std::thread _thread;
+  std::atomic<bool> _stopped{false};
+};
+
+// RAII key dir holding a client and a broker keypair, the three files
+// Mads::ProbeCurveKeys names.
+struct ReadyKeyDir {
+  fs::path path;
+  ReadyKeyDir(const std::string &tag) {
+    path = fs::temp_directory_path() /
+           ("mads_test_up_keys_" + tag + "_" +
+            std::to_string(reinterpret_cast<uintptr_t>(&tag)));
+    fs::create_directories(path);
+    for (const auto &name : {std::string("broker"), std::string("client")}) {
+      const auto kp = Mads::generate_keypair();
+      std::ofstream(path / (name + ".key")) << kp.secret_key << "\n";
+      std::ofstream(path / (name + ".pub")) << kp.public_key << "\n";
+    }
+  }
+  ~ReadyKeyDir() {
+    std::error_code ec;
+    fs::remove_all(path, ec);
+  }
+};
+
+} // namespace
+
+TEST_CASE("a keyless broker ready probe never passes a CURVE broker",
+          "[up_supervisor][curve]") {
+  const uint16_t port = 44401;
+  ReadyKeyDir keys("plain_probe");
+  ReadyCurveBroker broker(port, keys.path);
+
+  Mads::ProcessConfig a = make_proc("a", "sleep 30; exit 0");
+  Mads::ReadySpec ready;
+  ready.kind = Mads::ReadyKind::Broker;
+  ready.broker_uri = mads_test::loopback(port);
+  a.ready = ready;
+
+  Mads::UpOptions options; // options.curve deliberately unset
+  options.ready_timeout = 500ms;
+  options.grace = 300ms;
+
+  Mads::UpSupervisor sup({a}, options);
+  auto result = sup.run();
+
+  REQUIRE(result.outcome == Mads::RunOutcome::ReadyTimeout);
+  // The message has to name the one cause the plan file cannot show.
+  REQUIRE(result.message.find("--crypto") != std::string::npos);
+}
+
+TEST_CASE("a CURVE-configured broker ready probe opens the gate",
+          "[up_supervisor][curve]") {
+  const uint16_t port = 44402;
+  ReadyKeyDir keys("curve_probe");
+  ReadyCurveBroker broker(port, keys.path);
+
+  auto trace = scratch_file("ready_broker_curve");
+  fs::remove(trace);
+
+  Mads::ProcessConfig a = make_proc("a", "sleep 30; exit 0");
+  Mads::ReadySpec ready;
+  ready.kind = Mads::ReadyKind::Broker;
+  ready.broker_uri = mads_test::loopback(port);
+  a.ready = ready;
+  Mads::ProcessConfig b =
+      make_proc("b", append_line_cmd(trace, "b") + "; exit 0", {"a"});
+
+  Mads::UpOptions options;
+  options.curve = Mads::ProbeCurveKeys{keys.path, "client", "broker"};
+  options.ready_timeout = 3000ms;
+  options.grace = 300ms;
+  options.until_exit = "b";
+
+  Mads::UpSupervisor sup({a, b}, options);
+  auto result = sup.run();
+
+  REQUIRE(result.outcome == Mads::RunOutcome::Ok);
+  // b only ever starts once a's broker probe answered.
+  REQUIRE(read_lines(trace) == std::vector<std::string>{"b"});
+  fs::remove(trace);
+}
+
+TEST_CASE("a CURVE-configured probe still fails against a plain broker",
+          "[up_supervisor][curve]") {
+  const uint16_t port = 44403;
+  ReadyKeyDir keys("curve_vs_plain");
+
+  zmq::context_t ctx;
+  zmq::socket_t plain(ctx, zmq::socket_type::rep);
+  plain.bind(mads_test::loopback(port));
+
+  Mads::ProcessConfig a = make_proc("a", "sleep 30; exit 0");
+  Mads::ReadySpec ready;
+  ready.kind = Mads::ReadyKind::Broker;
+  ready.broker_uri = mads_test::loopback(port);
+  a.ready = ready;
+
+  Mads::UpOptions options;
+  options.curve = Mads::ProbeCurveKeys{keys.path, "client", "broker"};
+  options.ready_timeout = 500ms;
+  options.grace = 300ms;
+
+  Mads::UpSupervisor sup({a}, options);
+  auto result = sup.run();
+
+  REQUIRE(result.outcome == Mads::RunOutcome::ReadyTimeout);
+  REQUIRE(result.message.find("drop --crypto") != std::string::npos);
 }

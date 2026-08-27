@@ -29,6 +29,25 @@ Author(s): Paolo Bosetti
 namespace Mads {
 
 /**
+ * @brief Client-side CURVE credentials for a probe socket: the same
+ * key_dir/client/server naming convention every mads-* executable's
+ * --crypto/--keys_dir/--key_client/--key_broker flags configure (and that
+ * Mads::CurveAuth::setup_curve_client() reads).
+ *
+ * Every probe below takes this as an optional: unset means "probe in the
+ * clear", which is right only against a broker started without --crypto. A
+ * CURVE-secured broker drops a plain peer during the ZMTP handshake, before
+ * a single application frame is exchanged, so an unencrypted probe against
+ * an encrypted broker cannot distinguish that broker from a dead one -- it
+ * simply never gets an answer.
+ */
+struct ProbeCurveKeys {
+  std::filesystem::path key_dir;
+  std::string client_key_name = "client";
+  std::string server_key_name = "broker";
+};
+
+/**
  * @brief Probes whether a MADS broker's settings endpoint is up and speaking
  * the MADS wire protocol: connects a REQ socket to `uri`, sends
  * `[LIB_VERSION, "settings", <probe-name>]` and waits up to `timeout` for any
@@ -39,10 +58,13 @@ namespace Mads {
  *
  * @param uri broker settings endpoint, e.g. "tcp://localhost:9092".
  * @param timeout time budget to wait for a reachable broker.
+ * @param curve CURVE credentials to probe with; must be set to reach a
+ * broker running with --crypto, and must be unset to reach one without it.
  * @return true if the broker replied within timeout, false otherwise (never
- * throws).
+ * throws -- unreadable key files are reported as "no reply").
  */
-bool probe_broker(const std::string &uri, std::chrono::milliseconds timeout);
+bool probe_broker(const std::string &uri, std::chrono::milliseconds timeout,
+                  const std::optional<ProbeCurveKeys> &curve = std::nullopt);
 
 /**
  * @brief Probes whether a local TCP port is accepting connections, retrying
@@ -109,12 +131,16 @@ probe_curve_handshake(const std::string &uri,
  * @param sub_uri the broker's *backend* (subscribe) endpoint, i.e. where
  * agents connect their SUB sockets.
  * @param timeout how long to wait for one table to arrive.
+ * @param curve CURVE credentials to subscribe with; must be set when the
+ * broker runs with --crypto, exactly as for any other agent's SUB socket.
  * @return the decoded table, or nullopt if none arrived in time (broker
- * down, or `subscription_table` not enabled). Never throws.
+ * down, `subscription_table` not enabled, or the wrong encryption mode for
+ * this broker). Never throws.
  */
 std::optional<std::map<std::string, int>>
 fetch_subscription_table(const std::string &sub_uri,
-                         std::chrono::milliseconds timeout);
+                         std::chrono::milliseconds timeout,
+                         const std::optional<ProbeCurveKeys> &curve = std::nullopt);
 
 } // namespace Mads
 
