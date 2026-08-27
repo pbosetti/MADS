@@ -1,6 +1,7 @@
 #include "doctor_checks.hpp"
 
 #include "broker_probe.hpp"
+#include "detail/fd_limit.hpp"
 
 #include <fstream>
 #include <nlohmann/json.hpp>
@@ -329,6 +330,67 @@ CheckResult check_curve_handshake(const std::string &uri, const CurveKeyCheck &c
   return evaluate_curve_handshake(
       uri, probe_curve_handshake(uri, cfg.key_dir, cfg.client_key_name,
                                  cfg.server_key_name, timeout));
+}
+
+/* ---- 8. Open-file limit --------------------------------------------------- */
+
+CheckResult evaluate_fd_limit(bool supported, uint64_t soft, uint64_t hard,
+                              std::optional<int64_t> configured) {
+  CheckResult r;
+  r.name = "Open-file limit";
+
+  if (!supported) {
+    r.status = Status::Pass;
+    r.message = "This platform has no per-process descriptor limit for "
+                "sockets, so fleet size is not bounded by one.";
+    return r;
+  }
+
+  const uint64_t capacity = Mads::detail::agent_capacity(soft);
+  const std::string room = std::to_string(soft) + " descriptors, room for " +
+                           "about " + std::to_string(capacity) +
+                           " connected agents";
+
+  // A request the hard limit cannot satisfy is the one case where the settings
+  // file is actively misleading: it looks configured, but the broker will
+  // silently get less than it asked for.
+  if (configured.has_value() && *configured > 0 &&
+      static_cast<uint64_t>(*configured) > hard) {
+    r.status = Status::Warn;
+    r.message = "max_open_files = " + std::to_string(*configured) +
+                " exceeds this process's hard limit of " +
+                std::to_string(hard) + ", so the broker will get " + room + ".";
+    r.fix_hint = "Raise the hard limit with LimitNOFILE= in the systemd unit "
+                 "(or `ulimit -Hn` as root); max_open_files cannot go above it.";
+    return r;
+  }
+
+  if (soft > Mads::detail::FD_LOW_WATERMARK) {
+    r.status = Status::Pass;
+    r.message = "A broker started the same way as this check would have " +
+                room + ".";
+    return r;
+  }
+
+  r.status = Status::Warn;
+  r.message = "A broker started the same way as this check would have only " +
+              room + ". Every connected agent costs two descriptors, and "
+              "libzmq refuses the ones past the limit almost silently.";
+  r.fix_hint = hard > soft
+                   ? "Set `max_open_files` in the [broker] section of the "
+                     "settings file (up to the hard limit of " +
+                         std::to_string(hard) +
+                         "), or LimitNOFILE= in the systemd unit."
+                   : "Raise the hard limit with LimitNOFILE= in the systemd "
+                     "unit, or `ulimit -Hn` as root -- the soft limit is "
+                     "already at it.";
+  return r;
+}
+
+CheckResult check_fd_limit(std::optional<int64_t> configured) {
+  const auto limits = Mads::detail::query_fd_limits();
+  return evaluate_fd_limit(limits.supported, limits.soft, limits.hard,
+                           configured);
 }
 
 } // namespace Doctor

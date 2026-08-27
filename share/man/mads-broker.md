@@ -110,6 +110,32 @@ unedited settings file behaves exactly as before they existed.
    agent's plain REQ settings request works unchanged. A value below 1 is
    clamped to 1 with a warning rather than refused.
 
+**max_open_files** (`[broker]`, integer, unset by default)
+:  Open file descriptors the broker process may use, which is what bounds
+   fleet size. Every connected agent holds **two** of the broker's descriptors
+   for as long as it stays connected -- its publisher on the XSUB frontend and
+   its subscriber on the XPUB backend -- plus a third while it fetches its
+   settings. With the usual soft limit of 1024 and the broker's own ~30
+   descriptors of overhead, that caps a fleet at roughly **495 agents**, and
+   libzmq refuses everything past it *almost silently*: its listener treats
+   `EMFILE` as a non-fatal `accept()` error. Set this and the broker raises its
+   own soft limit at startup, before binding anything, and reports the
+   resulting ceiling and the agent count it implies.
+
+   Unset leaves the limit exactly as inherited and only reports it, warning
+   when it is low enough to be worth raising. `0` asks for as many descriptors
+   as the process is permitted. **Cannot exceed the hard limit** -- a larger
+   value is clamped with a warning, because raising the hard limit needs
+   `LimitNOFILE=` in the systemd unit or a privileged `ulimit -Hn`, not a
+   settings key. A negative value is ignored with a warning rather than
+   refused, like `io_threads`.
+
+   Has no effect on Windows, which has no per-process descriptor limit for
+   sockets, and is reported as not applicable there. On macOS the raise is
+   additionally capped by `kern.maxfilesperproc`, and on Linux by
+   `fs.nr_open`. `mads doctor` reports the limit in force and whether it
+   leaves room for the fleet.
+
 # BUGS
 
 The upstream bug tracker can be found at https://github.com/pbosetti/MADS/issues.

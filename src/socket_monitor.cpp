@@ -27,6 +27,8 @@ LinkEvent to_link_event(uint16_t zmq_event) {
     return LinkEvent::HandshakeFailedNoDetail;
   case ZMQ_EVENT_DISCONNECTED:
     return LinkEvent::Disconnected;
+  case ZMQ_EVENT_ACCEPT_FAILED:
+    return LinkEvent::AcceptFailed;
   default:
     return LinkEvent::None;
   }
@@ -122,6 +124,14 @@ protected:
                              const char *addr) override {
     record(ev, addr);
   }
+  // libzmq's tcp_listener_t treats a failed accept() as non-fatal -- EMFILE
+  // and ENFILE are both in the errno list it tolerates -- so without this the
+  // agents a full descriptor table turns away are refused in complete
+  // silence. ev.value carries that errno.
+  void on_event_accept_failed(const zmq_event_t &ev,
+                              const char *addr) override {
+    record(ev, addr);
+  }
 
 private:
   mutable std::mutex _mtx;
@@ -137,6 +147,9 @@ private:
       _last_address = addr ? addr : "";
       _state.last_event = _last_event;
       _state.last_event_address = _last_address;
+      _state.last_event_value = ev.value;
+      if (_last_event == LinkEvent::AcceptFailed)
+        ++_state.accept_failures;
       switch (_last_event) {
       case LinkEvent::HandshakeSucceeded:
       case LinkEvent::HandshakeFailedAuth:
@@ -181,6 +194,13 @@ private:
     case LinkEvent::None:
       // In flight, neither up nor conclusively down. last_event still
       // records them for callers that want the finer detail.
+      break;
+    case LinkEvent::AcceptFailed:
+      // Not a statement about any link: it is the listener reporting that a
+      // peer never became one. Scoring it as Down would mark a broker whose
+      // existing agents are all still connected as offline. The event and its
+      // errno stay in last_event/last_event_value, and accept_failures counts
+      // it; status is left exactly as it was.
       break;
     }
     if (next == _state.status)

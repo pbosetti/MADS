@@ -32,6 +32,7 @@ Author(s): Paolo Bosetti
 #include "broker_probe.hpp"
 
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -164,6 +165,24 @@ CheckResult evaluate_curve_handshake(const std::string &uri,
 
 CheckResult check_curve_handshake(const std::string &uri, const CurveKeyCheck &cfg,
                                   std::chrono::milliseconds timeout);
+
+/* ---- 8. Open-file limit leaves room for the fleet -------------------------
+   The broker holds two descriptors per connected agent -- the agent's
+   publisher on the XSUB frontend, its subscriber on the XPUB backend -- so
+   RLIMIT_NOFILE, not anything in libzmq, is what bounds fleet size. The
+   default soft limit of 1024 stops at roughly 495 agents, and libzmq refuses
+   everything past it near-silently.
+
+   Reported from *this* process's limit: doctor cannot see what a broker
+   started under systemd would inherit, so the wording says "a broker started
+   the same way as this check". The evaluator takes the limits as plain
+   integers rather than the Mads::detail type that produces them, so this
+   installed header stays free of src/detail/. */
+
+CheckResult evaluate_fd_limit(bool supported, uint64_t soft, uint64_t hard,
+                              std::optional<int64_t> configured);
+
+CheckResult check_fd_limit(std::optional<int64_t> configured);
 
 } // namespace Doctor
 } // namespace Mads
