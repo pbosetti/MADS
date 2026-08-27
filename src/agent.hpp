@@ -195,13 +195,19 @@ private:
    * Performs both the `settings` and `timecode` round-trips on one connection,
    * avoiding two separate socket open/connect/close cycles.
    *
+   * The attachment is returned as raw bytes rather than a path: where it gets
+   * cached depends on the `attachment_ext` setting, which is only known once
+   * the settings this same call fetched have been parsed. fetch_settings()
+   * persists it (see detail/plugin_cache.hpp).
+   *
    * @param uri The URI of the broker.
    * @param name The name of the agent.
    * @param timeout The timeout in milliseconds.
-   * @return a tuple {raw settings, attachment path, broker timecode}.
+   * @return a tuple {raw settings, attachment bytes (empty if the broker
+   *         served none), broker timecode}.
    * @throws AgentError if timed out or the broker refuses to provide settings.
    */
-  std::tuple<std::string, std::filesystem::path, double>
+  std::tuple<std::string, std::string, double>
   query_broker(std::string uri, std::string name,
                int timeout = DEFAULT_SETTINGS_TIMEOUT_MS);
 

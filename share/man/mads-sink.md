@@ -42,6 +42,11 @@ For this to work, the INI section of a given agent must have the `attachment` ke
 
 When the agent starts on a remote device, it requests the broker for an copy of the INI file. If the INI section specifies the `attachment`, then the broker also sends a compiled copy of the plugin, which is saved by the agent to a temporary directory and then dynamically loaded.
 
+The plugin is cached under a path that includes a digest of its own contents, `<temp>/mads/<section>/<digest>/<section>.<ext>`. Two consequences are worth knowing:
+
+* several instances of the same agent on one host — as produced by **mads-director**/**mads-up** with `scale` greater than 1 — share a single cached copy instead of each overwriting a common file. No `${ID}` templating or `--agent-id` is needed to make this safe.
+* when the plugin binary on the broker changes, its digest changes with it, so the new version lands on a new path and is picked up automatically at the next launch. Superseded copies are removed once no longer selected.
+
 Three things are resolved independently, each with its own precedence, and each is settled before the plugin file is actually loaded:
 
 **Plugin file:**

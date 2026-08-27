@@ -20,6 +20,7 @@
 #include <cstdlib>
 #include <mutex>
 #include "curve.hpp"
+#include "detail/plugin_cache.hpp"
 #include "detail/socket_options.hpp"
 #include "detail/wire_format.hpp"
 #include "exec_path.hpp"
@@ -113,7 +114,7 @@ void Agent::setup_curve_on(zmq::socket_t &socket) {
   }
 }
 
-tuple<string, filesystem::path, double>
+tuple<string, string, double>
 Agent::query_broker(string uri, string name, int timeout) {
   // Single REQ socket reused for both the settings and timecode round-trips.
   zmq::socket_t socket(_context, zmq::socket_type::req);
@@ -155,32 +156,12 @@ Agent::query_broker(string uri, string name, int timeout) {
                      version_str);
   }
   string raw_settings = msg_in.at(1).to_string();
-  filesystem::path attachment;
+  // A 3rd part -- and only a 3rd part -- is the attachment. It is carried back
+  // as bytes and written to disk by fetch_settings(), which by then knows the
+  // `attachment_ext` that decides the cached file's name.
+  string attachment;
   if (msg_in.size() == 3) {
-    auto tmp_mads_dir = filesystem::temp_directory_path() / "mads";
-    if (!filesystem::exists(tmp_mads_dir)) {
-      if (!filesystem::create_directory(tmp_mads_dir)) {
-        socket.close();
-        throw AgentError(
-            "Failed to create temporary directory for attachments");
-      }
-    }
-    auto tmp_file = tmp_mads_dir / (name + ".plugin");
-    ofstream ofs(tmp_file, ios::out | ios::binary);
-    if (!ofs) {
-      socket.close();
-      throw AgentError(
-          "Failed to open temporary file for writing attachment from broker");
-    }
-    ofs.write(static_cast<const char *>(msg_in.at(2).data()),
-              msg_in.at(2).size());
-    if (!ofs.good()) {
-      socket.close();
-      throw AgentError(
-          "Failed to write attachment from broker to temporary file");
-    }
-    ofs.close();
-    attachment = tmp_file;
+    attachment = msg_in.at(2).to_string();
   }
 
   // ---- timecode request (same socket) ----
@@ -260,6 +241,7 @@ void Agent::fetch_settings(bool crypto) {
   if (_settings_uri.empty()) {
     throw AgentError("Settings URI cannot be empty");
   }
+  string attachment;
   if (_settings_uri == "none") {
     stringstream ss;
     ss << "[" << _name << "]\n";
@@ -273,21 +255,27 @@ void Agent::fetch_settings(bool crypto) {
   } else {
     auto received = query_broker(_settings_uri, _name, _settings_timeout);
     _raw_settings = get<0>(received);
-    _attachment_path = get<1>(received);
+    attachment = get<1>(received);
     _timecode_offset = get<2>(received);
     _config = (toml::table)toml::parse(_raw_settings);
   }
 
-  // rename attachment if not a plugin
-  if (!_attachment_path.empty()) {
+  // Cache the attachment, if the broker served one. The extension has to come
+  // from the settings we just parsed, which is why this cannot happen inside
+  // query_broker(): the cached file's stem must stay _name (both plugin
+  // loaders fall back to it for the driver name), so the extension is part of
+  // the final name and has to be known before anything is written.
+  if (!attachment.empty()) {
     auto cfg = _config[_name];
     string ext = cfg["attachment_ext"].value_or("plugin");
     if (ext.rfind('.', 0) == 0) {
       ext = ext.substr(1); // remove leading dot
     }
-    auto saved_attach = _attachment_path;
-    _attachment_path.replace_extension(ext);
-    filesystem::rename(saved_attach, _attachment_path);
+    try {
+      _attachment_path = detail::store_attachment(_name, ext, attachment);
+    } catch (const std::exception &e) {
+      throw AgentError(e.what());
+    }
   }
 
   _settings_fetched = true;

@@ -254,7 +254,7 @@ TEST_CASE("init() saves a served attachment under the default .plugin "
   REQUIRE(contents.str() == broker.attachment_bytes);
 }
 
-TEST_CASE("init() renames a served attachment to a custom attachment_ext",
+TEST_CASE("init() saves a served attachment under a custom attachment_ext",
           "[agent_broker]") {
   mads_test::RunningGuard guard;
   const uint16_t port = 42203;
@@ -278,6 +278,95 @@ TEST_CASE("init() renames a served attachment to a custom attachment_ext",
   std::ostringstream contents;
   contents << in.rdbuf();
   REQUIRE(contents.str() == broker.attachment_bytes);
+}
+
+// The plugin loaders fall back to the attachment file's stem for the driver
+// name when the settings section has no `driver` key (plugin_loader.cpp,
+// worker.cpp), so the content digest that keys the cache must stay out of the
+// stem -- it is a directory component. See src/detail/plugin_cache.hpp.
+TEST_CASE("a served attachment keeps the section name as its file stem",
+          "[agent_broker]") {
+  mads_test::RunningGuard guard;
+  const uint16_t port = 42208;
+  FakeBroker broker(port);
+  broker.settings_body = make_settings_toml("battach3");
+  broker.with_attachment = true;
+  broker.attachment_bytes = "BINARY-PLUGIN-DATA-3";
+  broker.timecode_value = 0.0;
+  broker.start();
+
+  Mads::Agent a("battach3", mads_test::loopback(port));
+  a.init(false, false);
+
+  REQUIRE(a.attachment_path().stem() == "battach3");
+}
+
+// Two instances of one scaled agent: both must resolve to the same cached file
+// rather than each rewriting a shared path, which is what used to crash a
+// sibling that had already dlopen()'d it.
+TEST_CASE("identical attachment bytes resolve to one shared cached path",
+          "[agent_broker]") {
+  mads_test::RunningGuard guard;
+  const uint16_t port = 42209;
+  FakeBroker broker(port);
+  broker.settings_body = make_settings_toml("battach4");
+  broker.with_attachment = true;
+  broker.attachment_bytes = "BINARY-PLUGIN-DATA-4";
+  broker.timecode_value = 0.0;
+  broker.start();
+
+  Mads::Agent first("battach4", mads_test::loopback(port));
+  first.init(false, false);
+  Mads::Agent second("battach4", mads_test::loopback(port));
+  second.init(false, false);
+
+  REQUIRE(first.attachment_path() == second.attachment_path());
+  REQUIRE(std::filesystem::exists(first.attachment_path()));
+
+  std::ifstream in(first.attachment_path(), std::ios::binary);
+  std::ostringstream contents;
+  contents << in.rdbuf();
+  REQUIRE(contents.str() == broker.attachment_bytes);
+}
+
+// The invalidation half: a different binary on the broker must not land on the
+// path an already-running instance is using. FakeBroker's config is fixed
+// before start(), so serving different bytes needs a second broker.
+TEST_CASE("changed attachment bytes resolve to a different cached path",
+          "[agent_broker]") {
+  mads_test::RunningGuard guard;
+  const uint16_t port_v1 = 42210;
+  const uint16_t port_v2 = 42211;
+
+  FakeBroker broker_v1(port_v1);
+  broker_v1.settings_body = make_settings_toml("battach5");
+  broker_v1.with_attachment = true;
+  broker_v1.attachment_bytes = "BINARY-PLUGIN-DATA-5-V1";
+  broker_v1.timecode_value = 0.0;
+  broker_v1.start();
+
+  Mads::Agent v1("battach5", mads_test::loopback(port_v1));
+  v1.init(false, false);
+  const auto v1_path = v1.attachment_path();
+  REQUIRE(std::filesystem::exists(v1_path));
+
+  FakeBroker broker_v2(port_v2);
+  broker_v2.settings_body = make_settings_toml("battach5");
+  broker_v2.with_attachment = true;
+  broker_v2.attachment_bytes = "BINARY-PLUGIN-DATA-5-V2";
+  broker_v2.timecode_value = 0.0;
+  broker_v2.start();
+
+  Mads::Agent v2("battach5", mads_test::loopback(port_v2));
+  v2.init(false, false);
+
+  REQUIRE(v2.attachment_path() != v1_path);
+  REQUIRE(v2.attachment_path().stem() == "battach5");
+
+  std::ifstream in(v2.attachment_path(), std::ios::binary);
+  std::ostringstream contents;
+  contents << in.rdbuf();
+  REQUIRE(contents.str() == broker_v2.attachment_bytes);
 }
 
 // ---------------------------------------------------------------------------

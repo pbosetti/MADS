@@ -4,6 +4,24 @@ This is a bugfix release. Expect it to be fully compatible with previous `v2.4.x
 
 ## Fixes
 
+- **OTA plugin delivery no longer crashes scaled agents.** A broker-served
+  plugin was written to one fixed path per settings section,
+  `<temp>/mads/<section>.plugin`, with a truncating write. That is fine for a
+  single agent and fatal for several: `mads-director`/`mads-up` with `scale`
+  greater than 1 start N instances of the same section on one host, and each
+  one rewrote the very file its siblings had already `dlopen`'d. Overwriting a
+  mapped file in place does not leave the running process with a stale but
+  valid copy -- it changes the pages underneath it -- so a sibling died at its
+  next page fault, intermittently and in a different process from the one that
+  did the writing. The attachment is now cached under a digest of its own
+  contents, `<temp>/mads/<section>/<digest>/<section>.<ext>`, and published by
+  an atomic rename, so the bytes at a path in use never change. Instances of a
+  scaled agent share one copy rather than fighting over it, with no `${ID}`
+  templating or `--agent-id` required; a plugin that changes on the broker
+  hashes differently, lands on a new path and is picked up at the next launch,
+  with superseded copies swept once they are no longer selected. Nothing on the
+  wire changed, and existing plugin binaries do not need recompiling.
+
 - **Encryption no longer silently switches off the subscription table.** With
   `[broker] subscription_table = true` and `--crypto` together, the
   `subscriptions` topic was never published: the broker rejoined its own
