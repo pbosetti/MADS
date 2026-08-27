@@ -99,7 +99,8 @@ jobs:
             libxcursor-dev \
             libxi-dev \
             libxext-dev \
-            libgl1-mesa-dev
+            libgl1-mesa-dev \
+            lowdown
 
       - name: Cache FetchContent dependencies
         uses: actions/cache@v5
