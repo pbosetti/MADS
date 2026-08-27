@@ -74,6 +74,17 @@ Author(s): Paolo Bosetti
 #define CONNECT_DELAY_MS 250 // Milliseconds
 #define CONNECT_DELAY chrono::milliseconds(CONNECT_DELAY_MS)
 
+// Slow-joiner grace: how long a freshly connected publisher waits, *after*
+// its ZMTP handshake has succeeded, for the broker's XSUB frontend to
+// forward the fleet's subscriptions back to it. A PUB socket silently drops
+// anything sent before a matching subscription has arrived, so a one-shot
+// publisher that skips this loses its only message. Measured on loopback the
+// window is 2-5 ms; 100 ms leaves room for a WAN round-trip and is still
+// capped by the caller's own connect delay, so it never costs more than the
+// blind sleep it replaced.
+#define SUBSCRIPTION_SETTLE_MS 100 // Milliseconds
+#define SUBSCRIPTION_SETTLE_DELAY chrono::milliseconds(SUBSCRIPTION_SETTLE_MS)
+
 #define DEFAULT_ENDPOINT_BIND "tcp://*:9000"
 #define DEFAULT_ENDPOINT "tcp://localhost:9000"
 #define DEFAULT_TOPIC "mads"

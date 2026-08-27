@@ -4,6 +4,24 @@ This is a bugfix release. Expect it to be fully compatible with previous `v2.4.x
 
 ## Fixes
 
+- **`mads-command` (and any other one-shot publisher) reaches the fleet
+  again.** 2.4.2 replaced the publisher's blind quarter-second connect sleep
+  with a real connection event -- but the event it waited on,
+  `ZMQ_EVENT_CONNECTED`, fires when TCP comes up, which is well before the
+  broker has forwarded the fleet's subscriptions back to the new publisher. A
+  `PUB` socket discards anything sent while no subscription matches it, and
+  discards it silently: no error, no dropped-message counter, nothing in a
+  log. A long-running agent never noticed, because its second message went out
+  a tick later. A publisher that connects, sends once and exits had no second
+  message -- so `mads-command stop|restart|info`, which is `mads-bridge -m`
+  under the hood, published into the void and left every agent running.
+  `connect()` now waits for the ZMTP handshake (`ZMQ_EVENT_HANDSHAKE_SUCCEEDED`
+  -- the same signal `link_state()` reports as *Up*) and then holds for a
+  100 ms subscription-settle grace, the whole thing still capped by the
+  caller's own connect delay, so the worst case is no slower than the sleep it
+  replaced and the common case is still ~2.5x faster. Remote control itself was
+  never broken: the command simply never arrived.
+
 - **OTA plugin delivery no longer crashes scaled agents.** A broker-served
   plugin was written to one fixed path per settings section,
   `<temp>/mads/<section>.plugin`, with a truncating write. That is fine for a

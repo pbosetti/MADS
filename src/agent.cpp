@@ -1108,7 +1108,7 @@ void Agent::connect_pub(chrono::milliseconds delay) {
   // agent's own _io_thread drives both monitors (§4.1), so neither needs a
   // thread of its own.
   _pub_monitor.attach(_publisher);
-  // Started here, not after connect(): wait_for_connection() below needs
+  // Started here, not after connect(): the handshake wait below needs
   // something draining the monitor before it can observe anything.
   _start_io_thread();
   if (_cross) {
@@ -1120,12 +1120,28 @@ void Agent::connect_pub(chrono::milliseconds delay) {
   } else {
     _publisher.connect(_pub_endpoint);
     if (delay.count() > 0) {
-      // A real ZMQ_EVENT_CONNECTED/HANDSHAKE_SUCCEEDED replaces the blind
-      // sleep the PUB/SUB slow-joiner problem used to require
-      // (ZMQ_DEVELOPMENT.md §2.1): returns as soon as the connection is
-      // confirmed, falling back to waiting out the full `delay` -- the
-      // previous worst case -- if no event arrives in time.
-      wait_for_connection(delay);
+      // A real ZMQ_EVENT_HANDSHAKE_SUCCEEDED replaces the blind sleep the
+      // PUB/SUB slow-joiner problem used to require (ZMQ_DEVELOPMENT.md
+      // §2.1), falling back to waiting out the full `delay` -- the previous
+      // worst case -- if the handshake never completes.
+      //
+      // The handshake alone is NOT enough to publish on, which is why this
+      // waits on it rather than on wait_for_connection()'s bare
+      // ZMQ_EVENT_CONNECTED. Both fire before the broker's XSUB frontend has
+      // forwarded the fleet's subscriptions back to this publisher, and a PUB
+      // socket discards -- silently -- anything sent while no subscription
+      // matches. A long-running agent never notices; a one-shot publisher
+      // (`mads-bridge -m`, i.e. every `mads-command` invocation) loses its
+      // only message. So the handshake is followed by a settle grace, capped
+      // by whatever is left of the caller's own `delay` so the total wall
+      // time can never exceed what the blind sleep already cost.
+      auto const started = chrono::steady_clock::now();
+      _pub_monitor.wait_handshake_succeeded(delay);
+      auto const elapsed = chrono::duration_cast<chrono::milliseconds>(
+          chrono::steady_clock::now() - started);
+      auto const grace = std::min(delay - elapsed, SUBSCRIPTION_SETTLE_DELAY);
+      if (grace > 0ms)
+        this_thread::sleep_for(grace);
     }
   }
 }

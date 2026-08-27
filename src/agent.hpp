@@ -356,12 +356,19 @@ public:
   /**
    * @brief Connects the agent to the publish and subscribe endpoints.
    *
-   * Optionally, this function accepts a delay parameter, which is the delay
-   * after connecting. This is needed to ensure that the agent is connected
-   * before sending messages. The default delay is 250 milliseconds.
+   * Optionally, this function accepts a delay parameter, which bounds how
+   * long connecting may take before publishing is safe. This is needed to
+   * ensure that the agent is connected before sending messages. The default
+   * delay is 250 milliseconds.
+   *
+   * `delay` is an upper bound, not a fixed cost: the publisher waits for its
+   * ZMTP handshake and then for SUBSCRIPTION_SETTLE_DELAY of slow-joiner
+   * grace, and returns as soon as both are done. Pass 0 only when the agent
+   * does not publish immediately -- a first message sent with no grace at all
+   * is dropped by the PUB socket, unsent and unreported.
    *
    * @param type The type of connection to be established.
-   * @param delay The delay in milliseconds after connecting.
+   * @param delay Upper bound, in milliseconds, on the connect-and-settle wait.
    * @throws AgentError if not initialized
    */
   void connect(std::chrono::milliseconds delay = std::chrono::milliseconds(250));
@@ -369,9 +376,15 @@ public:
   /**
    * @brief Blocks until the publisher socket's connection is confirmed by a
    * real ZMQ_EVENT_CONNECTED/ZMQ_EVENT_HANDSHAKE_SUCCEEDED event, or
-   * `timeout` elapses (ZMQ_DEVELOPMENT.md §2.1). connect() uses this in place
-   * of a blind sleep whenever its `delay` argument is positive; exposed
-   * separately for callers that want to wait on demand instead.
+   * `timeout` elapses (ZMQ_DEVELOPMENT.md §2.1).
+   *
+   * @warning This is a transport-liveness signal, not a licence to publish.
+   * ZMQ_EVENT_CONNECTED fires at the TCP level, before the broker's XSUB
+   * frontend has forwarded the fleet's subscriptions back to this publisher,
+   * and a PUB socket silently discards anything sent while no subscription
+   * matches it. connect() therefore does *not* use this: it waits on the ZMTP
+   * handshake and then adds SUBSCRIPTION_SETTLE_DELAY of slow-joiner grace.
+   * Callers waiting by hand before a one-shot publish need that same grace.
    *
    * @param timeout upper bound on how long to wait.
    * @return true if the connection was observed within the timeout.
