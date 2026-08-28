@@ -120,11 +120,11 @@ unedited settings file behaves exactly as before they existed.
    for as long as it stays connected -- its publisher on the XSUB frontend and
    its subscriber on the XPUB backend -- plus a third while it fetches its
    settings. With the usual soft limit of 1024 and the broker's own ~30
-   descriptors of overhead, that caps a fleet at roughly **495 agents**, and
+   descriptors of overhead, that caps a fleet at roughly **490 agents**, and
    libzmq refuses everything past it *almost silently*: its listener treats
-   `EMFILE` as a non-fatal `accept()` error. Set this and the broker raises its
-   own soft limit at startup, before binding anything, and reports the
-   resulting ceiling and the agent count it implies.
+   `EMFILE` as a non-fatal `accept()` error. Set this and the broker applies
+   the limit at startup, before binding anything, and reports the resulting
+   ceiling and the agent count it implies.
 
    Unset leaves the limit exactly as inherited and only reports it, warning
    when it is low enough to be worth raising. `0` asks for as many descriptors
@@ -133,6 +133,16 @@ unedited settings file behaves exactly as before they existed.
    `LimitNOFILE=` in the systemd unit or a privileged `ulimit -Hn`, not a
    settings key. A negative value is ignored with a warning rather than
    refused, like `io_threads`.
+
+   A value *below* the current soft limit **lowers** it. That needs no
+   privileges -- the soft limit moves freely anywhere at or below the hard one
+   -- and is useful both to cap a broker sharing a machine with other services
+   and, chiefly, to rehearse what descriptor exhaustion looks like: with
+   `max_open_files = 128` the broker starts with room for about 48 agents, so
+   the refusal messages can be seen without root or a real fleet. Lowering is
+   always reported as a warning, since it is much the rarer intent and a typo
+   (`128` for `1280`) is otherwise noticed only when the fleet stops growing.
+   Descriptors already open are unaffected; only further allocations fail.
 
    Has no effect on Windows, which has no per-process descriptor limit for
    sockets, and is reported as not applicable there. On macOS the raise is

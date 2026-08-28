@@ -482,6 +482,29 @@ private:
   std::atomic<bool> _running{false};
 };
 
+// Turns a libzmq failure into something an operator can act on when the cause
+// is a full descriptor table.
+//
+// Without this the broker dies during startup with a bare
+// "libc++abi: terminating due to uncaught exception of type zmq::error_t: Too
+// many open files" -- the least explanatory failure in the whole system, and
+// easy to reach now that `max_open_files` can lower the limit as well as raise
+// it. Descriptor exhaustion while the broker is creating its *own* sockets is
+// fatal (unlike a refused agent, which AcceptWatch merely reports), so this
+// says what happened and what the limit would have to be.
+string explain_zmq_error(zmq::error_t const &e, uint64_t fd_soft_limit) {
+  string message = e.what();
+  if (!Mads::detail::is_fd_exhaustion(e.num()))
+    return message;
+  return message + "\n  The broker ran out of file descriptors while setting "
+                   "up its own sockets: the limit is " +
+         std::to_string(fd_soft_limit) + ", and it needs about " +
+         std::to_string(Mads::detail::FD_BROKER_OVERHEAD) +
+         " for itself before a single agent connects.\n  Raise "
+         "`max_open_files` in the [broker] section of the settings file, or "
+         "LimitNOFILE= in the systemd unit.";
+}
+
 // Install SIGINT/SIGTERM handlers that request a clean shutdown by stopping
 // the process-wide run flag. Used in daemon mode so a `kill`/`systemctl stop` (or CTRL-C)
 // unwinds the proxy and stops advertising instead of killing the process
@@ -652,7 +675,7 @@ int main(int argc, char **argv) {
   // connected agent holds two of the broker's descriptors for as long as it
   // stays connected (its publisher on the XSUB frontend, its subscriber on the
   // XPUB backend) and a third while it fetches its settings. A stock Linux
-  // soft limit of 1024 therefore walls a fleet in at roughly 495 agents -- and
+  // soft limit of 1024 therefore walls a fleet in at roughly 490 agents -- and
   // libzmq refuses everything past that almost silently, which is what
   // AcceptWatch above exists to report.
   // Read from the broker's own section only, like io_threads and
@@ -670,7 +693,7 @@ int main(int argc, char **argv) {
       cout << fd_plan.message << endl;
   }
   if (!fd_outcome.error.empty()) {
-    cerr << fg::red << "Could not raise the open-file limit: "
+    cerr << fg::red << "Could not set the open-file limit: "
          << fd_outcome.error << fg::reset << endl;
   }
   const uint64_t fd_soft_limit = fd_outcome.limits.soft;
@@ -745,8 +768,8 @@ int main(int argc, char **argv) {
     accept_watch.watch(backend, backend_address);
     backend.bind(backend_address);
   } catch (const zmq::error_t &e) {
-    cerr << fg::red << "ZMQ error, could not connect: " << e.what() << fg::reset
-         << endl;
+    cerr << fg::red << "ZMQ error, could not bind broker sockets: "
+         << explain_zmq_error(e, fd_soft_limit) << fg::reset << endl;
     std::exit(EXIT_FAILURE);
   }
 
@@ -807,15 +830,30 @@ int main(int argc, char **argv) {
        << " worker" << (settings_workers == 1 ? "" : "s") << ") at "
        << style::bold << settings_address << style::reset << endl;
 
-  zmq::socket_t settings_dealer(context, zmq::socket_type::dealer);
-  settings_dealer.bind(settings_workers_endpoint);
+  // Default-constructed and assigned inside the try below rather than
+  // constructed in place: creating a socket allocates its mailbox, which is
+  // where a too-low descriptor limit kills the broker, and the handler must
+  // be able to explain that instead of letting the exception reach
+  // std::terminate. The sockets have to outlive the try, hence the split.
+  zmq::socket_t settings_dealer;
+  zmq::socket_t settings_proxy_controlled;
+  zmq::socket_t settings_proxy_controller;
+  try {
+    settings_dealer = zmq::socket_t(context, zmq::socket_type::dealer);
+    settings_dealer.bind(settings_workers_endpoint);
 
-  // Steerable so shutdown can TERMINATE it deterministically, exactly like
-  // the frontend/backend proxy() above.
-  zmq::socket_t settings_proxy_controlled(context, zmq::socket_type::rep);
-  settings_proxy_controlled.bind("inproc://mads-broker-settings-proxy-ctrl");
-  zmq::socket_t settings_proxy_controller(context, zmq::socket_type::req);
-  settings_proxy_controller.connect("inproc://mads-broker-settings-proxy-ctrl");
+    // Steerable so shutdown can TERMINATE it deterministically, exactly like
+    // the frontend/backend proxy() above.
+    settings_proxy_controlled = zmq::socket_t(context, zmq::socket_type::rep);
+    settings_proxy_controlled.bind("inproc://mads-broker-settings-proxy-ctrl");
+    settings_proxy_controller = zmq::socket_t(context, zmq::socket_type::req);
+    settings_proxy_controller.connect(
+        "inproc://mads-broker-settings-proxy-ctrl");
+  } catch (const zmq::error_t &e) {
+    cerr << fg::red << "ZMQ error, could not create broker settings sockets: "
+         << explain_zmq_error(e, fd_soft_limit) << fg::reset << endl;
+    std::exit(EXIT_FAILURE);
+  }
   thread settings_proxy_thread(proxy, ref(settings_router), ref(settings_dealer),
                                ref(settings_proxy_controlled), zmq::socket_ref());
 
@@ -825,6 +863,11 @@ int main(int argc, char **argv) {
   // Each worker's REP loop body is the pre-ROUTER handler verbatim: same
   // commands, same frame layout, same check_version() handling.
   auto settings_worker_body = [&]() {
+    // Everything below runs on its own thread, so an escaping zmq::error_t
+    // would reach std::terminate rather than any handler in main(). Creating
+    // this socket is the broker's last descriptor allocation during startup
+    // and so the first thing a too-low limit kills; see the catch at the end.
+    try {
     zmq::socket_t settings(context, zmq::socket_type::rep);
     settings.set(zmq::sockopt::rcvtimeo, 1000);
     settings.connect(settings_workers_endpoint);
@@ -896,6 +939,17 @@ int main(int argc, char **argv) {
       }
     }
     settings.close();
+    } catch (const zmq::error_t &e) {
+      // Composed into one string and written with a single << : every worker
+      // hits this at the same moment, and separate << calls from each thread
+      // interleave into an unreadable braid of half-messages.
+      const string report = timestamp() + "Settings worker stopped: " +
+                            explain_zmq_error(e, fd_soft_limit);
+      cerr << goback(1, !daemon) << fg::red << report << fg::reset << endl;
+      // A worker that cannot open its socket leaves agents unable to fetch
+      // settings at all, so this is a startup failure, not a degraded mode.
+      Mads::Runtime::stop_process();
+    }
   };
 
   vector<thread> settings_worker_threads;

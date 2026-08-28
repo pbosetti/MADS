@@ -38,8 +38,11 @@ TEST_CASE("agent_capacity: two descriptors per agent above the broker's own",
           "[fd_limit]") {
   // The wall this whole feature exists for: a stock 1024 soft limit.
   REQUIRE(agent_capacity(1024) == (1024 - FD_BROKER_OVERHEAD) / 2);
-  REQUIRE(agent_capacity(1024) == 496);
   REQUIRE(agent_capacity(65536) == (65536 - FD_BROKER_OVERHEAD) / 2);
+  // FD_BROKER_OVERHEAD differs per platform (libzmq's signaler costs one
+  // descriptor where eventfd exists and two where it does not), so the figure
+  // is asserted relative to it rather than pinned to one platform's number.
+  REQUIRE(agent_capacity(1024) > 400);
 }
 
 TEST_CASE("agent_capacity: a limit below the broker's own footprint is zero",
@@ -87,7 +90,8 @@ TEST_CASE("plan_fd_limit: unconfigured warns at the stock 1024 soft limit",
   REQUIRE(contains(plan.message, "max_open_files"));
   // The capacity estimate is the whole point of the line: it is what turns
   // "1024" into "this is why the 461st agent was refused".
-  REQUIRE(contains(plan.message, "496 agents"));
+  REQUIRE(contains(plan.message,
+                   std::to_string(agent_capacity(1024)) + " agents"));
 }
 
 TEST_CASE("plan_fd_limit: no nagging when the hard limit leaves nothing to gain",
@@ -119,24 +123,36 @@ TEST_CASE("plan_fd_limit: zero targets the hard limit", "[fd_limit]") {
 TEST_CASE("plan_fd_limit: zero is a no-op when soft already equals hard",
           "[fd_limit]") {
   const auto plan = plan_fd_limit(0, limits(4096, 4096));
-  REQUIRE(plan.action == FdLimitPlan::Action::AlreadyEnough);
+  REQUIRE(plan.action == FdLimitPlan::Action::Unchanged);
   REQUIRE(plan.target == 4096);
+  REQUIRE_FALSE(plan.clamped);
 }
 
-/* ---- explicit targets --------------------------------------------------- */
+/* ---- explicit targets ---------------------------------------------------
+   max_open_files names the soft limit the broker should run under, so it is
+   honoured in BOTH directions. Lowering needs no privileges (the soft limit
+   moves freely below the hard one) and is the only way to exercise the
+   descriptor-exhaustion path without root -- silently ignoring it, as an
+   earlier revision did, made `max_open_files = 128` look like a no-op. */
 
-TEST_CASE("plan_fd_limit: a request below the current soft limit is a no-op",
+TEST_CASE("plan_fd_limit: a request below the current soft limit lowers it",
           "[fd_limit]") {
-  const auto plan = plan_fd_limit(512, limits(4096, 1048576));
-  REQUIRE(plan.action == FdLimitPlan::Action::AlreadyEnough);
-  REQUIRE(plan.target == 4096); // never lowers an existing limit
+  const auto plan = plan_fd_limit(128, limits(1048575, 1048575));
+  REQUIRE(plan.action == FdLimitPlan::Action::Lower);
+  REQUIRE(plan.target == 128);
+  // Reported loudly: deliberate when testing, expensive to spot when a typo.
+  REQUIRE(plan.warn);
+  REQUIRE(contains(plan.message, "1048575 -> 128"));
+  REQUIRE(contains(plan.message,
+                   std::to_string(agent_capacity(128)) + " agents"));
 }
 
-TEST_CASE("plan_fd_limit: a request equal to the soft limit is a no-op",
+TEST_CASE("plan_fd_limit: a request equal to the soft limit changes nothing",
           "[fd_limit]") {
   const auto plan = plan_fd_limit(4096, limits(4096, 1048576));
-  REQUIRE(plan.action == FdLimitPlan::Action::AlreadyEnough);
+  REQUIRE(plan.action == FdLimitPlan::Action::Unchanged);
   REQUIRE(plan.target == 4096);
+  REQUIRE_FALSE(plan.warn);
 }
 
 TEST_CASE("plan_fd_limit: a reachable request raises the soft limit",
@@ -145,6 +161,7 @@ TEST_CASE("plan_fd_limit: a reachable request raises the soft limit",
   REQUIRE(plan.action == FdLimitPlan::Action::Raise);
   REQUIRE(plan.target == 65536);
   REQUIRE_FALSE(plan.warn);
+  REQUIRE_FALSE(plan.clamped);
   REQUIRE(contains(plan.message, "1024 -> 65536"));
 }
 
@@ -152,20 +169,34 @@ TEST_CASE("plan_fd_limit: a request beyond the hard limit is clamped, not "
           "refused",
           "[fd_limit]") {
   const auto plan = plan_fd_limit(2000000, limits(1024, 1048576));
-  REQUIRE(plan.action == FdLimitPlan::Action::Clamped);
+  // Still a raise -- `clamped` is orthogonal to what happens to the soft limit.
+  REQUIRE(plan.action == FdLimitPlan::Action::Raise);
+  REQUIRE(plan.clamped);
   REQUIRE(plan.target == 1048576);
   REQUIRE(plan.warn);
   // The operator needs to know the remedy is outside the settings file.
   REQUIRE(contains(plan.message, "LimitNOFILE"));
 }
 
-TEST_CASE("plan_fd_limit: a clamp that lands on the current limit becomes a "
-          "no-op but still warns",
+TEST_CASE("plan_fd_limit: a clamp that lands on the current limit changes "
+          "nothing but still warns",
           "[fd_limit]") {
   const auto plan = plan_fd_limit(65536, limits(1024, 1024));
-  REQUIRE(plan.action == FdLimitPlan::Action::AlreadyEnough);
+  REQUIRE(plan.action == FdLimitPlan::Action::Unchanged);
+  REQUIRE(plan.clamped);
   REQUIRE(plan.target == 1024);
   REQUIRE(plan.warn); // the request could not be honoured; say so
+}
+
+TEST_CASE("plan_fd_limit: a lowering request above the hard limit is still "
+          "clamped down to it",
+          "[fd_limit]") {
+  // hard < soft cannot come out of query_fd_limits(), which clamps it, but
+  // plan_fd_limit() is pure and must stay well-behaved on any input.
+  const auto plan = plan_fd_limit(9000, limits(8192, 4096));
+  REQUIRE(plan.clamped);
+  REQUIRE(plan.target == 4096);
+  REQUIRE(plan.action == FdLimitPlan::Action::Lower);
 }
 
 /* ---- rendering ---------------------------------------------------------- */
@@ -175,7 +206,8 @@ TEST_CASE("describe_fd_limits: soft, hard and the implied agent count",
   const auto text = describe_fd_limits(limits(1024, 1048576));
   REQUIRE(contains(text, "1024 soft"));
   REQUIRE(contains(text, "1048576 hard"));
-  REQUIRE(contains(text, "496 agents"));
+  REQUIRE(contains(text,
+                   std::to_string(agent_capacity(1024)) + " agents"));
 }
 
 /* ---- exhaustion errnos -------------------------------------------------- */

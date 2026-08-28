@@ -29,6 +29,7 @@
 #include "curve.hpp"
 #include "zap_auth.hpp"
 
+#include "detail/fd_limit.hpp"
 #include "doctor_checks.hpp"
 #include "mads_test_helpers.hpp"
 
@@ -525,8 +526,10 @@ TEST_CASE("evaluate_fd_limit warns at the stock 1024 soft limit",
   auto r = Mads::Doctor::evaluate_fd_limit(true, 1024, 1048576, std::nullopt);
   REQUIRE(r.status == Status::Warn);
   // The agent count is what connects the limit to the symptom an operator
-  // actually sees -- agents refused past roughly 495 of them.
-  REQUIRE(r.message.find("496") != std::string::npos);
+  // actually sees -- the agent count the limit allows. Derived from
+  // FD_BROKER_OVERHEAD, which is platform-dependent.
+  REQUIRE(r.message.find(std::to_string(Mads::detail::agent_capacity(1024))) !=
+          std::string::npos);
   REQUIRE(r.fix_hint.find("max_open_files") != std::string::npos);
 }
 

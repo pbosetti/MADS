@@ -263,7 +263,7 @@ exactly as before until you opt in. Details and examples are in
   descriptors for as long as it stays connected -- its publisher on the XSUB
   frontend, its subscriber on the XPUB backend -- plus a third while it fetches
   its settings. With the usual soft `RLIMIT_NOFILE` of 1024 that caps a fleet
-  at roughly **495 agents**.
+  at roughly **490 agents**.
 
   Past that ceiling the broker used to fail in the least helpful way possible.
   libzmq's TCP listener counts `EMFILE`/`ENFILE` among the errnos `accept()`
@@ -278,13 +278,17 @@ exactly as before until you opt in. Details and examples are in
   responsible.
 
   Three changes, all backwards-compatible:
-  - `max_open_files` under `[broker]` raises the soft limit at startup, before
+  - `max_open_files` under `[broker]` sets the soft limit at startup, before
     any socket is bound. Unset (the default) leaves it untouched and merely
     reports it; `0` asks for as much as the process is permitted. It cannot
     exceed the hard limit -- a larger value is clamped with a warning, since
-    only `LimitNOFILE=` or a privileged `ulimit -Hn` can lift that. Portable:
-    the raise is capped by `kern.maxfilesperproc` on macOS and `fs.nr_open` on
-    Linux, and reported as not applicable on Windows, which has no per-process
+    only `LimitNOFILE=` or a privileged `ulimit -Hn` can lift that. A value
+    *below* the current soft limit lowers it, which needs no privileges, caps
+    a broker sharing a box with other services, and is the only way to
+    exercise the descriptor-exhaustion path without root; lowering is always
+    reported as a warning, being much the rarer intent. Portable: the target
+    is capped by `kern.maxfilesperproc` on macOS and `fs.nr_open` on Linux,
+    and reported as not applicable on Windows, which has no per-process
     descriptor limit for sockets.
   - The broker now watches its bound sockets for `ZMQ_EVENT_ACCEPT_FAILED` and
     reports a refused agent explicitly, naming the endpoint, the limit in

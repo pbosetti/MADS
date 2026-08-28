@@ -9,7 +9,7 @@ connected agent -- the agent's PUB connects to the XSUB frontend and its SUB to
 the XPUB backend -- plus a third, transient one while the agent fetches its
 settings over the REQ/ROUTER settings socket. With Linux's usual soft
 RLIMIT_NOFILE of 1024 and the broker's own ~30 descriptors of overhead, that
-walls a fleet in at roughly 495 agents, and libzmq reports the wall almost
+walls a fleet in at roughly 490 agents, and libzmq reports the wall almost
 invisibly: tcp_listener_t::accept() lists EMFILE/ENFILE among its non-fatal
 errnos, so a refused agent produces only a ZMQ_EVENT_ACCEPT_FAILED that nobody
 was listening for.
@@ -49,9 +49,19 @@ inline constexpr uint64_t FD_PER_AGENT = 2;
 
 /// The broker's own descriptor footprint, independent of fleet size: three
 /// listening sockets, ~10 libzmq socket mailboxes, the context reaper's and
-/// each I/O thread's eventfd/epoll pair, stdio, and the settings-file inotify
-/// watch. Rounded up, so the capacity estimate errs on the safe side.
-inline constexpr uint64_t FD_BROKER_OVERHEAD = 32;
+/// each I/O thread's poller, stdio, and the settings-file watch.
+///
+/// Platform-dependent, because the mailboxes dominate it and their cost is
+/// not the same everywhere: libzmq's signaler uses eventfd() where it exists
+/// (Linux), costing one descriptor per mailbox, and falls back to a
+/// socketpair -- two descriptors -- everywhere else. Measured at idle: ~34 on
+/// Linux, 49 on macOS. Rounded up in both cases, so the capacity estimate
+/// errs toward understating how many agents will fit rather than overstating.
+#if defined(__linux__)
+inline constexpr uint64_t FD_BROKER_OVERHEAD = 40;
+#else
+inline constexpr uint64_t FD_BROKER_OVERHEAD = 64;
+#endif
 
 /// Soft limit at or below which raising is worth suggesting -- the default on
 /// essentially every Linux distribution, and the value systemd hands a unit
@@ -153,10 +163,16 @@ struct FdLimitPlan {
     NotSupported, ///< no per-process descriptor limit on this platform
     Unset,        ///< nothing configured; report the limit and leave it alone
     Invalid,      ///< configured value makes no sense; ignored, limit untouched
-    AlreadyEnough,///< the soft limit already meets the request
+    Unchanged,    ///< the soft limit is already exactly what was asked for
     Raise,        ///< raise the soft limit to `target`
-    Clamped       ///< raise it, but only as far as the OS allows
+    Lower         ///< lower the soft limit to `target`
   };
+
+  /// Set when the request was above the hard limit and `target` had to be
+  /// capped to it. Orthogonal to `action`, which still describes what happens
+  /// to the soft limit: a clamped request can still raise, lower or change
+  /// nothing at all.
+  bool clamped = false;
 
   Action action = Action::Unset;
   /// The soft limit that should end up in force.
@@ -167,7 +183,7 @@ struct FdLimitPlan {
   bool warn = false;
 };
 
-/// Renders "1024 soft / 1048576 hard, about 496 agents".
+/// Renders e.g. "1024 soft / 1048576 hard, about 492 agents".
 inline std::string describe_fd_limits(const FdLimits &limits) {
   return std::to_string(limits.soft) + " soft / " + std::to_string(limits.hard) +
          " hard, about " + std::to_string(agent_capacity(limits.soft)) +
@@ -227,41 +243,60 @@ inline FdLimitPlan plan_fd_limit(std::optional<int64_t> requested,
   uint64_t wanted = *requested == 0 ? limits.hard
                                     : static_cast<uint64_t>(*requested);
 
-  if (wanted > limits.hard) {
-    plan.action = FdLimitPlan::Action::Clamped;
-    plan.target = limits.hard;
-    plan.warn = true;
-    plan.message = "File descriptors: max_open_files = " +
-                   std::to_string(*requested) +
-                   " exceeds this process's hard limit, clamping to " +
-                   std::to_string(limits.hard) + " (about " +
-                   std::to_string(agent_capacity(limits.hard)) + " agents). "
-                   "Raising the hard limit needs LimitNOFILE= in the systemd "
-                   "unit or a privileged `ulimit -Hn`";
-    // Nothing to do if the clamped target is what we already have.
-    if (plan.target <= limits.soft) {
-      plan.action = FdLimitPlan::Action::AlreadyEnough;
-      plan.target = limits.soft;
-    }
-    return plan;
-  }
+  // Above the hard limit the request is capped rather than refused: only
+  // LimitNOFILE= in the unit, or a privileged `ulimit -Hn`, can lift that.
+  plan.clamped = wanted > limits.hard;
+  if (plan.clamped)
+    wanted = limits.hard;
 
-  if (wanted <= limits.soft) {
-    plan.action = FdLimitPlan::Action::AlreadyEnough;
-    plan.target = limits.soft;
-    plan.message = "File descriptors: " + describe_fd_limits(limits) +
-                   " (already at or above max_open_files = " +
-                   std::to_string(*requested) + ")";
-    return plan;
-  }
-
-  plan.action = FdLimitPlan::Action::Raise;
   plan.target = wanted;
-  plan.message = "File descriptors: raising soft limit " +
-                 std::to_string(limits.soft) + " -> " +
-                 std::to_string(wanted) + " (hard " +
-                 std::to_string(limits.hard) + "), about " +
-                 std::to_string(agent_capacity(wanted)) + " agents";
+
+  if (wanted == limits.soft) {
+    plan.action = FdLimitPlan::Action::Unchanged;
+    plan.message = "File descriptors: " + describe_fd_limits(limits) +
+                   " (max_open_files already in force)";
+  } else if (wanted > limits.soft) {
+    plan.action = FdLimitPlan::Action::Raise;
+    plan.message = "File descriptors: raising soft limit " +
+                   std::to_string(limits.soft) + " -> " +
+                   std::to_string(wanted) + " (hard " +
+                   std::to_string(limits.hard) + "), about " +
+                   std::to_string(agent_capacity(wanted)) + " agents";
+  } else {
+    // Lowering is deliberate and allowed: the soft limit moves freely below
+    // the hard one, needing no privileges. It is how a broker is capped on a
+    // shared box, and -- the reason it must not be silently ignored -- the
+    // only way to exercise the descriptor-exhaustion path without root.
+    //
+    // Always reported as a warning: it is by far the minority case, and an
+    // accidental one (128 typed for 1280) is otherwise discovered only when
+    // the fleet stops growing.
+    plan.action = FdLimitPlan::Action::Lower;
+    plan.warn = true;
+    plan.message = "File descriptors: lowering soft limit " +
+                   std::to_string(limits.soft) + " -> " +
+                   std::to_string(wanted) + " (hard " +
+                   std::to_string(limits.hard) + "), room for about " +
+                   std::to_string(agent_capacity(wanted)) + " agents";
+    // Below its own footprint the broker cannot finish starting: it runs out
+    // while creating its own sockets, long before an agent ever connects.
+    // Saying so here is much cheaper than letting it die mid-startup.
+    if (wanted <= FD_BROKER_OVERHEAD) {
+      plan.message += " -- WARNING: the broker needs about " +
+                      std::to_string(FD_BROKER_OVERHEAD) +
+                      " descriptors for itself and will most likely fail to"
+                      " start with this few";
+    }
+  }
+
+  if (plan.clamped) {
+    plan.warn = true;
+    plan.message += ". max_open_files = " + std::to_string(*requested) +
+                    " exceeds this process's hard limit of " +
+                    std::to_string(limits.hard) +
+                    "; raising that needs LimitNOFILE= in the systemd unit or"
+                    " a privileged `ulimit -Hn`";
+  }
   return plan;
 }
 
@@ -272,16 +307,20 @@ struct FdLimitOutcome {
   std::string error;    ///< why it failed, when it did
 };
 
-/// Carries out `plan`. Only ever raises the soft limit: rlim_max is left
+/// Carries out `plan`. Only ever moves the soft limit: rlim_max is left
 /// untouched, since raising it needs CAP_SYS_RESOURCE and would simply fail
-/// for an unprivileged broker, while raising the soft limit toward the hard
-/// one never needs privileges at all.
+/// for an unprivileged broker, while moving the soft limit anywhere at or
+/// below the hard one never needs privileges at all -- in either direction.
+///
+/// Lowering does not close descriptors that are already open; it only makes
+/// further allocations fail. Since the broker applies this before binding
+/// anything, that distinction does not arise in practice.
 inline FdLimitOutcome apply_fd_limit(const FdLimitPlan &plan) {
   FdLimitOutcome outcome;
   outcome.limits = query_fd_limits();
 
   const bool wants_change = plan.action == FdLimitPlan::Action::Raise ||
-                            plan.action == FdLimitPlan::Action::Clamped;
+                            plan.action == FdLimitPlan::Action::Lower;
   if (!wants_change || !outcome.limits.supported)
     return outcome;
 
