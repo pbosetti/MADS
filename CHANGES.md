@@ -257,6 +257,49 @@ exactly as before until you opt in. Details and examples are in
   load time. The same file therefore scales identically under the Director GUI
   and under `mads up` / `mads doctor --plan`.
 
+- **`[broker] max_open_files`, and a broker that says when it runs out of
+  descriptors.** Fleet size is bounded by the broker's open-file limit, not by
+  anything in libzmq: every connected agent holds two of the broker's
+  descriptors for as long as it stays connected -- its publisher on the XSUB
+  frontend, its subscriber on the XPUB backend -- plus a third while it fetches
+  its settings. With the usual soft `RLIMIT_NOFILE` of 1024 that caps a fleet
+  at roughly **495 agents**.
+
+  Past that ceiling the broker used to fail in the least helpful way possible.
+  libzmq's TCP listener counts `EMFILE`/`ENFILE` among the errnos `accept()`
+  may fail with harmlessly, so it raised `ZMQ_EVENT_ACCEPT_FAILED` -- which
+  nothing listened for -- and refused every new agent in complete silence. The
+  only thing that printed was the service-discovery thread, because its
+  once-a-second `getifaddrs()` and broadcast sockets are the broker's only
+  *timed* descriptor allocations and so were the first to fail. The result was
+  a broker that looked healthy while turning agents away, reporting
+  `ServiceDiscovery advertising failed: getifaddrs failed: Too many open
+  files`, which points at discovery rather than at the limit actually
+  responsible.
+
+  Three changes, all backwards-compatible:
+  - `max_open_files` under `[broker]` raises the soft limit at startup, before
+    any socket is bound. Unset (the default) leaves it untouched and merely
+    reports it; `0` asks for as much as the process is permitted. It cannot
+    exceed the hard limit -- a larger value is clamped with a warning, since
+    only `LimitNOFILE=` or a privileged `ulimit -Hn` can lift that. Portable:
+    the raise is capped by `kern.maxfilesperproc` on macOS and `fs.nr_open` on
+    Linux, and reported as not applicable on Windows, which has no per-process
+    descriptor limit for sockets.
+  - The broker now watches its bound sockets for `ZMQ_EVENT_ACCEPT_FAILED` and
+    reports a refused agent explicitly, naming the endpoint, the limit in
+    force, the agent count it allows and how to raise it. Rate-limited,
+    because a full descriptor table leaves the listening socket permanently
+    readable and libzmq retries the failing accept as fast as it can poll.
+  - Any discovery socket error caused by a full descriptor table now says so,
+    and the advertising loop reports an unchanged failure at most once every
+    30 seconds instead of every second.
+
+  The shipped systemd template (`mads service`) now sets `LimitNOFILE=65536`;
+  without it a unit inherits systemd's `DefaultLimitNOFILE`, which is that same
+  1024 on most distributions. `mads doctor` gained a check reporting the limit
+  in force and whether it leaves room for the fleet.
+
 ## Fixes
 
 

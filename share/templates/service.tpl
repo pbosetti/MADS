@@ -22,6 +22,13 @@ Type=simple
 Restart=always
 RestartSec=1
 User=root
+# systemd hands a unit that does not say otherwise its DefaultLimitNOFILE soft
+# value, which is 1024 on most distributions. The broker holds two descriptors
+# per connected agent (its publisher and its subscriber), so that default caps
+# a fleet at roughly 495 agents -- and libzmq refuses everything past it almost
+# silently. Can also be set from the settings file with [broker] max_open_files,
+# but only up to the hard limit this line establishes.
+LimitNOFILE=65536
 ExecStart={{command}}
 
 [Install]

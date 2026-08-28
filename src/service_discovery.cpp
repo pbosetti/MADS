@@ -1,5 +1,7 @@
 #include "service_discovery.hpp"
 
+#include "detail/fd_limit.hpp"
+
 #include <array>
 #include <cerrno>
 #include <cstring>
@@ -106,6 +108,21 @@ bool socket_would_block() {
 #endif
 }
 
+// Appended to any socket error caused by a full descriptor table.
+//
+// Without it, the broker's most common scaling failure reads as a bare
+// "getifaddrs failed: Too many open files", which points the finger at service
+// discovery rather than at the process-wide limit that is actually refusing
+// agents. Discovery is only the messenger: the advertising loop is the sole
+// thing in the broker that allocates a descriptor on a timer -- a netlink
+// socket for getifaddrs(), then one UDP socket per interface -- so it is the
+// first thing to fail and the only one that prints.
+std::string fd_exhaustion_hint() {
+  return " (the process has run out of file descriptors -- raise the limit"
+         " with `max_open_files` in the settings file, or LimitNOFILE= in the"
+         " systemd unit)";
+}
+
 std::string last_socket_error(const std::string &message) {
 #ifdef _WIN32
   const DWORD error = WSAGetLastError();
@@ -127,9 +144,16 @@ std::string last_socket_error(const std::string &message) {
           details.back() == ' ')) {
     details.pop_back();
   }
-  return message + ": " + details;
+  std::string result = message + ": " + details;
+  if (Mads::detail::is_fd_exhaustion(static_cast<int>(error)))
+    result += fd_exhaustion_hint();
+  return result;
 #else
-  return message + ": " + std::strerror(errno);
+  const int error = errno;
+  std::string result = message + ": " + std::strerror(error);
+  if (Mads::detail::is_fd_exhaustion(error))
+    result += fd_exhaustion_hint();
+  return result;
 #endif
 }
 
@@ -951,6 +975,16 @@ ServiceDiscovery::list_broadcast_interfaces() const {
 }
 
 void ServiceDiscovery::advertising_loop() {
+  // Under descriptor exhaustion advertise_once() fails on every single tick.
+  // Printing each one would scroll away the messages that matter -- not least
+  // the broker's own report of the agents it is refusing -- so an unchanged
+  // failure is reported at most once per FAILURE_REPORT_PERIOD, with a count
+  // of what was suppressed. A *different* failure is always reported at once.
+  constexpr auto FAILURE_REPORT_PERIOD = std::chrono::seconds(30);
+  std::string last_failure;
+  uint64_t suppressed = 0;
+  auto next_failure_report = std::chrono::steady_clock::now();
+
   while (true) {
     ServiceInfo service;
     std::chrono::milliseconds interval{0};
@@ -966,9 +1000,23 @@ void ServiceDiscovery::advertising_loop() {
 
     try {
       advertise_once(service);
+      // Recovered: the next failure, even an identical one, is news again.
+      last_failure.clear();
+      suppressed = 0;
     } catch (const std::exception &e) {
-      std::cerr << "ServiceDiscovery advertising failed: " << e.what()
-                << std::endl;
+      const std::string what = e.what();
+      const auto now = std::chrono::steady_clock::now();
+      if (what != last_failure || now >= next_failure_report) {
+        std::cerr << "ServiceDiscovery advertising failed: " << what;
+        if (what == last_failure && suppressed > 0)
+          std::cerr << " (and " << suppressed << " more like it)";
+        std::cerr << std::endl;
+        last_failure = what;
+        suppressed = 0;
+        next_failure_report = now + FAILURE_REPORT_PERIOD;
+      } else {
+        ++suppressed;
+      }
     }
 
     std::unique_lock lock(_mutex);

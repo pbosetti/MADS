@@ -20,6 +20,7 @@ Author(s): Paolo Bosetti
 #include <winsock2.h>
 #include <windows.h>
 #endif
+#include "../detail/fd_limit.hpp"
 #include "../detail/socket_options.hpp"
 #include "../detail/wire_format.hpp"
 #include "../exec_path.hpp"
@@ -29,6 +30,7 @@ Author(s): Paolo Bosetti
 #include "../keypress.hpp"
 #include "../goback.hpp"
 #include "../service_discovery.hpp"
+#include "../socket_monitor.hpp"
 #include <atomic>
 #include <csignal>
 #include <cstring>
@@ -332,6 +334,154 @@ private:
   zmq::socket_t _capture;
 };
 
+// Reports the one broker failure mode libzmq otherwise swallows entirely: an
+// inbound agent connection that could not be accepted because the process has
+// run out of file descriptors.
+//
+// libzmq's tcp_listener_t::accept() lists EMFILE and ENFILE among the errnos
+// it treats as non-fatal, so it fires ZMQ_EVENT_ACCEPT_FAILED and returns --
+// and with no monitor attached, the refused agent produces no output at all.
+// The broker looks healthy while silently turning every new agent away. Worse,
+// the listening socket stays readable, so libzmq retries the failing accept as
+// fast as it can poll; that is why everything here is rate-limited.
+//
+// The monitors subscribe to ZMQ_EVENT_ACCEPT_FAILED *only*. On an XPUB/XSUB
+// pair carrying hundreds of agents, ZMQ_EVENT_ALL would deliver a per-peer
+// event storm for no benefit.
+class AcceptWatch {
+public:
+  // Must be called before socket.bind(): SocketMonitor's ordering contract is
+  // that libzmq may fire (and an unattached monitor miss) events raised while
+  // the socket is coming up.
+  void watch(zmq::socket_t &socket, string const &address) {
+    auto entry = make_unique<Watched>();
+    entry->address = address;
+    entry->monitor.start(socket, ZMQ_EVENT_ACCEPT_FAILED);
+    _watched.push_back(std::move(entry));
+  }
+
+  void start_reporting(uint64_t fd_soft_limit, bool daemon) {
+    if (_watched.empty())
+      return;
+    _running = true;
+    _thread = thread([this, fd_soft_limit, daemon]() {
+      report_loop(fd_soft_limit, daemon);
+    });
+  }
+
+  // Must run before the watched sockets are closed and before the context is
+  // terminated: SocketMonitor::stop() is what releases each monitor's inproc
+  // PAIR socket, and a leaked one makes zmq_ctx_term() block forever.
+  void stop() {
+    _running = false;
+    if (_thread.joinable())
+      _thread.join();
+    for (auto &w : _watched)
+      w->monitor.stop();
+    _watched.clear();
+  }
+
+  ~AcceptWatch() { stop(); }
+
+private:
+  // SocketMonitor is non-copyable and non-movable, so the entries are held by
+  // pointer to keep the vector itself assignable.
+  struct Watched {
+    Mads::SocketMonitor monitor;
+    string address;
+    /// Failures already attributed to this endpoint. Only used to spot which
+    /// socket a new refusal came from, so the message names the one that just
+    /// turned an agent away rather than whichever failed first.
+    uint64_t seen = 0;
+  };
+
+  static constexpr auto SUMMARY_PERIOD = 10s;
+  static constexpr auto POLL_PERIOD = 250ms;
+
+  void report_loop(uint64_t fd_soft_limit, bool daemon) {
+    uint64_t reported = 0;
+    // Latched separately per failure class. A refused connection is not always
+    // descriptor exhaustion -- ECONNABORTED, for a client that hangs up mid
+    // handshake, is routine -- and one of those must not consume the one-shot
+    // explanation that the descriptor-exhaustion case exists to deliver.
+    bool explained_exhaustion = false;
+    bool explained_other = false;
+    // Kept across polls: a refusal seen while the rollup timer has not expired
+    // still has to be attributable when the timer finally does.
+    string address;
+    int last_errno = 0;
+    auto next_summary = chrono::steady_clock::now() + SUMMARY_PERIOD;
+
+    while (_running) {
+      this_thread::sleep_for(POLL_PERIOD);
+
+      // The counters are monotonic, so summing them and remembering what has
+      // already been reported is all the bookkeeping a rollup needs.
+      uint64_t total = 0;
+      for (auto &w : _watched) {
+        const auto st = w->monitor.state();
+        total += st.accept_failures;
+        if (st.accept_failures > w->seen) {
+          w->seen = st.accept_failures;
+          address = w->address;
+          last_errno = st.last_event_value;
+        }
+      }
+      if (total <= reported)
+        continue;
+
+      const uint64_t fresh = total - reported;
+      const bool exhausted = Mads::detail::is_fd_exhaustion(last_errno);
+      bool &explained = exhausted ? explained_exhaustion : explained_other;
+
+      if (!explained) {
+        explained = true;
+        reported = total;
+        next_summary = chrono::steady_clock::now() + SUMMARY_PERIOD;
+        if (exhausted) {
+          cerr << goback(1, !daemon) << fg::red << timestamp()
+               << "OUT OF FILE DESCRIPTORS: refused an agent connection on "
+               << address << "." << fg::reset << endl
+               << fg::yellow
+               << "  The open-file limit is " << fd_soft_limit
+               << " and every connected agent needs "
+               << Mads::detail::FD_PER_AGENT
+               << " descriptors (publisher + subscriber), plus one more while "
+                  "it fetches"
+               << endl
+               << "  its settings -- room for about "
+               << Mads::detail::agent_capacity(fd_soft_limit)
+               << " agents. Set `max_open_files` in the [broker] section of "
+                  "the settings"
+               << endl
+               << "  file, or LimitNOFILE= in the systemd unit, to raise it."
+               << fg::reset << endl;
+        } else {
+          cerr << goback(1, !daemon) << fg::red << timestamp()
+               << "Refused an inbound connection on " << address << ": "
+               << std::strerror(last_errno) << fg::reset << endl;
+        }
+        continue;
+      }
+
+      // Already explained once. Roll the rest up rather than let a listener
+      // that re-fires continuously scroll the explanation off the screen.
+      if (chrono::steady_clock::now() >= next_summary) {
+        cerr << goback(1, !daemon) << fg::red << timestamp() << fresh
+             << " more inbound connection(s) refused"
+             << (exhausted ? " (out of file descriptors)" : "") << fg::reset
+             << endl;
+        reported = total;
+        next_summary = chrono::steady_clock::now() + SUMMARY_PERIOD;
+      }
+    }
+  }
+
+  vector<unique_ptr<Watched>> _watched;
+  thread _thread;
+  std::atomic<bool> _running{false};
+};
+
 // Install SIGINT/SIGTERM handlers that request a clean shutdown by stopping
 // the process-wide run flag. Used in daemon mode so a `kill`/`systemctl stop` (or CTRL-C)
 // unwinds the proxy and stops advertising instead of killing the process
@@ -495,6 +645,36 @@ int main(int argc, char **argv) {
   auto socket_options =
       Mads::detail::SocketOptions::resolve(config["agents"], config[name]);
 
+  // The descriptor budget, settled before a single socket is bound so that the
+  // figure reported below is the one the proxy actually runs under.
+  //
+  // Fleet size is bounded by this limit, not by anything in libzmq: every
+  // connected agent holds two of the broker's descriptors for as long as it
+  // stays connected (its publisher on the XSUB frontend, its subscriber on the
+  // XPUB backend) and a third while it fetches its settings. A stock Linux
+  // soft limit of 1024 therefore walls a fleet in at roughly 495 agents -- and
+  // libzmq refuses everything past that almost silently, which is what
+  // AcceptWatch above exists to report.
+  // Read from the broker's own section only, like io_threads and
+  // settings_workers: this is a property of the broker process, not a
+  // socket option an agent could meaningfully inherit from [agents].
+  const auto requested_fd_limit =
+      config[name]["max_open_files"].value<int64_t>();
+  const auto fd_plan = Mads::detail::plan_fd_limit(
+      requested_fd_limit, Mads::detail::query_fd_limits());
+  const auto fd_outcome = Mads::detail::apply_fd_limit(fd_plan);
+  if (!fd_plan.message.empty()) {
+    if (fd_plan.warn)
+      cerr << fg::yellow << fd_plan.message << fg::reset << endl;
+    else
+      cout << fd_plan.message << endl;
+  }
+  if (!fd_outcome.error.empty()) {
+    cerr << fg::red << "Could not raise the open-file limit: "
+         << fd_outcome.error << fg::reset << endl;
+  }
+  const uint64_t fd_soft_limit = fd_outcome.limits.soft;
+
   // ZMQ_DEVELOPMENT.md §2.2: off by default. See SubscriptionTable's comment
   // above for the cost this opts into.
   const bool subscription_table_enabled =
@@ -552,12 +732,17 @@ int main(int argc, char **argv) {
     }
   }
 
+  // Attached before the binds below, per SocketMonitor's ordering contract.
+  AcceptWatch accept_watch;
+
   try {
     std::cout << "Binding broker frontend (XSUB) at " << style::bold
               << frontend_address << style::reset << endl;
+    accept_watch.watch(frontend, frontend_address);
     frontend.bind(frontend_address);
     std::cout << "Binding broker backend (XPUB) at " << style::bold
               << backend_address << style::reset << endl;
+    accept_watch.watch(backend, backend_address);
     backend.bind(backend_address);
   } catch (const zmq::error_t &e) {
     cerr << fg::red << "ZMQ error, could not connect: " << e.what() << fg::reset
@@ -615,7 +800,9 @@ int main(int argc, char **argv) {
   if (crypto)
     curve_auth_ptr->setup_curve_server(settings_router, key_name);
   socket_options.apply(settings_router);
+  accept_watch.watch(settings_router, settings_address);
   settings_router.bind(settings_address);
+  accept_watch.start_reporting(fd_soft_limit, daemon);
   cout << "Binding broker shared settings (ROUTER, " << settings_workers
        << " worker" << (settings_workers == 1 ? "" : "s") << ") at "
        << style::bold << settings_address << style::reset << endl;
@@ -860,6 +1047,10 @@ int main(int argc, char **argv) {
     settings_proxy_controller.close();
     settings_proxy_controlled.close();
     if (subscription_table) subscription_table->stop();
+    // Before the sockets it monitors are closed and before the context is
+    // terminated: each monitor holds an inproc PAIR socket that would
+    // otherwise keep zmq_ctx_term() blocked forever.
+    accept_watch.stop();
     frontend.close();
     backend.close();
     settings_router.close();
@@ -994,6 +1185,10 @@ int main(int argc, char **argv) {
     if (crypto)
       curve_auth_ptr = nullptr;
     if (subscription_table) subscription_table->stop();
+    // Before the sockets it monitors are closed and before the context is
+    // terminated: each monitor holds an inproc PAIR socket that would
+    // otherwise keep zmq_ctx_term() blocked forever.
+    accept_watch.stop();
     frontend.close();
     backend.close();
     settings_router.close();

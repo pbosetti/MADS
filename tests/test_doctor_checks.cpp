@@ -508,3 +508,54 @@ TEST_CASE("check_port_available passes when nothing is listening", "[doctor][por
   REQUIRE(r.status == Status::Pass);
   REQUIRE(r.message.find("is free") != std::string::npos);
 }
+
+/* ---- 8. Open-file limit --------------------------------------------------
+   Pure evaluator, so the whole matrix is reachable without touching this
+   process's real rlimits -- including the Windows "no such limit" branch. */
+
+TEST_CASE("evaluate_fd_limit passes where the platform has no such limit",
+         "[doctor][fd_limit]") {
+  auto r = Mads::Doctor::evaluate_fd_limit(false, 0, 0, std::nullopt);
+  REQUIRE(r.status == Status::Pass);
+  REQUIRE(r.fix_hint.empty());
+}
+
+TEST_CASE("evaluate_fd_limit warns at the stock 1024 soft limit",
+         "[doctor][fd_limit]") {
+  auto r = Mads::Doctor::evaluate_fd_limit(true, 1024, 1048576, std::nullopt);
+  REQUIRE(r.status == Status::Warn);
+  // The agent count is what connects the limit to the symptom an operator
+  // actually sees -- agents refused past roughly 495 of them.
+  REQUIRE(r.message.find("496") != std::string::npos);
+  REQUIRE(r.fix_hint.find("max_open_files") != std::string::npos);
+}
+
+TEST_CASE("evaluate_fd_limit points at the hard limit when the soft one is "
+         "already there",
+         "[doctor][fd_limit]") {
+  auto r = Mads::Doctor::evaluate_fd_limit(true, 1024, 1024, std::nullopt);
+  REQUIRE(r.status == Status::Warn);
+  // max_open_files cannot help here; only raising the hard limit can.
+  REQUIRE(r.fix_hint.find("LimitNOFILE") != std::string::npos);
+  REQUIRE(r.fix_hint.find("max_open_files") == std::string::npos);
+}
+
+TEST_CASE("evaluate_fd_limit passes with a raised limit", "[doctor][fd_limit]") {
+  auto r = Mads::Doctor::evaluate_fd_limit(true, 65536, 1048576, std::nullopt);
+  REQUIRE(r.status == Status::Pass);
+  REQUIRE(r.fix_hint.empty());
+}
+
+TEST_CASE("evaluate_fd_limit warns when max_open_files exceeds the hard limit",
+         "[doctor][fd_limit]") {
+  auto r = Mads::Doctor::evaluate_fd_limit(true, 65536, 65536, 200000);
+  REQUIRE(r.status == Status::Warn);
+  REQUIRE(r.message.find("exceeds") != std::string::npos);
+  REQUIRE(r.fix_hint.find("LimitNOFILE") != std::string::npos);
+}
+
+TEST_CASE("evaluate_fd_limit ignores a configured value the limit can satisfy",
+         "[doctor][fd_limit]") {
+  auto r = Mads::Doctor::evaluate_fd_limit(true, 65536, 1048576, 65536);
+  REQUIRE(r.status == Status::Pass);
+}

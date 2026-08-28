@@ -38,6 +38,12 @@ enum class LinkEvent {
   HandshakeFailedProtocol,
   HandshakeFailedNoDetail,
   Disconnected,
+  /// A *bound* socket could not accept an inbound connection. Unlike every
+  /// other event here this describes the listener, not a link: the peer it
+  /// would have belonged to never got far enough to have one. The errno
+  /// libzmq reported (EMFILE when the process is out of file descriptors)
+  /// arrives with it, in LinkState::last_event_value.
+  AcceptFailed,
 };
 
 /// Whether the link is usable *right now*. Where LinkEvent is a
@@ -77,6 +83,16 @@ struct LinkState {
   /// When `status` last changed; empty while it is still Unknown. Callers
   /// report "down for 12s" from this.
   std::optional<std::chrono::steady_clock::time_point> changed_at;
+  /// The integer libzmq attached to the most recent event. Its meaning is
+  /// per-event and it is 0 for the ones that carry nothing useful; the case
+  /// this exists for is AcceptFailed, where it is the errno accept(2)
+  /// failed with.
+  int last_event_value = 0;
+  /// Inbound connections this listener has failed to accept. Monotonic, so a
+  /// caller can report only what is new since it last looked -- which matters
+  /// because a full descriptor table leaves the listening socket permanently
+  /// readable, and libzmq re-fires the failure as fast as it can poll.
+  uint64_t accept_failures = 0;
 };
 
 /**

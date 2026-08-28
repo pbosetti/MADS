@@ -646,6 +646,18 @@ int main(int argc, char *argv[]) {
         << style::reset << fg::reset << endl;
   }
 
+  // --- 8. open-file limit --------------------------------------------------
+  // Last because it is the only check about the machine rather than the
+  // fleet's configuration -- and the one that explains a broker which passes
+  // every other check and still turns agents away past roughly 495 of them.
+  {
+    std::optional<int64_t> configured;
+    if (config.has_value()) {
+      configured = (*config)["broker"]["max_open_files"].value<int64_t>();
+    }
+    print_result(Doctor::check_fd_limit(configured));
+  }
+
   cout << endl;
   if (overall_exit_code == 0) {
     cout << fg::green << style::bold << "All checks passed." << style::reset
