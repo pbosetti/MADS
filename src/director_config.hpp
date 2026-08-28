@@ -116,6 +116,22 @@ struct DirectorConfig {
 };
 
 /**
+ * @brief Caller-supplied overrides applied while the file is expanded.
+ *
+ * These exist for values that cannot be patched after the fact:
+ * load_director_config() substitutes `${ID}` into every instance's `command`
+ * during expansion, so by the time it returns there is no `${ID}` left to
+ * renumber. An override has to be in hand before that happens.
+ */
+struct DirectorLoadOptions {
+  /// When set, replaces every section's `base_instance_id` -- including
+  /// sections that state one explicitly. Intended for running one
+  /// director.toml on several machines with disjoint `${ID}` ranges. Must be
+  /// >= 0, on the same terms as the file's own key.
+  std::optional<int> base_instance_id;
+};
+
+/**
  * @brief Loads, validates, expands and orders a director.toml file.
  * @param path path to the director.toml file.
  * @param out_error set to a human-readable message on failure (malformed
@@ -125,6 +141,8 @@ struct DirectorConfig {
  * per ignored unknown key/section. This module never writes to stdout/stderr
  * itself (it stays a pure function of its input); the caller (mads-up)
  * decides how to display these.
+ * @param options overrides applied during expansion; see DirectorLoadOptions.
+ * Defaulted, so existing call sites are unaffected.
  * @return the config on success; std::nullopt on failure.
  *
  * Unknown top-level keys/sections/tables and unknown keys inside a process
@@ -135,7 +153,8 @@ struct DirectorConfig {
  */
 std::optional<DirectorConfig>
 load_director_config(const std::string &path, std::string *out_error,
-                     std::vector<std::string> *out_warnings = nullptr);
+                     std::vector<std::string> *out_warnings = nullptr,
+                     const DirectorLoadOptions &options = {});
 
 } // namespace Mads
 

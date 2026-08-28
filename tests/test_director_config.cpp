@@ -263,6 +263,85 @@ TEST_CASE("base_instance_id defaults to 0 when omitted", "[director_config]") {
   fs::remove(path);
 }
 
+/* ---- DirectorLoadOptions::base_instance_id (the --base-instance-id flag) --
+   The override has to be applied during expansion, not after: `${ID}` is
+   already substituted into each instance's command by the time the loader
+   returns. These pin that it reaches the commands, not just instance_id. */
+
+TEST_CASE("base_instance_id override replaces every section's value, set or "
+          "not",
+          "[director_config]") {
+  Mads::DirectorLoadOptions options;
+  options.base_instance_id = 100;
+  std::string error;
+  std::vector<std::string> warnings;
+  auto config = Mads::load_director_config(
+      fixture("base_instance_id.toml").string(), &error, &warnings, options);
+  REQUIRE(config.has_value());
+  REQUIRE(warnings.empty());
+
+  // The fixture mixes all three cases: a section with no key, one with 10 and
+  // one with 7. The override must flatten all of them to the same base.
+  const auto *broker = find_proc(*config, "broker");
+  REQUIRE(broker != nullptr);
+  REQUIRE(broker->instance_id == 100);
+  REQUIRE(broker->command == "mads-broker --id=100");
+
+  // Overriding shifts the whole scaled run, keeping it contiguous, and the
+  // instance *names* stay 1-based exactly as without an override.
+  REQUIRE(find_proc(*config, "perf_assess[1]")->instance_id == 100);
+  REQUIRE(find_proc(*config, "perf_assess[2]")->instance_id == 101);
+  REQUIRE(find_proc(*config, "perf_assess[3]")->instance_id == 102);
+  REQUIRE(find_proc(*config, "perf_assess[2]")->command ==
+          "mads-perf_assess -p10 -id=\"perf_assess_101\"");
+
+  // A section that set 7 explicitly is overridden too, not left alone.
+  REQUIRE(find_proc(*config, "worker")->instance_id == 100);
+  REQUIRE(find_proc(*config, "worker")->command == "mads-worker --id=100");
+}
+
+TEST_CASE("an unset base_instance_id override leaves the file's own values "
+          "alone",
+          "[director_config]") {
+  // The defaulted parameter must be a no-op, or every existing caller
+  // (mads doctor --plan among them) would silently renumber to 0.
+  Mads::DirectorLoadOptions options; // base_instance_id stays nullopt
+  std::string error;
+  auto config = Mads::load_director_config(
+      fixture("base_instance_id.toml").string(), &error, nullptr, options);
+  REQUIRE(config.has_value());
+  REQUIRE(find_proc(*config, "broker")->instance_id == 0);
+  REQUIRE(find_proc(*config, "perf_assess[1]")->instance_id == 10);
+  REQUIRE(find_proc(*config, "worker")->instance_id == 7);
+}
+
+TEST_CASE("a base_instance_id override of 0 is honoured, not treated as unset",
+          "[director_config]") {
+  // std::optional, not a sentinel: `--base-instance-id 0` is a real request to
+  // renumber sections that ask for 10 and 7 back down to 0.
+  Mads::DirectorLoadOptions options;
+  options.base_instance_id = 0;
+  std::string error;
+  auto config = Mads::load_director_config(
+      fixture("base_instance_id.toml").string(), &error, nullptr, options);
+  REQUIRE(config.has_value());
+  REQUIRE(find_proc(*config, "perf_assess[1]")->instance_id == 0);
+  REQUIRE(find_proc(*config, "perf_assess[3]")->instance_id == 2);
+  REQUIRE(find_proc(*config, "worker")->instance_id == 0);
+  REQUIRE(find_proc(*config, "worker")->command == "mads-worker --id=0");
+}
+
+TEST_CASE("a negative base_instance_id override is rejected",
+          "[director_config]") {
+  Mads::DirectorLoadOptions options;
+  options.base_instance_id = -1;
+  std::string error;
+  auto config = Mads::load_director_config(
+      fixture("base_instance_id.toml").string(), &error, nullptr, options);
+  REQUIRE_FALSE(config.has_value());
+  REQUIRE(error.find("base_instance_id") != std::string::npos);
+}
+
 TEST_CASE("a negative base_instance_id is rejected", "[director_config]") {
   auto path = write_temp_toml(
       "[api]\ncommand = \"echo hi\"\nbase_instance_id = -1\n",

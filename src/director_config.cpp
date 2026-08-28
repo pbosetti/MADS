@@ -457,7 +457,19 @@ std::optional<ReadySpec> parse_ready_spec(const std::string &value,
 
 std::optional<DirectorConfig>
 load_director_config(const std::string &path, std::string *out_error,
-                     std::vector<std::string> *out_warnings) {
+                     std::vector<std::string> *out_warnings,
+                     const DirectorLoadOptions &options) {
+  // Validated up front, before the file is even opened: an out-of-range
+  // override is the caller's mistake, and it should be reported the same way
+  // whatever the file happens to contain.
+  if (options.base_instance_id.has_value() && *options.base_instance_id < 0) {
+    if (out_error != nullptr) {
+      *out_error = "Invalid base_instance_id override " +
+                   std::to_string(*options.base_instance_id) +
+                   ". Must be >= 0.";
+    }
+    return std::nullopt;
+  }
   try {
     const auto parsed = toml::parse_file(path);
 
@@ -553,7 +565,14 @@ load_director_config(const std::string &path, std::string *out_error,
         // Director offsets ${ID} by the section's `base_instance_id`
         // (default 0), so a scale=3 / base_instance_id=10 process expands to
         // ${ID} 10, 11, 12 -- while the instance *names* stay base[1..3].
-        instance.instance_id = process.base_instance_id + i;
+        //
+        // Applied here rather than during parsing so an override wins over
+        // every section uniformly, including ones that set the key
+        // explicitly, and so the file's own values are still validated even
+        // when they are about to be replaced.
+        const int base_instance_id =
+            options.base_instance_id.value_or(process.base_instance_id);
+        instance.instance_id = base_instance_id + i;
         instance.ready = process.ready;
 
         if (process.workdir.has_value()) {

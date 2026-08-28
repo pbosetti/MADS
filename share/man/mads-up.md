@@ -11,6 +11,7 @@
   [**\-\-timeout** *duration*]
   [**\-\-grace** *duration*]
   [**\-\-max-restarts** *n*]
+  [**\-\-base-instance-id** *n*]
   [**\-\-no-shell**]
   [**\-\-dry-run**]
   [**\-q, \-\-quiet**]
@@ -147,6 +148,22 @@ starting at 100ms and capped at 30s (reset once a restarted process has stayed u
 **\-\-max-restarts** *n*
 :  Give up relaunching a `relaunch = true` process after *n* attempts (it stays stopped; the rest of the
    plan keeps running). Default: unlimited (the exponential backoff already bounds CPU usage).
+
+**\-\-base-instance-id** *n*
+:  Override every section's `base_instance_id`, so `${ID}` numbering starts at *n*. Applies to the whole
+   plan, including sections that set the key themselves, and shifts only `${ID}` -- the `base[N]`
+   instance names stay 1-based, exactly as when the value comes from the file. A scaled process stays
+   contiguous from the new base, so `scale = 3` with **\-\-base-instance-id** `100` expands `${ID}` to
+   100, 101 and 102.
+
+   Omitting the option is not the same as passing `0`: with no option each section keeps whatever it
+   declares (defaulting to 0), whereas `\-\-base-instance-id 0` renumbers sections that ask for a
+   non-zero base back down to 0. Must be >= 0, on the same terms as the file's own key.
+
+   Its purpose is running one `director.toml` across several machines with disjoint `${ID}` ranges,
+   without editing the file per host. Pair it with **\-\-dry-run** to see the resolved numbering
+   before anything starts. Note that a negative value has to be written as
+   `\-\-base-instance-id=-1`, since a bare `-1` parses as an option.
 
 **\-\-no-shell**
 :  Tokenize each process's `command` and exec it directly instead of shelling out. Use this when a

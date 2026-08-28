@@ -111,6 +111,7 @@ int main(int argc, char *argv[]) {
     ("timeout", "Hard cap on the whole run, e.g. '30s', '5m' (default: none)", value<string>())
     ("grace", "SIGTERM -> SIGKILL grace period, e.g. '5s'", value<string>()->default_value("5s"))
     ("max-restarts", "Cap on relaunch attempts per process (default: unlimited)", value<int>())
+    ("base-instance-id", "Override every section's base_instance_id, so ${ID} numbering starts here (default: use the file's own values)", value<int>())
     ("no-shell", "Tokenize 'command' and exec it directly instead of shelling out")
     ("crypto", "Speak CURVE in `ready = \"broker\"` probes (same convention as other mads-* executables); pass this whenever the broker runs with --crypto")
     ("keys_dir", "Directory where CURVE keys are stored", value<string>()->default_value(Mads::exec_dir("../etc")))
@@ -142,9 +143,18 @@ int main(int argc, char *argv[]) {
 
   const string path = parsed["file"].as<string>();
 
+  // Has to reach the loader rather than be applied afterwards: `${ID}` is
+  // substituted into each instance's command during expansion, so once
+  // load_director_config() returns there is nothing left to renumber.
+  DirectorLoadOptions load_options;
+  if (parsed.count("base-instance-id")) {
+    load_options.base_instance_id = parsed["base-instance-id"].as<int>();
+  }
+
   string load_error;
   vector<string> warnings;
-  auto config = load_director_config(path, &load_error, &warnings);
+  auto config =
+      load_director_config(path, &load_error, &warnings, load_options);
   for (const auto &w : warnings) {
     cerr << fg::yellow << "Warning: " << w << fg::reset << endl;
   }
