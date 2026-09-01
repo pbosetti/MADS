@@ -49,6 +49,7 @@ Author(s): Paolo Bosetti
 #include <span>
 #include <atomic>
 #include <memory>
+#include "clock_offset.hpp"
 #include "curve.hpp"
 #include "exec_path.hpp"
 #include "socket_monitor.hpp"
@@ -116,6 +117,25 @@ public:
 private:
   mutable std::optional<std::string> _text;
   mutable std::optional<nlohmann::json> _doc;
+};
+
+/**
+ * @brief One responder's answer to Agent::broadcast_clock_probe()'s ping
+ * (clock-offset source B, see clock_offset.hpp): the raw four-timestamp
+ * sample plus the responder's identity and its own currently adopted clock
+ * offset, which is what lets an initiator compose
+ * `clock_offset(mine) = responder_adopted.offset_us + estimate(sample).offset_us`
+ * rather than treating a peer exchange as an unrelated measurement.
+ */
+struct ClockPeerObservation {
+  std::string responder_agent_id;
+  std::string responder_name;
+  std::string responder_hostname;
+  std::string responder_domain;
+  ClockSample sample;
+  /// The responder's own clock_offset() at reply time; source() ==
+  /// ClockSource::None if the responder had no valid measurement of its own.
+  ClockOffsetResult responder_adopted;
 };
 
 class Agent; // forward declaration
@@ -1060,6 +1080,72 @@ public:
   static void install_signal_handlers();
 
 
+  /*
+    ____ _            _      ___   __  __          _
+   / ___| | ___   ___| | __ / _ \ / _|/ _|___  ___| |_
+  | |   | |/ _ \ / __| |/ /| | | | |_| |_/ __|/ _ \ __|
+  | |___| | (_) | (__|   < | |_| |  _|  _\__ \  __/ |_
+   \____|_|\___/ \___|_|\_\ \___/|_| |_| |___/\___|\__|
+
+  */
+
+  /**
+   * @brief Runs `samples` four-timestamp exchanges against the broker's
+   * settings endpoint and adopts the result as this agent's own clock-offset
+   * measurement (clock-offset source A -- clock_offset.hpp §"Source A").
+   * Never throws: an unreachable broker, or one too old to know the "clock"
+   * command, leaves any previous measurement in place and returns
+   * {valid=false}.
+   *
+   * Called automatically at the end of init() when [agents] clock_source is
+   * "broker" (the default) and settings come from a broker; called again
+   * periodically by the background clock thread when clock_interval_ms > 0
+   * and this agent is (or would become) its clock domain's adopted source.
+   * Safe to call directly at any other time too.
+   *
+   * @param samples number of round-trips; the min-delay one is kept.
+   * @param timeout_ms per-request send/receive timeout.
+   */
+  Mads::ClockOffsetResult measure_clock_offset(size_t samples = 5,
+                                               int timeout_ms = 1000);
+
+  /**
+   * @brief Broadcasts a clock-sync ping on CLOCKSYNC_TOPIC and collects
+   * every responder's pong that arrives within `window` (clock-offset
+   * source B -- clock_offset.hpp §"Source B"). Used internally when
+   * [agents] clock_source is "peer", and by `mads top --probe` to build its
+   * fleet table.
+   *
+   * Blocking: drives this agent's own receive() calls for the duration of
+   * `window`, so nothing else on the calling thread progresses meanwhile,
+   * and it is not safe to call concurrently with another in-flight
+   * broadcast_clock_probe() on the same Agent (single-flight; the
+   * background clock thread already respects this by construction).
+   * Returns an empty vector immediately if this agent has no publisher
+   * connected (no pub_topic) -- it cannot ping without one.
+   *
+   * @param window how long to wait for responders.
+   */
+  std::vector<Mads::ClockPeerObservation> broadcast_clock_probe(
+      std::chrono::milliseconds window = std::chrono::milliseconds(300));
+
+  /**
+   * @brief This agent's currently adopted clock offset: the clock domain's
+   * consensus winner (Mads::ClockConsensus, possibly another agent's
+   * measurement) if one is known and fresh, else this agent's own last
+   * measurement, else {valid=false}. Add offset_us to a wall-clock reading
+   * taken on this host to obtain broker-host time.
+   */
+  Mads::ClockOffsetResult clock_offset() const;
+
+  /**
+   * @brief This process's clock-domain identity
+   * (Mads::detail::clock_domain_id(): boot_id on Linux, hostname
+   * elsewhere). Agents that share this value share a clock and are
+   * expected to converge on one identical clock_offset().
+   */
+  std::string clock_domain() const;
+
   double timecode_fps = MADS_FPS;
   Mads::auth_verbose auth_verbose = auth_verbose::off;
   std::string server_key_name = "broker";
@@ -1142,6 +1228,59 @@ protected:
    */
   void _start_io_thread();
 
+  /**
+   * @brief Parses the [agents]/[<name>] clock_* settings during init() and
+   * appends CLOCKSYNC_TOPIC to _sub_topic when this agent needs to
+   * participate (mirrors how enable_remote_control() appends "control").
+   */
+  void _configure_clock_sync();
+
+  /// True when this agent needs to hear/answer CLOCKSYNC_TOPIC (source
+  /// != none, or the responder is enabled -- true by default). Deliberately
+  /// not reflected in _sub_topic/sub_topic() -- see _configure_clock_sync().
+  bool _clock_wants_sync() const;
+
+  /**
+   * @brief Brings up _clock_thread if it is not already running: announces
+   * this agent's adopted clock offset on CLOCKSYNC_TOPIC every
+   * clock_announce_ms, and -- when clock_interval_ms > 0 and this agent is
+   * its clock domain's current winner (or no winner is known yet) --
+   * re-measures. A "peer"-source agent takes its very first measurement
+   * here too, since broadcast_clock_probe() needs a connected socket that
+   * does not exist yet during init(). Called from connect(); joined in
+   * disconnect()/shutdown() exactly like _io_thread.
+   */
+  void _start_clock_thread();
+
+  /// One clock_source == "peer" measurement attempt: probes, picks an
+  /// anchor per the chain-safety rules (bounded hops, non-stale, a real
+  /// source), composes clock_offset(mine) = anchor.offset_us + theta, and
+  /// records/announces the result. A no-op if no eligible peer responds.
+  void _run_peer_measurement();
+
+  /// Handles one decoded CLOCKSYNC_TOPIC message (ping/pong/announce).
+  /// Called from receive()'s two data-frame branches and from the
+  /// _io_thread control-analogous branch; never throws, never surfaces the
+  /// message to the caller.
+  void _handle_clocksync_message(const nlohmann::json &msg);
+
+  /// Publishes `r` as a CLOCKSYNC_TOPIC announcement and records it into
+  /// this agent's own local consensus view.
+  void _announce_clock_offset(const Mads::ClockOffsetResult &r);
+
+  /// Fills in the Agent-level bookkeeping estimate()/ClockOffsetEstimator
+  /// do not know about: source, hops, this agent's identity, and the next
+  /// measurement sequence number.
+  Mads::ClockOffsetResult
+  _stamp_clock_result(Mads::ClockOffsetResult r, Mads::ClockSource source,
+                      uint8_t hops);
+
+  /// Stable per-agent identity for clock-sync bookkeeping (ping/pong/
+  /// announce "who"), independent of the optional, user-facing
+  /// --agent-id/_agent_id used for payload stamping: falls back to
+  /// "<name>@<pid>" so consensus works even when --agent-id was never set.
+  std::string _clock_agent_identity() const;
+
   // Member variables
   std::string _hostname;
   std::string _name;
@@ -1223,6 +1362,38 @@ protected:
   Compression _compression = Compression::Auto;
   std::atomic<size_t> _dropped_messages{0};
   nlohmann::json _settings_json; // cached JSON projection of settings
+
+  // ---- Clock offset (see clock_offset.hpp) --------------------------
+  Mads::ClockSource _clock_source = Mads::ClockSource::Broker;
+  bool _clock_sync_responder = true;
+  int _clock_interval_ms = 0;
+  int _clock_announce_ms = 5000;
+  bool _clock_correction = false;
+  // Per-clock-domain adoption (§2 of the design): every agent, regardless
+  // of its own clock_source, records what it hears so clock_offset() can
+  // return the domain's winner rather than only this agent's own
+  // measurement.
+  Mads::ClockConsensus _clock_consensus{std::chrono::seconds(30)};
+  // This agent's own last measurement (source Broker or Peer), guarded
+  // separately from _clock_consensus's own internal mutex since it is
+  // read/written by measure_clock_offset()/_run_peer_measurement() (the
+  // clock thread or init()) and read by clock_offset() (any thread).
+  mutable std::mutex _clock_mtx;
+  Mads::ClockOffsetResult _own_clock_measurement;
+  uint64_t _clock_seq = 0;
+  std::thread _clock_thread;
+  // Pending broadcast_clock_probe() collection state: the send instant (for
+  // local_elapsed_us) and the pongs gathered so far. Single-flight by
+  // design (see broadcast_clock_probe()'s doc comment).
+  mutable std::mutex _clocksync_mtx;
+  std::chrono::steady_clock::time_point _clocksync_probe_sent_at{};
+  std::vector<Mads::ClockPeerObservation> _clocksync_pongs;
+  uint64_t _clocksync_probe_seq = 0;
+  // Per-initiator rate limit for this agent's own ping responses (§4.1 of
+  // the design): guarded by _clocksync_mtx too.
+  std::map<std::string, std::chrono::steady_clock::time_point>
+      _clocksync_last_reply;
+
 public:
   bool dummy = false;
 };

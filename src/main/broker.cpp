@@ -931,6 +931,24 @@ int main(int argc, char **argv) {
           chrono::system_clock::time_point now = chrono::system_clock::now();
           const string tc = to_string(Mads::timecode(now, timecode_fps));
           settings.send(zmq::buffer(tc), zmq::send_flags::none);
+        } else if (cmd == "clock") {
+          // Reply to Agent::measure_clock_offset()'s four-timestamp
+          // exchange (src/clock_offset.hpp): t2 as the branch's very first
+          // statement, t3 right before send, so the responder-side
+          // processing time (t3-t2) the client subtracts out is as tight as
+          // possible. Purely additive and stateless -- the broker never
+          // tracks per-agent clock state; consensus among agents sharing a
+          // clock domain lives on the bus (Mads::ClockConsensus), not here.
+          // No version check, matching "timecode" above: an agent talking
+          // to an old broker that doesn't know "clock" falls into the
+          // generic branch below and gets back a bare [LIB_VERSION] reply,
+          // which Agent::measure_clock_offset() detects (< 3 frames) and
+          // degrades from gracefully.
+          const int64_t t2 = Mads::epoch_us(chrono::system_clock::now());
+          const int64_t t3 = Mads::epoch_us(chrono::system_clock::now());
+          content.addstr(to_string(t2));
+          content.addstr(to_string(t3));
+          content.send(settings);
         } else {
           cerr << goback(1, !daemon) << fg::yellow << timestamp()
                << "Got unexpected command " << cmd << fg::reset << endl;

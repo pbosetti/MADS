@@ -20,11 +20,16 @@
 #include <cstdlib>
 #include <mutex>
 #include "curve.hpp"
+#include "detail/clock_domain.hpp"
 #include "detail/plugin_cache.hpp"
 #include "detail/socket_options.hpp"
 #include "detail/wire_format.hpp"
 #include "exec_path.hpp"
 #include "mads.hpp"
+
+#ifdef _WIN32
+#include <process.h>
+#endif
 
 #ifndef MADS_AGENT_NO_INFO
 #include <rang.hpp>
@@ -75,6 +80,38 @@ std::optional<LazyPayload> decode_to_payload(const string &raw, uint8_t format,
 
 // Process-global signal-handler guard (REFACTOR.md §1.6).
 std::once_flag g_signal_once;
+
+// ---- Clock offset (clock_offset.hpp) wire-protocol helpers ----------------
+// Kept local to agent.cpp rather than in clock_offset.hpp: the wire encoding
+// (JSON field names, ClockSource <-> string) is an Agent/CLOCKSYNC_TOPIC
+// protocol detail, not part of the pure estimator/consensus math.
+
+// §1.3 chain-safety bounds: reject a peer-source anchor more than this many
+// hops out, or whose own measurement is older than this.
+constexpr uint8_t CLOCK_MAX_HOPS = 2;
+constexpr auto CLOCK_MAX_ANCHOR_AGE = chrono::seconds(60);
+// §4.1: at most one ping reply per initiator per this interval, so a
+// misbehaving prober cannot turn CLOCKSYNC_TOPIC into a storm.
+constexpr int CLOCK_MIN_PROBE_INTERVAL_MS = 200;
+
+string clock_source_name(ClockSource s) {
+  switch (s) {
+  case ClockSource::Broker:
+    return "broker";
+  case ClockSource::Peer:
+    return "peer";
+  default:
+    return "none";
+  }
+}
+
+ClockSource clock_source_from_name(const string &s) {
+  if (s == "broker")
+    return ClockSource::Broker;
+  if (s == "peer")
+    return ClockSource::Peer;
+  return ClockSource::None;
+}
 
 } // namespace
 
@@ -315,6 +352,7 @@ void Agent::init(bool crypto, bool install_watchdog) {
   } else {
     throw AgentError("Invalid sub_topic type for " + _name);
   }
+  _configure_clock_sync();
   _time_step = chrono::milliseconds(cfg["time_step"].value_or(0));
   // Finer-grained override: if time_step_us is present, it wins over time_step.
   if (cfg["time_step_us"].type() != toml::node_type::none) {
@@ -363,9 +401,57 @@ void Agent::init(bool crypto, bool install_watchdog) {
   }
 
   _init_done = true;
+
+  // Initial clock-offset measurement (source A only -- source "peer" needs
+  // a connected socket that does not exist until connect(), so its first
+  // attempt happens at the top of _start_clock_thread() instead). Skipped
+  // when there is no broker to ask (local settings file, or "none").
+  if (_clock_source == ClockSource::Broker && !settings_are_local()) {
+    measure_clock_offset();
+  }
 }
 
 void Agent::load_settings() {}
+
+void Agent::_configure_clock_sync() {
+  auto all_cfg = _config["agents"];
+  auto cfg = _config[_name];
+
+  string default_source = all_cfg["clock_source"].value_or(string("broker"));
+  string source = cfg["clock_source"].value_or(default_source);
+  if (source == "peer") {
+    _clock_source = ClockSource::Peer;
+  } else if (source == "none") {
+    _clock_source = ClockSource::None;
+  } else {
+    _clock_source = ClockSource::Broker;
+  }
+
+  bool default_responder = all_cfg["clock_sync_responder"].value_or(true);
+  _clock_sync_responder =
+      cfg["clock_sync_responder"].value_or(default_responder);
+
+  int default_interval = all_cfg["clock_interval_ms"].value_or(0);
+  _clock_interval_ms = cfg["clock_interval_ms"].value_or(default_interval);
+
+  int default_announce = all_cfg["clock_announce_ms"].value_or(5000);
+  _clock_announce_ms = cfg["clock_announce_ms"].value_or(default_announce);
+
+  bool default_correction = all_cfg["clock_correction"].value_or(false);
+  _clock_correction = cfg["clock_correction"].value_or(default_correction);
+
+  // Deliberately NOT appended to _sub_topic here (unlike how
+  // enable_remote_control() appends "control"): _sub_topic is public,
+  // user-facing state -- sub_topic(), info()'s "Sub topics:" listing, and
+  // `mads doctor --graph`'s topology diagram all read it verbatim, and it
+  // must keep reflecting exactly what the settings file declared. The raw
+  // ZMQ subscription for CLOCKSYNC_TOPIC is issued separately by
+  // connect_sub() (see _clock_wants_sync()).
+}
+
+bool Agent::_clock_wants_sync() const {
+  return _clock_source != ClockSource::None || _clock_sync_responder;
+}
 
 Agent::~Agent() {
   shutdown();
@@ -398,6 +484,9 @@ void Agent::shutdown() {
 
   // 3. Join the I/O thread (bounded by its receive timeout)
   if (_io_thread.joinable()) _io_thread.join();
+  // 3a. Join the clock-sync thread (bounded by its own 200ms poll -- see
+  //     _start_clock_thread()); keep_running() already reflects _stopping.
+  if (_clock_thread.joinable()) _clock_thread.join();
 
   // 3b. Stop the socket monitors before the sockets they watch are closed
   //     below (SocketMonitor::stop() detaches while the socket is still
@@ -526,6 +615,22 @@ void Agent::info(ostream &out) {
       << endl;
   out << "  Timecode offset:  " << style::bold << _timecode_offset
       << " s" << style::reset << endl;
+  if (_clock_source != ClockSource::None) {
+    out << "  Clock domain:     " << style::bold << detail::clock_domain_id()
+        << style::reset << endl;
+    auto adopted = clock_offset();
+    if (adopted.valid) {
+      out << "  Clock offset:     " << style::bold
+          << (adopted.offset_us / 1000.0) << " ms" << style::reset
+          << " (" << clock_source_name(adopted.source) << ", "
+          << static_cast<int>(adopted.hops) << " hops, delay "
+          << (adopted.delay_us / 1000.0) << " ms, ref "
+          << adopted.clock_ref() << ")" << endl;
+    } else {
+      out << "  Clock offset:     " << style::dim << "not yet measured"
+          << style::reset << endl;
+    }
+  }
   if (!_attachment_path.empty()) {
     out << "  Attachment:       " << style::bold
         << _attachment_path.string() << style::reset << endl;
@@ -551,9 +656,21 @@ void Agent::connect(chrono::milliseconds delay) {
     connect_pub(delay);
     _connected = true;
   }
+  // Deliberately NOT forced open for a pure source agent with no declared
+  // sub_topic: doing so would silently turn every publish-only agent into
+  // a subscriber too, changing link_state()'s publish-only fallback and
+  // doubling its socket footprint fleet-wide just to answer clock pings it
+  // may never receive. Such an agent still measures/announces its own
+  // clock_source == "broker" reading (that REQ round-trip needs no
+  // subscriber); it just cannot itself answer pings or hear the domain's
+  // other measurements until it has a real reason to subscribe to
+  // something. See _clock_wants_sync().
   if (!_sub_topic.empty()) {
     connect_sub();
     _connected = true;
+  }
+  if (_clock_source != ClockSource::None) {
+    _start_clock_thread();
   }
 }
 
@@ -578,6 +695,7 @@ void Agent::disconnect() {
   _event_cv.notify_all();
   if (_startup_event_thread.joinable()) _startup_event_thread.join();
   if (_io_thread.joinable()) _io_thread.join();
+  if (_clock_thread.joinable()) _clock_thread.join();
 
   try {
     _publisher.disconnect(_pub_endpoint);
@@ -674,6 +792,19 @@ void Agent::publish(nlohmann::json payload, string topic) {
       offset = STARTUP_SHUTDOWN_DELAY_MS;
     }
   chrono::system_clock::time_point now = chrono::system_clock::now();
+  // [agents] clock_correction (opt-in, off by default): step the instant
+  // stamped below by this agent's adopted offset, so timestamp/timecode
+  // become broker-referenced instead of host-local. Never silent: a
+  // corrected message also carries clock_offset_us/clock_ref, so a
+  // consumer can recover the raw local time and see which measurement
+  // produced the correction.
+  ClockOffsetResult clock_adj;
+  if (_clock_correction) {
+    clock_adj = clock_offset();
+    if (clock_adj.valid) {
+      now += chrono::microseconds(clock_adj.offset_us);
+    }
+  }
   // Only stamp fields the caller has not already provided (REFACTOR.md §3.2).
   if (!payload.contains("agent_id")) {
     payload["agent_id"] = _agent_id;
@@ -686,6 +817,11 @@ void Agent::publish(nlohmann::json payload, string topic) {
   }
   if (!payload.contains("timecode")) {
     payload["timecode"] = timecode(now, timecode_fps) - (offset / 1000.0);
+  }
+  if (_clock_correction && clock_adj.valid &&
+      !payload.contains("clock_offset_us")) {
+    payload["clock_offset_us"] = clock_adj.offset_us;
+    payload["clock_ref"] = clock_adj.clock_ref();
   }
   if (topic.empty()) {
     topic = _pub_topic;
@@ -722,6 +858,13 @@ void Agent::publish(const char *payload, size_t len,
     throw AgentError("Agent not initialized");
   zmq::multipart_t message;
   chrono::system_clock::time_point now = chrono::system_clock::now();
+  ClockOffsetResult clock_adj;
+  if (_clock_correction) {
+    clock_adj = clock_offset();
+    if (clock_adj.valid) {
+      now += chrono::microseconds(clock_adj.offset_us);
+    }
+  }
   if (!meta.contains("timestamp"))
     meta["timestamp"]["$date"] = get_ISODate_time(now);
   if (!meta.contains("timecode"))
@@ -730,6 +873,11 @@ void Agent::publish(const char *payload, size_t len,
     meta["agent_id"] = _agent_id;
   if (!meta.contains("hostname"))
     meta["hostname"] = _hostname;
+  if (_clock_correction && clock_adj.valid &&
+      !meta.contains("clock_offset_us")) {
+    meta["clock_offset_us"] = clock_adj.offset_us;
+    meta["clock_ref"] = clock_adj.clock_ref();
+  }
   if (topic.empty())
     topic = _pub_topic;
   if (_wire_format == WireFormat::MsgPack) {
@@ -860,6 +1008,19 @@ message_type Agent::receive(bool dont_block) {
       remote_control(pl->text());
       return message_type::json;
     }
+    // CLOCKSYNC_TOPIC is reserved and unconditionally swallowed here (not
+    // gated on this agent's own clock_source/clock_sync_responder, unlike
+    // "control" above): an agent with sub_topic = [""] subscribes to every
+    // topic at the ZMQ level regardless of its own clock settings, so this
+    // must never leak clock-sync traffic into a caller's normal receive()
+    // loop (e.g. `mads feedback`/`mads logger`/`mads top`).
+    if (topic == CLOCKSYNC_TOPIC) {
+      try {
+        _handle_clocksync_message(pl->doc());
+      } catch (...) {
+      }
+      return message_type::none;
+    }
     auto lp = std::make_shared<LazyPayload>(std::move(*pl));
     std::lock_guard<std::mutex> lock(_message_state_mutex);
     _status[topic] = lp;
@@ -885,6 +1046,19 @@ message_type Agent::receive(bool dont_block) {
     if (_remote_controlled && topic == "control") {
       remote_control(pl->text());
       return message_type::json;
+    }
+    // CLOCKSYNC_TOPIC is reserved and unconditionally swallowed here (not
+    // gated on this agent's own clock_source/clock_sync_responder, unlike
+    // "control" above): an agent with sub_topic = [""] subscribes to every
+    // topic at the ZMQ level regardless of its own clock settings, so this
+    // must never leak clock-sync traffic into a caller's normal receive()
+    // loop (e.g. `mads feedback`/`mads logger`/`mads top`).
+    if (topic == CLOCKSYNC_TOPIC) {
+      try {
+        _handle_clocksync_message(pl->doc());
+      } catch (...) {
+      }
+      return message_type::none;
     }
     auto lp = std::make_shared<LazyPayload>(std::move(*pl));
     std::lock_guard<std::mutex> lock(_message_state_mutex);
@@ -1102,6 +1276,396 @@ void Agent::save_settings(const string path) {
   out.close();
 }
 
+/*
+  ____ _            _      ___   __  __          _
+ / ___| | ___   ___| | __ / _ \ / _|/ _|___  ___| |_
+| |   | |/ _ \ / __| |/ /| | | | |_| |_/ __|/ _ \ __|
+| |___| | (_) | (__|   < | |_| |  _|  _\__ \  __/ |_
+ \____|_|\___/ \___|_|\_\ \___/|_| |_| |___/\___|\__|
+
+*/
+
+string Agent::_clock_agent_identity() const {
+  if (!_agent_id.empty())
+    return _agent_id;
+#ifdef _WIN32
+  const auto pid = static_cast<long long>(_getpid());
+#else
+  const auto pid = static_cast<long long>(getpid());
+#endif
+  return _name + "@" + to_string(pid);
+}
+
+ClockOffsetResult Agent::_stamp_clock_result(ClockOffsetResult r,
+                                             ClockSource source,
+                                             uint8_t hops) {
+  r.source = source;
+  r.hops = hops;
+  r.origin_agent_id = _clock_agent_identity();
+  r.measured_at = chrono::steady_clock::now();
+  {
+    std::lock_guard<std::mutex> lock(_clock_mtx);
+    r.seq = ++_clock_seq;
+  }
+  return r;
+}
+
+void Agent::_announce_clock_offset(const ClockOffsetResult &r) {
+  if (!_init_done || !r.valid)
+    return;
+  nlohmann::json msg;
+  msg["type"] = "announce";
+  msg["agent_id"] = r.origin_agent_id;
+  msg["name"] = _name;
+  msg["hostname"] = _hostname;
+  msg["domain"] = detail::clock_domain_id();
+  msg["offset_us"] = r.offset_us;
+  msg["delay_us"] = r.delay_us;
+  msg["jitter_us"] = r.jitter_us;
+  msg["hops"] = r.hops;
+  msg["source"] = clock_source_name(r.source);
+  msg["seq"] = r.seq;
+  try {
+    publish(msg, CLOCKSYNC_TOPIC);
+  } catch (...) {
+    // A publish failure here (e.g. socket not connected yet) just means
+    // this announcement is skipped; the next periodic one will retry.
+  }
+}
+
+ClockOffsetResult Agent::measure_clock_offset(size_t samples,
+                                              int timeout_ms) {
+  if (settings_are_local())
+    return {}; // no broker settings endpoint to talk to
+
+  ClockOffsetEstimator estimator;
+  try {
+    zmq::socket_t socket(_context, zmq::socket_type::req);
+    setup_curve_on(socket);
+    // Same reasoning as query_broker(): drop any undelivered request on
+    // close rather than blocking context teardown on an unreachable broker.
+    socket.set(zmq::sockopt::linger, 0);
+    if (timeout_ms > 0) {
+      socket.set(zmq::sockopt::rcvtimeo, timeout_ms);
+      socket.set(zmq::sockopt::sndtimeo, timeout_ms);
+    }
+    socket.connect(_settings_uri);
+    for (size_t i = 0; i < samples; ++i) {
+      const auto t1_steady = chrono::steady_clock::now();
+      const auto t1_wall = chrono::system_clock::now();
+      zmq::multipart_t out, in;
+      out.addstr(LIB_VERSION);
+      out.addstr("clock");
+      if (!out.send(socket))
+        break;
+      if (!in.recv(socket))
+        break;
+      const auto t4_steady = chrono::steady_clock::now();
+      const auto t4_wall = chrono::system_clock::now();
+      // Fewer than 3 frames means an old broker that does not know "clock"
+      // (it falls into the generic "unexpected command" branch and echoes
+      // back a bare [LIB_VERSION]) -- stop and report whatever, if
+      // anything, earlier samples in this same call already gathered.
+      if (in.size() < 3)
+        break;
+      ClockSample s;
+      s.t1 = epoch_us(t1_wall);
+      s.t2 = std::stoll(in.at(1).to_string());
+      s.t3 = std::stoll(in.at(2).to_string());
+      s.t4 = epoch_us(t4_wall);
+      s.local_elapsed_us =
+          chrono::duration_cast<chrono::microseconds>(t4_steady - t1_steady)
+              .count();
+      estimator.add(s);
+    }
+    socket.disconnect(_settings_uri);
+    socket.close();
+  } catch (...) {
+    // Never throws (per the public contract): fall through with whatever
+    // the estimator collected before the failure, if anything.
+  }
+
+  auto best = estimator.best();
+  if (!best.valid)
+    return best; // unreachable broker, too old, or every round-trip failed
+
+  auto r = _stamp_clock_result(best, ClockSource::Broker, /*hops=*/0);
+  {
+    std::lock_guard<std::mutex> lock(_clock_mtx);
+    _own_clock_measurement = r;
+  }
+  _clock_consensus.record(detail::clock_domain_id(), r,
+                          chrono::steady_clock::now());
+  _announce_clock_offset(r);
+  return r;
+}
+
+vector<ClockPeerObservation>
+Agent::broadcast_clock_probe(chrono::milliseconds window) {
+  if (!_init_done || _pub_topic.empty())
+    return {};
+
+  {
+    std::lock_guard<std::mutex> lock(_clocksync_mtx);
+    _clocksync_pongs.clear();
+    _clocksync_probe_sent_at = chrono::steady_clock::now();
+  }
+  nlohmann::json ping;
+  ping["type"] = "ping";
+  ping["probe"] = _clock_agent_identity();
+  ping["target"] = ""; // broadcast: every responder on the bus answers
+  ping["seq"] = ++_clocksync_probe_seq;
+  ping["t1"] = epoch_us(chrono::system_clock::now());
+  try {
+    publish(ping, CLOCKSYNC_TOPIC);
+  } catch (...) {
+    return {};
+  }
+
+  // Poll receive() in short bursts rather than one blocking call: a single
+  // receive(dont_block=false) can wait up to _receive_timeout past the
+  // caller's requested window.
+  const auto deadline = chrono::steady_clock::now() + window;
+  while (chrono::steady_clock::now() < deadline) {
+    try {
+      receive(/*dont_block=*/true);
+    } catch (...) {
+    }
+    this_thread::sleep_for(chrono::milliseconds(5));
+  }
+
+  std::lock_guard<std::mutex> lock(_clocksync_mtx);
+  return _clocksync_pongs;
+}
+
+void Agent::_run_peer_measurement() {
+  auto peers = broadcast_clock_probe();
+  if (peers.empty())
+    return;
+
+  // §1.3 chain safety: an eligible anchor must have a real source of its
+  // own, be within the hop budget, and not be stale. Among the eligible
+  // ones, prefer fewer hops, then the smaller round-trip delay -- the same
+  // priorities ClockConsensus::adopted() uses.
+  const ClockPeerObservation *chosen = nullptr;
+  ClockOffsetResult chosen_theta;
+  const auto now = chrono::steady_clock::now();
+  for (auto const &p : peers) {
+    if (p.responder_adopted.source == ClockSource::None)
+      continue;
+    if (p.responder_adopted.hops >= CLOCK_MAX_HOPS)
+      continue;
+    if (now - p.responder_adopted.measured_at > CLOCK_MAX_ANCHOR_AGE)
+      continue;
+    auto theta = estimate(p.sample);
+    if (!chosen ||
+        p.responder_adopted.hops < chosen->responder_adopted.hops ||
+        (p.responder_adopted.hops == chosen->responder_adopted.hops &&
+         theta.delay_us < chosen_theta.delay_us)) {
+      chosen = &p;
+      chosen_theta = theta;
+    }
+  }
+  if (!chosen)
+    return;
+
+  auto r = _stamp_clock_result(chosen_theta, ClockSource::Peer,
+                               static_cast<uint8_t>(
+                                   chosen->responder_adopted.hops + 1));
+  // clock_offset(mine) = clock_offset(peer) + theta (§1.3 of the design):
+  // the peer's own broker-anchored offset composed with the pairwise
+  // exchange, not a bare pairwise measurement.
+  r.offset_us = chosen->responder_adopted.offset_us + chosen_theta.offset_us;
+  {
+    std::lock_guard<std::mutex> lock(_clock_mtx);
+    _own_clock_measurement = r;
+  }
+  _clock_consensus.record(detail::clock_domain_id(), r,
+                          chrono::steady_clock::now());
+  _announce_clock_offset(r);
+}
+
+ClockOffsetResult Agent::clock_offset() const {
+  const auto now = chrono::steady_clock::now();
+  auto adopted = _clock_consensus.adopted(detail::clock_domain_id(), now);
+  if (adopted.valid)
+    return adopted;
+  std::lock_guard<std::mutex> lock(_clock_mtx);
+  return _own_clock_measurement;
+}
+
+string Agent::clock_domain() const { return detail::clock_domain_id(); }
+
+void Agent::_handle_clocksync_message(const nlohmann::json &msg) {
+  if (!msg.is_object())
+    return;
+  const string type = msg.value("type", "");
+
+  if (type == "ping") {
+    if (!_clock_sync_responder)
+      return;
+    const string initiator = msg.value("probe", "");
+    if (initiator.empty())
+      return;
+    const string target = msg.value("target", "");
+    const string my_identity = _clock_agent_identity();
+    if (!target.empty() && target != my_identity)
+      return;
+
+    const auto now = chrono::steady_clock::now();
+    {
+      std::lock_guard<std::mutex> lock(_clocksync_mtx);
+      auto it = _clocksync_last_reply.find(initiator);
+      if (it != _clocksync_last_reply.end() &&
+          now - it->second <
+              chrono::milliseconds(CLOCK_MIN_PROBE_INTERVAL_MS)) {
+        return; // §4.1 rate limit: already answered this initiator recently
+      }
+      _clocksync_last_reply[initiator] = now;
+    }
+
+    nlohmann::json pong;
+    pong["type"] = "pong";
+    pong["probe"] = initiator;
+    pong["seq"] = msg.value("seq", static_cast<uint64_t>(0));
+    pong["responder"] = my_identity;
+    pong["name"] = _name;
+    pong["hostname"] = _hostname;
+    pong["domain"] = detail::clock_domain_id();
+    pong["t1"] = msg.value("t1", static_cast<int64_t>(0));
+    pong["t2"] = epoch_us(chrono::system_clock::now());
+    auto adopted = clock_offset();
+    if (adopted.valid) {
+      pong["clock_offset_us"] = adopted.offset_us;
+      pong["clock_ref"] = adopted.clock_ref();
+      pong["hops"] = adopted.hops;
+      pong["source"] = clock_source_name(adopted.source);
+      pong["anchor_age_us"] = chrono::duration_cast<chrono::microseconds>(
+                                  chrono::steady_clock::now() -
+                                  adopted.measured_at)
+                                  .count();
+    } else {
+      pong["source"] = clock_source_name(ClockSource::None);
+    }
+    pong["t3"] = epoch_us(chrono::system_clock::now());
+    try {
+      publish(pong, CLOCKSYNC_TOPIC);
+    } catch (...) {
+    }
+    return;
+  }
+
+  if (type == "announce") {
+    const string agent_id = msg.value("agent_id", "");
+    const string domain = msg.value("domain", "");
+    if (agent_id.empty() || domain.empty())
+      return;
+    ClockOffsetResult r;
+    r.offset_us = msg.value("offset_us", static_cast<int64_t>(0));
+    r.delay_us = msg.value("delay_us", static_cast<int64_t>(0));
+    r.jitter_us = msg.value("jitter_us", static_cast<int64_t>(0));
+    r.hops = static_cast<uint8_t>(msg.value("hops", 0));
+    r.source = clock_source_from_name(msg.value("source", string("none")));
+    r.origin_agent_id = agent_id;
+    r.seq = msg.value("seq", static_cast<uint64_t>(0));
+    r.valid = true;
+    _clock_consensus.record(domain, r, chrono::steady_clock::now());
+    return;
+  }
+
+  if (type == "pong") {
+    const string probe = msg.value("probe", "");
+    if (probe.empty() || probe != _clock_agent_identity())
+      return; // not addressed to this agent's own outstanding probe
+
+    ClockPeerObservation obs;
+    obs.responder_agent_id = msg.value("responder", "");
+    obs.responder_name = msg.value("name", "");
+    obs.responder_hostname = msg.value("hostname", "");
+    obs.responder_domain = msg.value("domain", "");
+    obs.sample.t1 = msg.value("t1", static_cast<int64_t>(0));
+    obs.sample.t2 = msg.value("t2", static_cast<int64_t>(0));
+    obs.sample.t3 = msg.value("t3", static_cast<int64_t>(0));
+    obs.sample.t4 = epoch_us(chrono::system_clock::now());
+    if (msg.contains("clock_offset_us")) {
+      obs.responder_adopted.valid = true;
+      obs.responder_adopted.offset_us =
+          msg.value("clock_offset_us", static_cast<int64_t>(0));
+      obs.responder_adopted.hops =
+          static_cast<uint8_t>(msg.value("hops", 0));
+      obs.responder_adopted.source =
+          clock_source_from_name(msg.value("source", string("none")));
+      obs.responder_adopted.origin_agent_id = obs.responder_agent_id;
+      const int64_t age_us =
+          msg.value("anchor_age_us", static_cast<int64_t>(0));
+      obs.responder_adopted.measured_at =
+          chrono::steady_clock::now() - chrono::microseconds(age_us);
+    } else {
+      obs.responder_adopted.source = ClockSource::None;
+    }
+
+    std::lock_guard<std::mutex> lock(_clocksync_mtx);
+    // local_elapsed_us needs THIS agent's own steady_clock send instant,
+    // which only broadcast_clock_probe() (the only caller that ever sets
+    // an outstanding probe) knows.
+    if (_clocksync_probe_sent_at != chrono::steady_clock::time_point{}) {
+      obs.sample.local_elapsed_us =
+          chrono::duration_cast<chrono::microseconds>(
+              chrono::steady_clock::now() - _clocksync_probe_sent_at)
+              .count();
+    }
+    _clocksync_pongs.push_back(std::move(obs));
+    return;
+  }
+}
+
+void Agent::_start_clock_thread() {
+  if (_clock_thread.joinable())
+    return;
+  _clock_thread = thread([this]() {
+    // A "peer"-source agent takes its very first measurement here: init()
+    // could not attempt it (no connected socket exists that early), and
+    // this thread only ever starts from connect(), once one does.
+    if (_clock_source == ClockSource::Peer) {
+      _run_peer_measurement();
+    }
+    auto last_announce = chrono::steady_clock::time_point::min();
+    auto last_measure = chrono::steady_clock::now();
+    while (keep_running()) {
+      const auto now = chrono::steady_clock::now();
+      if (_clock_announce_ms > 0 &&
+          (last_announce == chrono::steady_clock::time_point::min() ||
+           now - last_announce >=
+               chrono::milliseconds(_clock_announce_ms))) {
+        auto current = clock_offset();
+        if (current.valid) {
+          _announce_clock_offset(current);
+        }
+        last_announce = now;
+      }
+      if (_clock_interval_ms > 0 &&
+          now - last_measure >= chrono::milliseconds(_clock_interval_ms)) {
+        // §2.3: only the domain's current winner (or nobody yet) re-
+        // measures, so N agents on one host cost one measurement per
+        // interval, not N.
+        const string domain = detail::clock_domain_id();
+        auto winner = _clock_consensus.adopted(domain, now);
+        if (!winner.valid ||
+            _clock_consensus.is_winner(domain, _clock_agent_identity(),
+                                       now)) {
+          if (_clock_source == ClockSource::Broker) {
+            measure_clock_offset();
+          } else if (_clock_source == ClockSource::Peer) {
+            _run_peer_measurement();
+          }
+        }
+        last_measure = now;
+      }
+      this_thread::sleep_for(chrono::milliseconds(200));
+    }
+  });
+}
+
 void Agent::connect_pub(chrono::milliseconds delay) {
   // Must be attached before connect()/bind(), or libzmq may fire (and this
   // miss) the very first lifecycle event. attach() rather than start(): the
@@ -1190,6 +1754,14 @@ void Agent::connect_sub() {
       _subscriber.set(zmq::sockopt::subscribe, t);
     }
   }
+  // CLOCKSYNC_TOPIC (§"Clock offset"): a ZMQ-level subscribe issued
+  // separately from the loop above so it never appears in _sub_topic/
+  // sub_topic() -- see _configure_clock_sync()'s comment. Matched in
+  // _topic_matches_subscription() under the same _clock_wants_sync() gate,
+  // and always intercepted (never surfaced to the app) inside receive().
+  if (_clock_wants_sync()) {
+    _subscriber.set(zmq::sockopt::subscribe, CLOCKSYNC_TOPIC);
+  }
   // Hand _subscriber over to the I/O thread iff LKV delivery and/or threaded
   // remote control need it consumed off the application thread. Published
   // only now, with release ordering, so the thread cannot start polling a
@@ -1257,8 +1829,37 @@ void Agent::_start_io_thread() {
         if (!_wildcard_sub_topic.empty() && !_topic_matches_subscription(topic))
           continue;
 
-        // "control" messages are a distinct channel: dispatched to
-        // remote_control(), never also stored as an LKV value.
+        // "control" and CLOCKSYNC_TOPIC messages are distinct channels,
+        // dispatched below, never also stored as an LKV value. This is the
+        // path an LKV/threaded-remote-control agent's clocksync traffic
+        // takes -- its own receive()/receive_raw() never touches the
+        // subscriber socket directly (see _io_reads_subscriber), so
+        // without this branch such an agent could neither answer pings nor
+        // hear domain announcements.
+        if (topic == CLOCKSYNC_TOPIC) {
+          if (msg.size() < 2) continue;
+          string j;
+          bool ok = false;
+          WireHeader hdr;
+          if (parse_wire_header(msg.at(1).to_string(), hdr) &&
+              !hdr.has_blob && msg.size() >= 3) {
+            ok = decode_to_json_text(msg.at(2).to_string(), hdr.format,
+                                     hdr.compression, j);
+          } else if (msg.size() == 2) {
+            string payload = msg.at(1).to_string();
+            ok = snappy::Uncompress(payload.data(), payload.size(), &j);
+          }
+          if (ok) {
+            try {
+              _handle_clocksync_message(nlohmann::json::parse(j));
+            } catch (...) {
+            }
+          } else {
+            _dropped_messages++;
+          }
+          continue;
+        }
+
         if (_remote_controlled && topic == "control") {
           if (msg.size() < 2) continue;
           string j;
@@ -1295,6 +1896,13 @@ void Agent::_start_io_thread() {
 }
 
 bool Agent::_topic_matches_subscription(const string &topic) const {
+  // CLOCKSYNC_TOPIC is subscribed at the ZMQ layer outside of _sub_topic
+  // (connect_sub()), so it needs the same carve-out here: otherwise an
+  // agent with an MQTT wildcard sub_topic entry (P2) would have this
+  // wildcard-only filter silently drop every clock-sync frame the raw
+  // subscribe just asked for.
+  if (topic == CLOCKSYNC_TOPIC && _clock_wants_sync())
+    return true;
   // One rule for both entry kinds, shared verbatim with `mads doctor --graph`
   // (see Mads::subscription_match()): literal entries keep the byte-prefix
   // acceptance the raw ZMQ SUBSCRIBE frame already applies, wildcard entries
