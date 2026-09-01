@@ -2,6 +2,38 @@
 
 This is a bugfix release. Expect it to be fully compatible with previous `v2.4.x` releases.
 
+## New features
+
+- **Agents can measure their clock offset from the broker host, and each
+  other.** Nothing previously told you how far apart two hosts' clocks were;
+  the closest thing, `_timecode_offset`, is a single RTT-biased sample
+  quantised to a 40 ms frame and stays exactly as it was. `Agent::
+  measure_clock_offset()` does a real NTP-style four-timestamp exchange
+  against a new broker `clock` command on the existing settings socket
+  (`[agents] clock_source = "broker"`, the default), separating offset from
+  delay and reporting both plus jitter. `clock_source = "peer"` measures the
+  same quantity over a ping/pong on a new reserved `clocksync` topic instead,
+  for an agent that cannot reach the settings socket (behind `mads-bridge`/
+  `mads-federate`) or wants the offset measured along the data path itself;
+  each pong carries the responder's own already-adopted offset, so a peer
+  measurement composes onto the broker-anchored value rather than being an
+  unrelated number. Several agents sharing one host's clock
+  (`Mads::detail::clock_domain_id()`: the kernel boot id on Linux, hostname
+  elsewhere) converge on one identical adopted offset via periodic
+  announcements and a deterministic min-delay adoption rule
+  (`Mads::ClockConsensus`), so N agents on one host cost one measurement per
+  re-measure interval, not N. `[agents] clock_correction` (opt-in, off by
+  default) steps `publish()`'s stamped `timestamp`/`timecode` by the adopted
+  offset and tags the payload with `clock_offset_us`/`clock_ref`, so a
+  corrected message is never silently indistinguishable from an uncorrected
+  one. `mads top` shows a passive per-host skew column fed from existing
+  traffic (no protocol at all), and `mads top --probe` turns it into an
+  active fleet-wide clock-offset table grouped by clock domain. New
+  `[agents]` keys: `clock_source`, `clock_sync_responder` (default `true`),
+  `clock_interval_ms`, `clock_announce_ms`, `clock_correction`. `clocksync`
+  joins `control`/`agent_event` as a reserved topic name, excluded from
+  `mads-record`/`mads-federate` like they already are.
+
 ## Fixes
 
 - **`mads-command` (and any other one-shot publisher) reaches the fleet

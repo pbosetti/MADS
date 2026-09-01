@@ -10,6 +10,7 @@
   [**\-b, \-\-broker** *URI*]
   [**\-\-sample-rate** *seconds*]
   [**\-\-window** *seconds*]
+  [**\-\-probe**]
   [**\-s, \-\-settings** *arg*]
   [**\-n, \-\-name** *name*]
   [**\-i, \-\-agent-id** *id*]
@@ -53,6 +54,15 @@ broker is gone -- which otherwise look identical:
 **link: ?**
 :  Nothing observed yet -- still connecting.
 
+Below the topic table, a **Host clock skew** section lists, per hostname
+seen in traffic, the minimum of (this machine's receive time - the
+message's own `timestamp`) observed in the trailing **\-\-window** -- no
+extra protocol, since every published message already carries
+`timestamp`/`hostname`. Labelled *skew*, not *offset*: it is a tight upper
+bound on offset plus one-way network delay, not a clean measurement, and
+disappears once no traffic from that host is seen within the window. See
+**\-\-probe** below for a real measurement.
+
 Press **q** (or Ctrl-C) to quit.
 
 # OPTIONS
@@ -72,6 +82,15 @@ Press **q** (or Ctrl-C) to quit.
 :  Trailing time window used to average messages/second and bytes/second per topic. Default **5.0**. A
    larger window smooths bursty traffic; a smaller one reacts faster to changes.
 
+**\-\-probe**
+:  Replace the topic-activity table with an active clock-offset probe: every **\-\-sample-rate**
+   seconds, broadcast a clock-sync ping (**Agent::broadcast_clock_probe()**) and show every
+   responder's currently adopted offset, delay and source, grouped by clock domain -- the agents
+   sharing one clock domain (the same machine, or containers on one kernel) should always show the
+   same offset and the same **ref**; a mismatch that does not resolve itself is worth investigating.
+   Unlike the default read-only mode, **\-\-probe** needs a connected publisher, so it is the one case
+   where **mads-top** sends anything onto the bus. See "CLOCK OFFSET" below.
+
 **\-s**, **\-\-settings** *URI*
 :  Path to the settings file (ini format), or a broker settings URI (**tcp://host:port**). See
    **mads-echo**(1)'s "Two ways to reach a broker" for how this interacts with the zero-config default.
@@ -80,8 +99,9 @@ Press **q** (or Ctrl-C) to quit.
 :  Agent/section name to use with **\-\-settings** (default **top**).
 
 **\-i**, **\-\-agent-id** *id*
-:  Agent ID to add to outgoing JSON frames. Unused by **mads-top** itself (it never publishes) but
-   accepted for consistency with other **mads-\*** executables.
+:  Agent ID to add to outgoing JSON frames. Unused in the default read-only mode (**mads-top** never
+   publishes there) but accepted for consistency with other **mads-\*** executables; under **\-\-probe**
+   it also names this agent's own probes on the bus.
 
 **\-S**, **\-\-save-settings** *filename.ini*
 :  Save the settings (loaded via **\-\-settings**) to the given file (ini format), then exit.
@@ -124,6 +144,24 @@ window:
 ```
 mads-top --broker tcp://plant-broker.local:9091 --window 10 'sensors/#'
 ```
+
+Check whether every agent in the fleet agrees on its clock offset:
+
+```
+mads-top --probe
+```
+
+# CLOCK OFFSET
+
+**\-\-probe** is the interactive front end to the same clock-offset measurement described in
+**mads-broker**(1)'s "CLOCK OFFSET" section and the **[agents] clock_\*** keys documented in
+**mads.ini**. Each redraw shows this agent's own adopted offset first, then every responder heard
+within the probe window grouped by clock domain: **OFFSET** (this responder's currently adopted
+offset, i.e. what it would apply if **clock_correction** were on), the **source** that produced it
+(**broker** or **peer**), hop count, and the round-trip **delay** of this particular probe (expect an
+order of magnitude more than a **clock_source = "broker"** exchange, since a bus round trip crosses
+the broker's proxy twice). A responder that never measured its own offset shows **?** rather than a
+number.
 
 # SEE ALSO
 

@@ -171,6 +171,23 @@ A bag file is a small, bespoke binary format (`src/bag.hpp`) — not MCAP — th
 
 ---
 
+## Clock offset
+
+Every agent can measure how far its own clock is from the broker host's — useful for ordering events across machines, or just to notice a drifting Pi. Two independent mechanisms feed one number (`Agent::clock_offset()`), chosen by `[agents] clock_source`:
+
+- **`"broker"`** (the default) — an NTP-style four-timestamp exchange against a `clock` command on the existing settings socket. One REQ/REP round trip, most accurate.
+- **`"peer"`** — a ping/pong over a reserved `clocksync` topic on the bus, for an agent that cannot reach the settings socket (behind `mads-bridge`/`mads-federate`) or wants the offset measured along the actual data path. Each pong carries the responder's own already-adopted offset, so the result composes onto the broker-anchored value rather than being an unrelated measurement.
+
+Several agents sharing one host's clock converge on one identical offset — no per-agent disagreement, no election — by announcing their measurements and deterministically adopting the lowest-delay one heard for that clock domain (the kernel boot id on Linux, so containers sharing a kernel are recognized as one domain).
+
+```sh
+mads top --probe        # live, fleet-wide table of every agent's adopted offset, by clock domain
+```
+
+Offsets are reported, never silently applied: turn on `[agents] clock_correction` to have `publish()` step `timestamp`/`timecode` by the measured offset, and every corrected message carries `clock_offset_us`/`clock_ref` alongside it so the raw local time is never lost. See `man mads-broker` and `man mads-top`.
+
+---
+
 ## Extending MADS
 
 ### 1) Plugins — the fast path

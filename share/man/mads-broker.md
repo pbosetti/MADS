@@ -150,6 +150,23 @@ unedited settings file behaves exactly as before they existed.
    `fs.nr_open`. `mads doctor` reports the limit in force and whether it
    leaves room for the fleet.
 
+# CLOCK OFFSET
+
+The broker answers a `clock` command on the settings socket (the same
+REQ/REP endpoint `-s`/`--settings` uses), an NTP-style four-timestamp
+exchange that lets an agent measure how far its own clock is from the
+broker host's -- see `Mads::Agent::measure_clock_offset()`. This is purely
+additive and stateless on the broker side: no configuration is needed here,
+and an older broker that predates this command is detected gracefully by
+the agent (it falls into the ordinary "unexpected command" reply and the
+agent degrades to an unmeasured offset rather than erroring).
+
+The related agent-side settings (`clock_source`, `clock_sync_responder`,
+`clock_interval_ms`, `clock_announce_ms`, `clock_correction`) live under
+`[agents]` in the settings file the broker serves; see the comments in the
+shipped `mads.ini` and `mads-top`(1)'s `--probe` flag for how to see the
+measured offsets across a fleet.
+
 # BUGS
 
 The upstream bug tracker can be found at https://github.com/pbosetti/MADS/issues.
