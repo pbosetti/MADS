@@ -50,8 +50,15 @@ bool relay_one(Agent &from, Agent &to, const string &relay_id) {
     // Administrative channels are never federated automatically: relaying
     // remote-control or agent-lifecycle traffic across networks is rarely
     // intended and can have surprising effects (e.g. a shutdown command
-    // meant for one network reaching agents on the other).
-    if (topic == "control" || topic == METADATA_TOPIC)
+    // meant for one network reaching agents on the other). CLOCKSYNC_TOPIC
+    // is already unconditionally swallowed inside receive() (never
+    // returned as message_type::json in the first place, regardless of
+    // this Agent's own clock settings), so this check is redundant for it
+    // today -- kept anyway as an explicit, load-bearing statement of
+    // intent: relaying it would let agents on one broker anchor their
+    // clock_offset() on a different broker's reference entirely.
+    if (topic == "control" || topic == METADATA_TOPIC ||
+        topic == CLOCKSYNC_TOPIC)
       return false;
     if (!payload.is_object())
       return false;

@@ -11,11 +11,11 @@ Agent::receive_raw_message(), so JSON payloads are never re-parsed/
 re-serialized and blob bytes are copied exactly once, matching the wire
 byte-for-byte (src/bag.hpp documents the on-disk format).
 
-The administrative "control" and "agent_event" topics are never recorded,
-even under a catch-all sub_topic (e.g. sub_topic = [""]), mirroring
+The administrative "control", "agent_event" and "clocksync" topics are never
+recorded, even under a catch-all sub_topic (e.g. sub_topic = [""]), mirroring
 mads-federate's own rationale for excluding them from automatic relaying:
-capturing (and later replaying) a remote-control command such as
-"shutdown" would be a footgun, not a feature.
+capturing (and later replaying) a remote-control command such as "shutdown",
+or a clock-sync ping/pong/announce, would be a footgun, not a feature.
 
 Author(s): Paolo Bosetti
 */
@@ -91,7 +91,12 @@ int main(int argc, char *argv[]) {
     if (!recorder.receive_raw_message(topic, parts, true))
       return 0ms;
     // Administrative channels are never recorded: see file header.
-    if (topic == "control" || topic == METADATA_TOPIC)
+    // CLOCKSYNC_TOPIC in particular needs this explicit check --
+    // receive_raw_message() bypasses receive()'s own clock-sync
+    // interception (Agent::_handle_clocksync_message()), so without it
+    // every ping/pong/announce would land in the bag file.
+    if (topic == "control" || topic == METADATA_TOPIC ||
+        topic == CLOCKSYNC_TOPIC)
       return 0ms;
 
     int64_t now_ns = chrono::duration_cast<chrono::nanoseconds>(
