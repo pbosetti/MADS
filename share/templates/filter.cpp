@@ -37,13 +37,16 @@ public:
   // instead of the constructor.
   using {{parent}}::{{parent}}; // inherit constructors
 
-  // Typically, no need to change this.
-  // On multi-driver plugins, the kind() is used to select the settings section 
-  // in the agent's configuration file.
+  // Typically, no need to change this: PLUGIN_NAME is defined by the build
+  // system from the target name, and the host looks the driver up by that name.
+  // Since protocol P8 kind() no longer selects the settings section (the agent
+  // name does); it is checked against the driver name and a mismatch is a
+  // startup warning.
   string kind() override { return PLUGIN_NAME; }
 
   // Implement the actual functionality here
-  // Return types:
+  // Return types (full per-host semantics:
+  //  .claude/skills/mads-plugin/reference/return-types.md):
   // return_type::success: processing is valid, go to process
   // return_type::retry: skip processing go to next loop
   // return_type::warning: content of _error is tracked with register_event

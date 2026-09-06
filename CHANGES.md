@@ -34,6 +34,27 @@ This is a bugfix release. Expect it to be fully compatible with previous `v2.4.x
   joins `control`/`agent_event` as a reserved topic name, excluded from
   `mads-record`/`mads-federate` like they already are.
 
+- **`mads plugin` scaffolds an agent skill alongside the plugin sources.** A
+  plugin author has the plugin API -- three small headers, well commented --
+  but not the MADS sources, so neither they nor an AI assistant helping them
+  can see what the *host* does with what the plugin returns: that a source's
+  `return_type::error` publishes nothing on the data topic and surfaces on
+  `agent_event` instead, that `retry` is the normal idle path and discards
+  `next_loop_duration`, that `mads worker` treats every non-`success` value as
+  an error and ignores `out["topic"]`, that `set_params()` runs once after
+  `connect()` and is the only place setup belongs, or that since P8 the
+  settings section is the agent name and `kind()` is merely checked against the
+  driver name. `mads plugin` now writes `.claude/skills/mads-plugin/` (SKILL.md
+  plus reference files on the lifecycle, the full return-type matrix per host,
+  settings injection, frames/topics/blobs, testing, deployment and migration)
+  and an `AGENTS.md` pointing at it, for C++ and Rust plugins alike. The skill
+  is installed with MADS under `share/skills/`, stamped with the MADS version
+  and protocol numbers at scaffolding time, refreshed by `mads plugin --update`
+  so it never documents a protocol the project no longer targets, and skipped
+  with `--no-skill`. `share/plugin_deps.json` gained `plugin_min_protocol`,
+  which a unit test pins to `MADS_PLUGIN_MIN_PROTOCOL` in the loader so the
+  skill cannot drift from the code it describes.
+
 ## Fixes
 
 - **`mads-command` (and any other one-shot publisher) reaches the fleet

@@ -1,6 +1,7 @@
 {
-  "_comment": "Single source of truth for the dependency versions a freshly scaffolded C++ plugin pins to. `mads plugin` fills the template CMakeLists.txt placeholders from here, and `mads plugin --update` reads plugin_protocol/plugin_git_tag as the default migration target. Keep every pin consistent with the newest file in share/plugin_migrations/ (its `to`, `cmake.plugin_git_tag`, `cmake.pugg_git_tag` and the json version in its cmake replacements), so that a freshly scaffolded plugin and a plugin migrated up to the same protocol end up on identical dependencies.",
+  "_comment": "Single source of truth for the dependency versions a freshly scaffolded C++ plugin pins to. `mads plugin` fills the template CMakeLists.txt placeholders from here, and `mads plugin --update` reads plugin_protocol/plugin_git_tag as the default migration target. plugin_min_protocol mirrors MADS_PLUGIN_MIN_PROTOCOL in src/main/plugin_loader.cpp (the oldest protocol a host still loads) and is stamped into the mads-plugin agent skill. Keep every pin consistent with the newest file in share/plugin_migrations/ (its `to`, `cmake.plugin_git_tag`, `cmake.pugg_git_tag` and the json version in its cmake replacements), so that a freshly scaffolded plugin and a plugin migrated up to the same protocol end up on identical dependencies.",
   "plugin_protocol": 8,
+  "plugin_min_protocol": 7,
   "plugin_git_tag": "v2.4-P8",
   "pugg_git_tag": "1.2.0",
   "json_version": "v3.12.0"

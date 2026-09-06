@@ -509,6 +509,14 @@ install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/templates
   COMPONENT MadsApps
 )
 
+# Agent skill scaffolded into new plugin projects by `mads plugin` (and
+# refreshed by `mads plugin --update`): the runtime context a plugin author's
+# AI assistant needs but cannot read out of the plugin API.
+install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/skills
+  DESTINATION share
+  COMPONENT MadsApps
+)
+
 # Data-driven plugin migration: definitions consumed by `mads plugin --update`,
 # plus the dependency manifest that pins versions for freshly scaffolded plugins.
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/plugin_migrations

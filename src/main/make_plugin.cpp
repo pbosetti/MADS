@@ -17,6 +17,7 @@ Plugin maker: creates stub files for developing a new MADS plugin
 #include "../exec_path.hpp"
 #include "../mads.hpp"
 #include "plugin_migrate.hpp"
+#include "plugin_skill.hpp"
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -48,6 +49,34 @@ static string lowercase(string str) {
 static string ucfirst(string str) {
   str[0] = toupper(str[0]);
   return str;
+}
+
+// Dependency pins for a freshly scaffolded plugin come from the shared manifest
+// (share/plugin_deps.json), the single source of truth kept in sync with the
+// newest migration step. The defaults below are the fallback for an install
+// with a missing manifest; keep them mirroring the manifest, or a scaffolded
+// plugin silently ends up one protocol behind.
+static json plugin_deps(string const &manifest_path) {
+  json deps = {{"plugin_protocol", 8},
+               {"plugin_min_protocol", 7},
+               {"plugin_git_tag", "v2.4-P8"},
+               {"pugg_git_tag", "1.2.0"},
+               {"json_version", "v3.12.0"}};
+  ifstream mf(manifest_path);
+  if (mf) {
+    try {
+      json manifest = json::parse(mf);
+      for (auto const &key : {"plugin_protocol", "plugin_min_protocol",
+                              "plugin_git_tag", "pugg_git_tag",
+                              "json_version"}) {
+        if (manifest.contains(key))
+          deps[key] = manifest[key];
+      }
+    } catch (...) {
+      // keep defaults on malformed manifest
+    }
+  }
+  return deps;
 }
 
 
@@ -86,6 +115,7 @@ int main(int argc, char **argv) {
     ("o,overwrite", "Overwrite existing files")
     ("r,rust", "Create a Rust plugin (uses mads-rsource/rfilter/rsink loader)")
     ("s,datastore", "Enable Datastore class for persistency (C++ only)")
+    ("no-skill", "Do not write the mads-plugin agent skill and AGENTS.md")
     ("u,update", "Migrate an existing plugin (dir from --dir or positional) to the current protocol")
     ("dry-run", "With --update: show the changes without writing any file")
     ("no-check", "With --update: skip the post-migration compile check")
@@ -127,8 +157,22 @@ int main(int argc, char **argv) {
 
     filesystem::path migrations_dir = Mads::exec_dir("../share/plugin_migrations/");
     filesystem::path deps_manifest = Mads::exec_dir("../share/plugin_deps.json");
-    return Mads::PluginMigrate::run(project_dir, migrations_dir, deps_manifest,
-                                    mopts);
+    int rc = Mads::PluginMigrate::run(project_dir, migrations_dir, deps_manifest,
+                                      mopts);
+
+    // Refresh the agent skill so its documented protocol matches the one the
+    // project now targets. Only on a real (non-dry) run, and never when the
+    // migration itself failed structurally.
+    if (rc != 1 && !mopts.dry_run && options_parsed.count("no-skill") == 0) {
+      json sdata = plugin_deps(deps_manifest.string());
+      string ver = Mads::version();
+      sdata["mads_version"] = ver.rfind('v', 0) == 0 ? ver.substr(1) : ver;
+      cout << endl << style::bold << "Refreshing agent skill:" << style::reset
+           << endl;
+      Mads::PluginSkill::install(Mads::exec_dir("../share/skills/mads-plugin/"),
+                                 project_dir, sdata, true);
+    }
+    return rc;
   }
 
   data["type"] = "source";
@@ -211,37 +255,19 @@ int main(int argc, char **argv) {
     data["hostname"] = hostname;
   }
 
-  // Dependency pins for the generated CMakeLists.txt come from the shared
-  // manifest (share/plugin_deps.json) — the single source of truth kept in sync
-  // with the newest migration step. Fall back to sane defaults if it is missing;
-  // keep these mirroring the manifest, or an install with a missing manifest
-  // silently scaffolds plugins one protocol behind.
-  data["plugin_git_tag"] = "v2.4-P8";
-  data["pugg_git_tag"] = "1.2.0";
-  data["json_version"] = "v3.12.0";
-  {
-    ifstream mf(Mads::exec_dir("../share/plugin_deps.json"));
-    if (mf) {
-      try {
-        json manifest = json::parse(mf);
-        if (manifest.contains("plugin_git_tag"))
-          data["plugin_git_tag"] = manifest["plugin_git_tag"];
-        if (manifest.contains("pugg_git_tag"))
-          data["pugg_git_tag"] = manifest["pugg_git_tag"];
-        if (manifest.contains("json_version"))
-          data["json_version"] = manifest["json_version"];
-      } catch (...) {
-        // keep defaults on malformed manifest
-      }
-    }
-  }
+  // Dependency pins for the generated CMakeLists.txt, and the protocol numbers
+  // stamped into the agent skill, come from the shared manifest.
+  data.merge_patch(plugin_deps(Mads::exec_dir("../share/plugin_deps.json")));
 
   bool rust = options_parsed.count("rust") > 0;
+  data["rust"] = rust;
 
   if (rust && options_parsed.count("datastore") > 0) {
     cerr << fg::yellow << "Warning: --datastore is not applicable to Rust plugins, ignoring"
          << fg::reset << endl;
   }
+
+  string build_hint, run_hint;
 
   filesystem::create_directory(dir);
   filesystem::create_directory(dir + "src/");
@@ -289,11 +315,9 @@ int main(int argc, char **argv) {
       cout << fg::green << "created" << fg::reset << endl;
     }
 
-    cout << "To build: " << style::bold << "cd " << dir
-         << " && cargo build --release" << style::reset << endl;
-    cout << "To run:   " << style::bold << string(data["rust_loader"])
-         << " target/release/lib" << string(data["name"]) << ".so"
-         << style::reset << endl;
+    build_hint = "cd " + dir + " && cargo build --release";
+    run_hint = string(data["rust_loader"]) + " target/release/lib" +
+               string(data["name"]) + ".so";
 
   } else {
     // ── C++ plugin ───────────────────────────────────────────────────────────
@@ -331,9 +355,30 @@ int main(int argc, char **argv) {
       cout << fg::green << "created" << fg::reset << endl;
     }
 
-    cout << "To build: " << style::bold << "cd " << dir
-         << " && cmake -Bbuild && cmake --build build" << style::reset << endl;
+    build_hint = "cd " + dir + " && cmake -Bbuild && cmake --build build";
   }
+
+  // Agent documentation: a project-local AGENTS.md pointing at the mads-plugin
+  // skill, which carries the runtime context (call order, return-type effects,
+  // settings injection) that a plugin author's assistant cannot infer from the
+  // plugin API alone. Refreshed by `mads plugin --update`.
+  if (options_parsed.count("no-skill") == 0) {
+    string agents_file = dir + "AGENTS.md";
+    cout << "==> " << style::bold << agents_file << style::reset << ": ";
+    if (!overwrite && filesystem::exists(agents_file)) {
+      cout << fg::red << "already exists, skipped; use -o to overwrite"
+           << fg::reset << endl;
+    } else {
+      env_md.write("AGENTS.md", data, "AGENTS.md");
+      cout << fg::green << "created" << fg::reset << endl;
+    }
+    Mads::PluginSkill::install(Mads::exec_dir("../share/skills/mads-plugin/"),
+                               dir, data, overwrite);
+  }
+
+  cout << "To build: " << style::bold << build_hint << style::reset << endl;
+  if (!run_hint.empty())
+    cout << "To run:   " << style::bold << run_hint << style::reset << endl;
 
   return 0;
 }

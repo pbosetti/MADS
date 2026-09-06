@@ -12,6 +12,7 @@
   [**\-o, \-\-overwrite**]
   [**\-r, \-\-rust**]
   [**\-s, \-\-datastore**]
+  [**\-\-no-skill**]
   [**\-v, \-\-version**]
   [**\-h, \-\-help**]
   [*plugin name*]
@@ -22,6 +23,7 @@
   [**\-\-no-check**]
   [**\-\-from** *protocol*]
   [**\-\-to** *protocol*]
+  [**\-\-no-skill**]
   [*plugin directory*]
 
 # DESCRIPTION
@@ -46,6 +48,19 @@ and export a single C ABI symbol via the **export_*_plugin!** macro. The
 library is loaded by the dedicated Rust loaders **mads-rsource**,
 **mads-rfilter**, or **mads-rsink**, which mirror the behaviour of their C++
 counterparts. No C++ toolchain is required to write or build a Rust plugin.
+
+## Agent documentation
+
+Both C++ and Rust projects are scaffolded with an **AGENTS.md** and a
+**.claude/skills/mads-plugin/** directory holding the **mads-plugin** skill:
+the runtime context a plugin author (or an AI coding assistant working with
+them) cannot infer from the plugin API alone -- the order in which the host
+agent calls each method, what every **return_type** does in each host, how INI
+settings reach **set_params()**, topic and blob handling, testing, deployment
+and protocol migration. **SKILL.md** is stamped with the MADS version and the
+plugin protocol numbers it documents; **\-\-update** rewrites it so it never
+describes a protocol the project no longer targets. Use **\-\-no-skill** to
+skip both files.
 
 ## Migrating an existing plugin
 
@@ -103,6 +118,10 @@ crate version in **Cargo.toml** rather than the **\-P**\ *N* tag.
 **\-s**, **\-\-datastore**
 :  Enable datastore support in the generated C++ plugin (default: false).
    Not applicable to Rust plugins.
+
+**\-\-no-skill**
+:  Do not write **AGENTS.md** and **.claude/skills/mads-plugin/**. With
+   **\-\-update**, do not refresh an existing copy either.
 
 **\-u**, **\-\-update**
 :  Migrate an existing C++ plugin instead of scaffolding a new one. The plugin
@@ -169,6 +188,8 @@ The upstream bug tracker can be found at https://github.com/pbosetti/MADS/issues
 **/usr/local/share/templates**: directory containing C++ and Rust plugin templates.
 
 **/usr/local/share/rust/mads-plugin**: source of the **mads-plugin** Rust crate.
+
+**/usr/local/share/skills/mads-plugin**: source of the **mads-plugin** agent skill copied into scaffolded projects.
 
 **/usr/local/share/plugin_migrations**: JSON migration definitions used by **\-\-update**.
 
