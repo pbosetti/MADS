@@ -50,7 +50,10 @@ typedef struct mads_rust_plugin_t {
   const char *(*get_info)(void *self);
 
   /* ── Source-only ───────────────────────────────────────────────────────── */
-  /* Returns the blob MIME/format string (static, may be NULL or ""). */
+  /* Returns the blob MIME/format string, NUL-terminated, owned by the plugin
+     instance and valid until the next call on it.  May be NULL or "".
+     Callers must tolerate NULL; implementations must never return a pointer to
+     a non-NUL-terminated buffer (e.g. a Rust &str). */
   const char *(*blob_format)(void *self);
 
   /* Produce one output frame.  Output is accessed via output_json / output_blob

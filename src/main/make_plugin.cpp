@@ -316,8 +316,14 @@ int main(int argc, char **argv) {
     }
 
     build_hint = "cd " + dir + " && cargo build --release";
-    run_hint = string(data["rust_loader"]) + " target/release/lib" +
-               string(data["name"]) + ".so";
+    // cargo names a cdylib lib<name>.dylib on macOS, lib<name>.so elsewhere
+#ifdef __APPLE__
+    const string cdylib_ext = ".dylib";
+#else
+    const string cdylib_ext = ".so";
+#endif
+    run_hint = string(data["rust_loader"]) + " -n " + string(data["name"]) +
+               " target/release/lib" + string(data["name"]) + cdylib_ext;
 
   } else {
     // ── C++ plugin ───────────────────────────────────────────────────────────

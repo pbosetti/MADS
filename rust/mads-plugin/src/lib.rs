@@ -109,7 +109,7 @@ pub trait SinkPlugin: Default + 'static {
 #[doc(hidden)]
 pub mod __private {
     use super::*;
-    use std::ffi::CString;
+    use std::ffi::{CString, c_char};
 
     /// Per-instance heap state wrapping the user's plugin struct.
     pub struct PluginState<P> {
@@ -118,6 +118,10 @@ pub mod __private {
         pub last_blob:  Option<Vec<u8>>,   // binary output
         pub last_error: Option<CString>,
         pub last_info:  Option<CString>,
+        /// NUL-terminated copy of the &str returned by `blob_format()`.
+        /// A Rust &str is *not* NUL-terminated and an empty one has a dangling
+        /// pointer, so the loader can never be handed `str::as_ptr()` directly.
+        pub last_format: Option<CString>,
     }
 
     impl<P: Default> PluginState<P> {
@@ -128,6 +132,7 @@ pub mod __private {
                 last_blob:  None,
                 last_error: None,
                 last_info:  None,
+                last_format: None,
             }
         }
     }
@@ -161,7 +166,7 @@ pub mod __private {
             r.code
         }
 
-        pub fn output_json_ptr(&self) -> *const i8 {
+        pub fn output_json_ptr(&self) -> *const c_char {
             self.last_json.as_ref().map_or(std::ptr::null(), |s| s.as_ptr())
         }
         pub fn output_json_len(&self) -> usize {
@@ -173,11 +178,23 @@ pub mod __private {
         pub fn output_blob_len(&self) -> usize {
             self.last_blob.as_ref().map_or(0, |v| v.len())
         }
-        pub fn error_ptr(&self) -> *const i8 {
+        pub fn error_ptr(&self) -> *const c_char {
             self.last_error.as_ref().map_or(std::ptr::null(), |s| s.as_ptr())
         }
-        pub fn info_ptr(&self) -> *const i8 {
+        pub fn info_ptr(&self) -> *const c_char {
             self.last_info.as_ref().map_or(std::ptr::null(), |s| s.as_ptr())
+        }
+
+        /// Store a NUL-terminated copy of `fmt` and return a pointer to it.
+        /// Returns NULL for an empty format (the ABI allows NULL) or when the
+        /// string contains an interior NUL.
+        pub fn set_blob_format(&mut self, fmt: &str) -> *const c_char {
+            if fmt.is_empty() {
+                self.last_format = None;
+                return std::ptr::null();
+            }
+            self.last_format = CString::new(fmt).ok();
+            self.last_format.as_ref().map_or(std::ptr::null(), |s| s.as_ptr())
         }
 
         pub fn set_info<P2>(&mut self, map: std::collections::HashMap<String, String>)
@@ -200,21 +217,21 @@ pub mod __private {
     #[repr(C)]
     pub struct RawPluginTable {
         pub version:         i32,
-        pub name:            *const i8,
-        pub kind:            *const i8,
+        pub name:            *const std::ffi::c_char,
+        pub kind:            *const std::ffi::c_char,
         pub create:          Option<unsafe extern "C" fn() -> *mut std::ffi::c_void>,
         pub destroy:         Option<unsafe extern "C" fn(*mut std::ffi::c_void)>,
-        pub set_params:      Option<unsafe extern "C" fn(*mut std::ffi::c_void, *const i8, usize)>,
-        pub get_info:        Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> *const i8>,
-        pub blob_format:     Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> *const i8>,
+        pub set_params:      Option<unsafe extern "C" fn(*mut std::ffi::c_void, *const std::ffi::c_char, usize)>,
+        pub get_info:        Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> *const std::ffi::c_char>,
+        pub blob_format:     Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> *const std::ffi::c_char>,
         pub get_output:      Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> i32>,
-        pub load_data:       Option<unsafe extern "C" fn(*mut std::ffi::c_void, *const i8, usize, *const i8, *const u8, usize) -> i32>,
+        pub load_data:       Option<unsafe extern "C" fn(*mut std::ffi::c_void, *const std::ffi::c_char, usize, *const std::ffi::c_char, *const u8, usize) -> i32>,
         pub process:         Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> i32>,
-        pub output_json:     Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> *const i8>,
+        pub output_json:     Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> *const std::ffi::c_char>,
         pub output_json_len: Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> usize>,
         pub output_blob:     Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> *const u8>,
         pub output_blob_len: Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> usize>,
-        pub last_error:      Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> *const i8>,
+        pub last_error:      Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> *const std::ffi::c_char>,
         pub next_loop_ms:    Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> i64>,
     }
 }
@@ -235,7 +252,7 @@ pub mod prelude {
 macro_rules! export_filter_plugin {
     ($name:expr, $ty:ty) => {
         const _: () = {
-            use std::ffi::{CStr, c_void};
+            use std::ffi::{CStr, c_char, c_void};
             use $crate::__private::{PluginState, RawPluginTable, SyncWrapper};
             use $crate::{FilterPlugin, Output, Return};
 
@@ -247,13 +264,13 @@ macro_rules! export_filter_plugin {
             unsafe extern "C" fn _destroy(ptr: *mut c_void) {
                 drop(Box::from_raw(ptr as *mut State));
             }
-            unsafe extern "C" fn _set_params(ptr: *mut c_void, json: *const i8, len: usize) {
+            unsafe extern "C" fn _set_params(ptr: *mut c_void, json: *const c_char, len: usize) {
                 let s = &mut *(ptr as *mut State);
                 let bytes = std::slice::from_raw_parts(json as *const u8, len);
                 let v = $crate::serde_json::from_slice(bytes).unwrap_or_default();
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| s.inner.set_params(v))).ok();
             }
-            unsafe extern "C" fn _get_info(ptr: *mut c_void) -> *const i8 {
+            unsafe extern "C" fn _get_info(ptr: *mut c_void) -> *const c_char {
                 let s = &mut *(ptr as *mut State);
                 let map = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| s.inner.info()))
                     .unwrap_or_default();
@@ -265,8 +282,8 @@ macro_rules! export_filter_plugin {
             }
             unsafe extern "C" fn _load_data(
                 ptr: *mut c_void,
-                json_in: *const i8, json_len: usize,
-                topic: *const i8,
+                json_in: *const c_char, json_len: usize,
+                topic: *const c_char,
                 blob_in: *const u8, blob_in_len: usize,
             ) -> i32 {
                 let s = &mut *(ptr as *mut State);
@@ -296,7 +313,7 @@ macro_rules! export_filter_plugin {
                     Err(_)          => { s.set_error("panic in process".into()); 4 }
                 }
             }
-            unsafe extern "C" fn _output_json(ptr: *mut c_void) -> *const i8 {
+            unsafe extern "C" fn _output_json(ptr: *mut c_void) -> *const c_char {
                 (*(ptr as *mut State)).output_json_ptr()
             }
             unsafe extern "C" fn _output_json_len(ptr: *mut c_void) -> usize {
@@ -308,7 +325,7 @@ macro_rules! export_filter_plugin {
             unsafe extern "C" fn _output_blob_len(ptr: *mut c_void) -> usize {
                 (*(ptr as *mut State)).output_blob_len()
             }
-            unsafe extern "C" fn _last_error(ptr: *mut c_void) -> *const i8 {
+            unsafe extern "C" fn _last_error(ptr: *mut c_void) -> *const c_char {
                 (*(ptr as *mut State)).error_ptr()
             }
             unsafe extern "C" fn _next_loop_ms(ptr: *mut c_void) -> i64 {
@@ -319,8 +336,8 @@ macro_rules! export_filter_plugin {
 
             static TABLE: SyncWrapper<RawPluginTable> = SyncWrapper(RawPluginTable {
                 version:         1,
-                name:            concat!($name, "\0").as_ptr() as *const i8,
-                kind:            "filter\0".as_ptr() as *const i8,
+                name:            concat!($name, "\0").as_ptr() as *const c_char,
+                kind:            "filter\0".as_ptr() as *const c_char,
                 create:          Some(_create),
                 destroy:         Some(_destroy),
                 set_params:      Some(_set_params),
@@ -353,7 +370,7 @@ macro_rules! export_filter_plugin {
 macro_rules! export_sink_plugin {
     ($name:expr, $ty:ty) => {
         const _: () = {
-            use std::ffi::{CStr, c_void};
+            use std::ffi::{CStr, c_char, c_void};
             use $crate::__private::{PluginState, RawPluginTable, SyncWrapper};
             use $crate::{SinkPlugin, Output, Return};
 
@@ -365,13 +382,13 @@ macro_rules! export_sink_plugin {
             unsafe extern "C" fn _destroy(ptr: *mut c_void) {
                 drop(Box::from_raw(ptr as *mut State));
             }
-            unsafe extern "C" fn _set_params(ptr: *mut c_void, json: *const i8, len: usize) {
+            unsafe extern "C" fn _set_params(ptr: *mut c_void, json: *const c_char, len: usize) {
                 let s = &mut *(ptr as *mut State);
                 let bytes = std::slice::from_raw_parts(json as *const u8, len);
                 let v = $crate::serde_json::from_slice(bytes).unwrap_or_default();
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| s.inner.set_params(v))).ok();
             }
-            unsafe extern "C" fn _get_info(ptr: *mut c_void) -> *const i8 {
+            unsafe extern "C" fn _get_info(ptr: *mut c_void) -> *const c_char {
                 let s = &mut *(ptr as *mut State);
                 let map = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| s.inner.info()))
                     .unwrap_or_default();
@@ -383,8 +400,8 @@ macro_rules! export_sink_plugin {
             }
             unsafe extern "C" fn _load_data(
                 ptr: *mut c_void,
-                json_in: *const i8, json_len: usize,
-                topic: *const i8,
+                json_in: *const c_char, json_len: usize,
+                topic: *const c_char,
                 blob_in: *const u8, blob_in_len: usize,
             ) -> i32 {
                 let s = &mut *(ptr as *mut State);
@@ -404,7 +421,7 @@ macro_rules! export_sink_plugin {
                     Err(_) => { s.set_error("panic in load_data".into()); 4 }
                 }
             }
-            unsafe extern "C" fn _output_json(ptr: *mut c_void) -> *const i8 {
+            unsafe extern "C" fn _output_json(ptr: *mut c_void) -> *const c_char {
                 (*(ptr as *mut State)).output_json_ptr()
             }
             unsafe extern "C" fn _output_json_len(ptr: *mut c_void) -> usize {
@@ -416,7 +433,7 @@ macro_rules! export_sink_plugin {
             unsafe extern "C" fn _output_blob_len(ptr: *mut c_void) -> usize {
                 (*(ptr as *mut State)).output_blob_len()
             }
-            unsafe extern "C" fn _last_error(ptr: *mut c_void) -> *const i8 {
+            unsafe extern "C" fn _last_error(ptr: *mut c_void) -> *const c_char {
                 (*(ptr as *mut State)).error_ptr()
             }
             unsafe extern "C" fn _next_loop_ms(ptr: *mut c_void) -> i64 {
@@ -427,8 +444,8 @@ macro_rules! export_sink_plugin {
 
             static TABLE: SyncWrapper<RawPluginTable> = SyncWrapper(RawPluginTable {
                 version:         1,
-                name:            concat!($name, "\0").as_ptr() as *const i8,
-                kind:            "sink\0".as_ptr() as *const i8,
+                name:            concat!($name, "\0").as_ptr() as *const c_char,
+                kind:            "sink\0".as_ptr() as *const c_char,
                 create:          Some(_create),
                 destroy:         Some(_destroy),
                 set_params:      Some(_set_params),
@@ -461,7 +478,7 @@ macro_rules! export_sink_plugin {
 macro_rules! export_source_plugin {
     ($name:expr, $ty:ty) => {
         const _: () = {
-            use std::ffi::c_void;
+            use std::ffi::{c_char, c_void};
             use $crate::__private::{PluginState, RawPluginTable, SyncWrapper};
             use $crate::{SourcePlugin, Output, Return};
 
@@ -473,13 +490,13 @@ macro_rules! export_source_plugin {
             unsafe extern "C" fn _destroy(ptr: *mut c_void) {
                 drop(Box::from_raw(ptr as *mut State));
             }
-            unsafe extern "C" fn _set_params(ptr: *mut c_void, json: *const i8, len: usize) {
+            unsafe extern "C" fn _set_params(ptr: *mut c_void, json: *const c_char, len: usize) {
                 let s = &mut *(ptr as *mut State);
                 let bytes = std::slice::from_raw_parts(json as *const u8, len);
                 let v = $crate::serde_json::from_slice(bytes).unwrap_or_default();
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| s.inner.set_params(v))).ok();
             }
-            unsafe extern "C" fn _get_info(ptr: *mut c_void) -> *const i8 {
+            unsafe extern "C" fn _get_info(ptr: *mut c_void) -> *const c_char {
                 let s = &mut *(ptr as *mut State);
                 let map = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| s.inner.info()))
                     .unwrap_or_default();
@@ -489,11 +506,14 @@ macro_rules! export_source_plugin {
                 s.last_info = std::ffi::CString::new(obj.to_string()).ok();
                 s.info_ptr()
             }
-            unsafe extern "C" fn _blob_format(ptr: *mut c_void) -> *const i8 {
-                let s = &*(ptr as *mut State);
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| s.inner.blob_format()))
-                    .map(|f| f.as_ptr() as *const i8)
-                    .unwrap_or(std::ptr::null())
+            unsafe extern "C" fn _blob_format(ptr: *mut c_void) -> *const c_char {
+                let s = &mut *(ptr as *mut State);
+                // Copy into an owned String first: the &str borrowed from the
+                // plugin is not NUL-terminated, so it can never cross the ABI.
+                let fmt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    s.inner.blob_format().to_owned()
+                })).unwrap_or_default();
+                s.set_blob_format(&fmt)
             }
             unsafe extern "C" fn _get_output(ptr: *mut c_void) -> i32 {
                 let s = &mut *(ptr as *mut State);
@@ -505,7 +525,7 @@ macro_rules! export_source_plugin {
                     Err(_)          => { s.set_error("panic in get_output".into()); 4 }
                 }
             }
-            unsafe extern "C" fn _output_json(ptr: *mut c_void) -> *const i8 {
+            unsafe extern "C" fn _output_json(ptr: *mut c_void) -> *const c_char {
                 (*(ptr as *mut State)).output_json_ptr()
             }
             unsafe extern "C" fn _output_json_len(ptr: *mut c_void) -> usize {
@@ -517,7 +537,7 @@ macro_rules! export_source_plugin {
             unsafe extern "C" fn _output_blob_len(ptr: *mut c_void) -> usize {
                 (*(ptr as *mut State)).output_blob_len()
             }
-            unsafe extern "C" fn _last_error(ptr: *mut c_void) -> *const i8 {
+            unsafe extern "C" fn _last_error(ptr: *mut c_void) -> *const c_char {
                 (*(ptr as *mut State)).error_ptr()
             }
             unsafe extern "C" fn _next_loop_ms(ptr: *mut c_void) -> i64 {
@@ -528,8 +548,8 @@ macro_rules! export_source_plugin {
 
             static TABLE: SyncWrapper<RawPluginTable> = SyncWrapper(RawPluginTable {
                 version:         1,
-                name:            concat!($name, "\0").as_ptr() as *const i8,
-                kind:            "source\0".as_ptr() as *const i8,
+                name:            concat!($name, "\0").as_ptr() as *const c_char,
+                kind:            "source\0".as_ptr() as *const c_char,
                 create:          Some(_create),
                 destroy:         Some(_destroy),
                 set_params:      Some(_set_params),
@@ -554,4 +574,47 @@ macro_rules! export_source_plugin {
             }
         };
     };
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::__private::PluginState;
+    use std::ffi::CStr;
+
+    #[derive(Default)]
+    struct Dummy;
+
+    /// Regression: the loader does `(f && *f) ? string(f) : ""` on the pointer
+    /// returned by blob_format().  Handing it `str::as_ptr()` gave a dangling
+    /// 0x1 for "" (segfault) and an unterminated buffer otherwise (garbage).
+    #[test]
+    fn blob_format_empty_is_null() {
+        let mut st: PluginState<Dummy> = PluginState::new();
+        assert!(st.set_blob_format("").is_null());
+    }
+
+    #[test]
+    fn blob_format_is_nul_terminated() {
+        let mut st: PluginState<Dummy> = PluginState::new();
+        let p = st.set_blob_format("image/png");
+        assert!(!p.is_null());
+        assert_eq!(unsafe { CStr::from_ptr(p) }.to_str().unwrap(), "image/png");
+    }
+
+    #[test]
+    fn blob_format_survives_until_next_call() {
+        let mut st: PluginState<Dummy> = PluginState::new();
+        let p = st.set_blob_format("text/csv");
+        // ABI contract: valid until the next call on this instance.
+        st.set_error("unrelated".into());
+        assert_eq!(unsafe { CStr::from_ptr(p) }.to_str().unwrap(), "text/csv");
+    }
+
+    #[test]
+    fn blob_format_with_interior_nul_is_null() {
+        let mut st: PluginState<Dummy> = PluginState::new();
+        assert!(st.set_blob_format("bad\0fmt").is_null());
+    }
 }
