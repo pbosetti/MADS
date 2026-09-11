@@ -29,7 +29,12 @@ Conventions for test authors:
     test_up_supervisor (curve probes)     44400-44449
     test_agent_slow_joiner                44450-44499
     test_clock_offset_agent               44500-44599
-    (spare)                               44600+
+    (spare)                               44600-44999
+  Stay inside 42100-44999: that band sits in Linux's default ephemeral range
+  (32768-60999), so .github/workflows/coverage.yml reserves exactly it via
+  net.ipv4.ip_local_reserved_ports.  A port outside the band can be handed out
+  as an ephemeral source port on CI, and bind() then fails intermittently with
+  "Address already in use".
 - Any test that touches Mads::Agent::loop() must instantiate RunningGuard,
   since Mads::running is a process-global atomic.
 */
