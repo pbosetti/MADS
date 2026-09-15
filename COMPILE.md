@@ -111,6 +111,9 @@ At the moment, Android builds are intended for `MadsCore` and related native lib
 - cmake
 - Ninja
 - git
+- pkgconfig
+
+Simplest way to install `pkgconfig` is with `choco install pkgconfiglite`.
 
 ### Build
 
@@ -137,6 +140,7 @@ cmake -S . -B build-android-auto -G Ninja `
 
 cmake --build build-android-auto --target MadsCore
 cmake --install build-android-auto
+cmake --build build-android-auto --target MadsCore -t package
 ```
 
 After the first successful configure, if you want to rebuild without letting `FetchContent` check remote repositories again, you can re-run configure with:
