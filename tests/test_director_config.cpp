@@ -537,8 +537,13 @@ TEST_CASE("an absolute workdir is used verbatim", "[director_config]") {
 #else
   const std::string abs_dir = "/tmp/mads_test_abs_workdir";
 #endif
+  // A TOML literal (single-quoted) string does no escape processing, unlike
+  // a basic (double-quoted) one, which would reject the backslashes in a
+  // Windows path (`\m`/`\w` are not valid TOML escapes). Used on both
+  // branches for simplicity -- a literal string is equally valid for the
+  // POSIX path too.
   auto path = write_temp_toml(
-      "[api]\ncommand = \"echo hi\"\nworkdir = \"" + abs_dir + "\"\n",
+      "[api]\ncommand = \"echo hi\"\nworkdir = '" + abs_dir + "'\n",
       "abs_workdir");
   std::string error;
   auto config = Mads::load_director_config(path.string(), &error);

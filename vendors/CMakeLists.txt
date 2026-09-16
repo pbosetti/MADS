@@ -39,8 +39,23 @@ set(INJA_EXPORT OFF CACHE BOOL "" FORCE)
 set(INJA_USE_EMBEDDED_JSON OFF CACHE BOOL "" FORCE)
 
 set(SNAPPY_INSTALL OFF CACHE BOOL "" FORCE)
-set(BUILD_SHARED OFF CACHE BOOL "" FORCE)
-set(BUILD_STATIC ON CACHE BOOL "" FORCE)
+# libzmq must be a DLL on Windows, and only on Windows. A static libzmq gets
+# linked into MadsCore.dll *and*, separately, into every executable that also
+# touches the ZMQ API directly (the test binaries, mads, mads-broker,
+# mads-bridge, mads-dealer, mads-worker). PE gives each module its own private
+# copy of the library's globals, so such a process runs two libzmq instances --
+# including two copies of bundled wepoll's epoll handle table. A handle created
+# through one copy is then invisible to the other, and epoll_ctl fails with
+# EINVAL ("handle not in tree"), which libzmq turns into an errno_assert abort.
+# ELF and Mach-O collapse the duplicate definitions onto one, so Unix never had
+# the problem and keeps the static build (one fewer artifact to ship).
+if(WIN32)
+  set(BUILD_SHARED ON CACHE BOOL "" FORCE)
+  set(BUILD_STATIC OFF CACHE BOOL "" FORCE)
+else()
+  set(BUILD_SHARED OFF CACHE BOOL "" FORCE)
+  set(BUILD_STATIC ON CACHE BOOL "" FORCE)
+endif()
 set(ZMQ_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(ENABLE_CURVE ON CACHE BOOL "" FORCE)
 set(WITH_LIBSODIUM ON CACHE BOOL "" FORCE)
@@ -402,6 +417,14 @@ if(ANDROID)
       endif()
     endif()
   endforeach()
+endif()
+if(WIN32 AND TARGET libzmq)
+  # Emit libzmq.dll into the same directory as MadsCore.dll rather than leaving
+  # it under _deps/libzmq-build. Everything that has to find it at run time --
+  # the ctest DL_PATHS entry, a developer running an executable out of the build
+  # tree -- then needs one directory on PATH instead of two.
+  set_target_properties(libzmq PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 endif()
 # cppzmq is header-only (zmq.hpp + zmq_addon.hpp). Its own CMake project insists
 # on find_package(ZeroMQ), which would not see the in-tree libzmq target above,

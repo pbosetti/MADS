@@ -5,7 +5,9 @@
 #include <reproc/error.h>
 #include <reproc/reproc.h>
 
-#ifndef _WIN32
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -282,9 +284,63 @@ struct UpManagedProcess {
   std::atomic<bool> ready_signal{false};
   std::thread stdout_reader;
   std::thread stderr_reader;
+#ifdef _WIN32
+  // `void *` = `HANDLE`. The job object holding this child and every process it
+  // goes on to spawn; see make_job_for()/kill_job().
+  void *job = nullptr;
+#endif
 };
 
 namespace {
+
+#ifdef _WIN32
+// Windows equivalent of the setpgid()/killpg() pairing the POSIX path above
+// uses. It is needed because nothing else kills a process *tree* here:
+// reproc_kill() calls TerminateProcess() on the direct child only, and the
+// direct child is almost always cmd.exe (see shell_candidates()), which --
+// unlike `sh -c`, which execs and so becomes the workload -- stays resident as
+// a parent. Killing it therefore orphans the actual workload instead of
+// stopping it. That also stalls teardown: descendants inherit the child's
+// stdout/stderr write handles, so reader_thread_main() never sees EOF and the
+// joins below block until the orphan happens to exit on its own.
+//
+// A job object fixes both: every process the child spawns after being assigned
+// joins the job automatically, and TerminateJobObject() takes down the whole
+// tree in one call.
+void *make_job_for(void *process_handle) {
+  HANDLE job = CreateJobObjectW(nullptr, nullptr);
+  if (job == nullptr) {
+    return nullptr;
+  }
+  // If this supervisor dies without unwinding, dropping the last handle to the
+  // job takes the tree with it rather than leaking orphans.
+  JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+  limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+  SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits,
+                          sizeof(limits));
+  // Assignment can only happen once CreateProcess has returned, so a child that
+  // spawns a grandchild within that window escapes the job. reproc offers no
+  // CREATE_SUSPENDED hook to close it; in practice a shell needs milliseconds
+  // to start up and parse before it spawns anything.
+  if (!AssignProcessToJobObject(job, process_handle)) {
+    CloseHandle(job);
+    return nullptr;
+  }
+  return job;
+}
+
+// Kills whatever is still in the job and releases it. Idempotent, and safe once
+// the managed process itself has exited: a job outlives its members, so this is
+// also how orphans it left behind get reaped.
+void kill_job(void *&job) {
+  if (job == nullptr) {
+    return;
+  }
+  TerminateJobObject(static_cast<HANDLE>(job), 1);
+  CloseHandle(static_cast<HANDLE>(job));
+  job = nullptr;
+}
+#endif
 
 // Reads one stream (stdout or stderr) of a managed process until it closes,
 // line-buffering into multiplexed "[name] line" output and (for a
@@ -444,8 +500,9 @@ bool UpSupervisor::start_one(UpManagedProcess &mp) {
         mp.config.workdir.empty() ? nullptr : mp.config.workdir.c_str();
 #ifdef _WIN32
     // reproc already puts the child in a new process group here
-    // (CREATE_NEW_PROCESS_GROUP, see reproc's windows/process.c) -- no
-    // POSIX-style race to work around.
+    // (CREATE_NEW_PROCESS_GROUP, see reproc's windows/process.c), which is what
+    // reproc_terminate()'s CTRL_BREAK_EVENT needs. It is not enough to *kill* a
+    // tree, though -- see make_job_for(), applied right after the spawn below.
     err = reproc_start(&mp.proc, argv.data(), nullptr, workdir);
 #else
     // Not reproc_start(): see spawn_with_own_process_group()'s comment for
@@ -464,6 +521,12 @@ bool UpSupervisor::start_one(UpManagedProcess &mp) {
              << reproc_system_error() << ")\n";
     return false;
   }
+
+#ifdef _WIN32
+  // As early as possible after the spawn: anything the child starts from here
+  // on is in the job and dies with it.
+  mp.job = make_job_for(mp.proc.handle);
+#endif
 
   mp.running = true;
   mp.ready_signal.store(false);
@@ -537,7 +600,8 @@ void UpSupervisor::stop_one(UpManagedProcess &mp,
     std::cout << "[" << mp.config.name
              << "] still running after grace period, sending SIGKILL\n";
 #ifdef _WIN32
-    reproc_kill(&mp.proc);
+    kill_job(mp.job);      // the whole tree, not just the direct child
+    reproc_kill(&mp.proc); // fallback if the job could not be created
 #else
     if (::killpg(mp.proc.id, SIGKILL) != 0) {
       ::kill(mp.proc.id, SIGKILL);
@@ -548,6 +612,13 @@ void UpSupervisor::stop_one(UpManagedProcess &mp,
 
   mp.last_exit_code = static_cast<int>(reproc_exit_status(&mp.proc));
   mp.running = false;
+
+#ifdef _WIN32
+  // Also for a child that stopped gracefully: it may still have left
+  // descendants holding the stdout/stderr write handles, which would keep the
+  // joins below from ever returning.
+  kill_job(mp.job);
+#endif
 
   // Join the readers *before* reproc_destroy() closes the pipe fds they may
   // still be blocked reading from (the process has already been reaped at
@@ -643,6 +714,12 @@ RunResult UpSupervisor::run() {
 
           mp.last_exit_code = static_cast<int>(reproc_exit_status(&mp.proc));
           mp.running = false;
+#ifdef _WIN32
+          // The managed process is done, so anything it left behind is an
+          // orphan this supervisor owns -- and one still holding the pipe write
+          // handles would block the joins below indefinitely.
+          kill_job(mp.job);
+#endif
           if (mp.stdout_reader.joinable()) {
             mp.stdout_reader.join();
           }

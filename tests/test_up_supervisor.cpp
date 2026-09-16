@@ -68,6 +68,57 @@ std::string append_line_cmd(const fs::path &path, const std::string &text) {
   return "echo " + text + " >> \"" + path.string() + "\"";
 }
 
+#ifdef _WIN32
+// cmd.exe treats ';' as a literal character, not a command separator, so a
+// POSIX-style "cmd; exit 0" tail would land inside cmd's own output/argument
+// text instead of running a second command -- e.g. it's exactly what
+// corrupts append_line_cmd()'s trace-file content on Windows (cmd.exe pulls
+// the ">>" redirection out of the line and treats everything else, tail
+// included, as one echo argument). Every command these tails follow already
+// exits 0 on its own, so the tail is simply dropped on Windows.
+constexpr const char *kExitZeroTail = "";
+#else
+constexpr const char *kExitZeroTail = "; exit 0";
+#endif
+
+#ifdef _WIN32
+// cmd.exe has no `sleep`. `ping -n <seconds+1> 127.0.0.1 >nul` blocks for
+// about `seconds` round-trips and exits 0 on its own. `timeout /t` was
+// rejected: it reads console input and fails with "ERROR: Input redirection
+// is not supported" once reproc redirects the child's stdio.
+// Both streams go to nul, not just stdout: killing the direct child (cmd.exe)
+// leaves ping.exe running as a grandchild, and any of the supervisor's pipes it
+// still holds would keep them from reaching EOF -- making teardown block for
+// the sleeper's full duration instead of returning promptly.
+std::string sleep_cmd(int seconds) {
+  return "ping -n " + std::to_string(seconds + 1) + " 127.0.0.1 >nul 2>&1";
+}
+#else
+std::string sleep_cmd(int seconds) {
+  return "sleep " + std::to_string(seconds) + "; exit 0";
+}
+#endif
+
+#ifdef _WIN32
+// --no-shell execs a tokenized argv with no shell involved (see
+// tokenize_command()/start_one() in up_supervisor.cpp), so `/usr/bin/touch`
+// needs a real Windows equivalent. `copy /y nul <path>` creates an empty
+// file; a `>` redirection (e.g. `type nul > path`) was rejected because
+// redirection is shell syntax that would not survive tokenized exec.
+//
+// Single-quoted, not double: tokenize_command() unescapes backslashes inside
+// double quotes (up_supervisor.cpp:58), which would silently eat every
+// separator in a Windows path and create the file somewhere else entirely.
+// Inside single quotes it leaves backslashes alone.
+std::string touch_cmd(const fs::path &path) {
+  return "cmd.exe /c copy /y nul '" + path.string() + "'";
+}
+#else
+std::string touch_cmd(const fs::path &path) {
+  return "/usr/bin/touch " + path.string();
+}
+#endif
+
 std::vector<std::string> read_lines(const fs::path &path) {
   std::vector<std::string> lines;
   std::ifstream in(path);
@@ -112,13 +163,13 @@ TEST_CASE("run() starts processes in after-order", "[up_supervisor]") {
   ready_b.log_pattern = "READY_B";
 
   Mads::ProcessConfig proc_a = make_proc(
-      "a", append_line_cmd(trace, "a") + " && echo READY_A; exit 0");
+      "a", append_line_cmd(trace, "a") + " && echo READY_A" + kExitZeroTail);
   proc_a.ready = ready_a;
   Mads::ProcessConfig proc_b = make_proc(
-      "b", append_line_cmd(trace, "b") + " && echo READY_B; exit 0", {"a"});
+      "b", append_line_cmd(trace, "b") + " && echo READY_B" + kExitZeroTail, {"a"});
   proc_b.ready = ready_b;
   Mads::ProcessConfig proc_c =
-      make_proc("c", append_line_cmd(trace, "c") + "; exit 0", {"b"});
+      make_proc("c", append_line_cmd(trace, "c") + kExitZeroTail, {"b"});
 
   std::vector<Mads::ProcessConfig> procs{proc_a, proc_b, proc_c};
 
@@ -218,7 +269,7 @@ TEST_CASE("relaunch honours --max-restarts", "[up_supervisor]") {
 TEST_CASE("a non-relaunch process exiting non-zero ends the run",
          "[up_supervisor]") {
   std::vector<Mads::ProcessConfig> procs{
-      make_proc("stable", "sleep 30; exit 0"),
+      make_proc("stable", sleep_cmd(30)),
       make_proc("dies", "exit 9"),
   };
   Mads::UpOptions options;
@@ -243,7 +294,7 @@ TEST_CASE("a non-relaunch process exiting non-zero ends the run",
 // rather than a positional test-name filter.
 TEST_CASE("the timeout option fires and tears everything down",
          "[up_supervisor]") {
-  std::vector<Mads::ProcessConfig> procs{make_proc("long", "sleep 30; exit 0")};
+  std::vector<Mads::ProcessConfig> procs{make_proc("long", sleep_cmd(30))};
   Mads::UpOptions options;
   options.timeout = 300ms;
   options.grace = 300ms;
@@ -264,7 +315,7 @@ TEST_CASE("the timeout option fires and tears everything down",
 
 TEST_CASE("request_stop() tears down a long-running process promptly",
          "[up_supervisor]") {
-  std::vector<Mads::ProcessConfig> procs{make_proc("long", "sleep 30; exit 0")};
+  std::vector<Mads::ProcessConfig> procs{make_proc("long", sleep_cmd(30))};
   Mads::UpOptions options;
   options.grace = 300ms;
 
@@ -339,7 +390,7 @@ TEST_CASE("the no-shell option execs the tokenized command directly",
   auto trace = scratch_file("noshell");
   fs::remove(trace);
   std::vector<Mads::ProcessConfig> procs{
-      make_proc("touch-file", "/usr/bin/touch " + trace.string())};
+      make_proc("touch-file", touch_cmd(trace))};
   Mads::UpOptions options;
   options.until_exit = "touch-file";
   options.grace = 500ms;
@@ -364,14 +415,14 @@ TEST_CASE("a delay ready probe gates start of what depends on it",
   fs::remove(trace);
 
   Mads::ProcessConfig a =
-      make_proc("a", append_line_cmd(trace, "a") + "; exit 0");
+      make_proc("a", append_line_cmd(trace, "a") + kExitZeroTail);
   Mads::ReadySpec ready;
   ready.kind = Mads::ReadyKind::Delay;
   ready.delay = 150ms;
   a.ready = ready;
 
   Mads::ProcessConfig b =
-      make_proc("b", append_line_cmd(trace, "b") + "; exit 0", {"a"});
+      make_proc("b", append_line_cmd(trace, "b") + kExitZeroTail, {"a"});
 
   Mads::UpOptions options;
   options.until_exit = "b";
@@ -390,7 +441,7 @@ TEST_CASE("a delay ready probe gates start of what depends on it",
 }
 
 TEST_CASE("a ready probe that never succeeds fails startup", "[up_supervisor]") {
-  Mads::ProcessConfig a = make_proc("a", "sleep 30; exit 0");
+  Mads::ProcessConfig a = make_proc("a", sleep_cmd(30));
   Mads::ReadySpec ready;
   ready.kind = Mads::ReadyKind::Port;
   ready.port = 42599; // nothing listens here
@@ -484,7 +535,7 @@ TEST_CASE("a keyless broker ready probe never passes a CURVE broker",
   ReadyKeyDir keys("plain_probe");
   ReadyCurveBroker broker(port, keys.path);
 
-  Mads::ProcessConfig a = make_proc("a", "sleep 30; exit 0");
+  Mads::ProcessConfig a = make_proc("a", sleep_cmd(30));
   Mads::ReadySpec ready;
   ready.kind = Mads::ReadyKind::Broker;
   ready.broker_uri = mads_test::loopback(port);
@@ -511,13 +562,13 @@ TEST_CASE("a CURVE-configured broker ready probe opens the gate",
   auto trace = scratch_file("ready_broker_curve");
   fs::remove(trace);
 
-  Mads::ProcessConfig a = make_proc("a", "sleep 30; exit 0");
+  Mads::ProcessConfig a = make_proc("a", sleep_cmd(30));
   Mads::ReadySpec ready;
   ready.kind = Mads::ReadyKind::Broker;
   ready.broker_uri = mads_test::loopback(port);
   a.ready = ready;
   Mads::ProcessConfig b =
-      make_proc("b", append_line_cmd(trace, "b") + "; exit 0", {"a"});
+      make_proc("b", append_line_cmd(trace, "b") + kExitZeroTail, {"a"});
 
   Mads::UpOptions options;
   options.curve = Mads::ProbeCurveKeys{keys.path, "client", "broker"};
@@ -543,7 +594,7 @@ TEST_CASE("a CURVE-configured probe still fails against a plain broker",
   zmq::socket_t plain(ctx, zmq::socket_type::rep);
   plain.bind(mads_test::loopback(port));
 
-  Mads::ProcessConfig a = make_proc("a", "sleep 30; exit 0");
+  Mads::ProcessConfig a = make_proc("a", sleep_cmd(30));
   Mads::ReadySpec ready;
   ready.kind = Mads::ReadyKind::Broker;
   ready.broker_uri = mads_test::loopback(port);
