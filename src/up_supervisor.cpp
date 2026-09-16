@@ -95,8 +95,9 @@ std::vector<std::string> tokenize_command(const std::string &command) {
 // Candidate argvs to try, in order, for shelling out to `command`. Mirrors
 // mads_director v2.4.2's exec_child_command() (see director_config.cpp's
 // top-of-file comment): try $SHELL first, fall back to /bin/sh -lc, then
-// finally plain /bin/sh -c. On Windows, Director always uses
-// `cmd.exe /S /C "<command>"` (no fallback chain needed/possible).
+// finally plain /bin/sh -c. Windows has no fallback chain (Director always uses
+// `cmd.exe /S /C "<command>"`) and does not go through argv at all -- see
+// spawn_shell_verbatim().
 //
 // Caveat: reproc's argv[]-only API can't express Director's C-level
 // distinction between "path used to exec" and "argv[0] shown to the child"
@@ -104,10 +105,8 @@ std::vector<std::string> tokenize_command(const std::string &command) {
 // basename as argv[0]). Here argv[0] does double duty, so the child sees
 // its full resolved shell path as $0 instead of a bare name. This is
 // cosmetic only -- it doesn't change how "-lc"/"-c" are interpreted.
+#ifndef _WIN32
 std::vector<std::vector<std::string>> shell_candidates(const std::string &command) {
-#ifdef _WIN32
-  return {{"cmd.exe", "/S", "/C", command}};
-#else
   std::vector<std::vector<std::string>> candidates;
   const char *env_shell = std::getenv("SHELL");
   if (env_shell != nullptr && env_shell[0] != '\0') {
@@ -116,8 +115,8 @@ std::vector<std::vector<std::string>> shell_candidates(const std::string &comman
   candidates.push_back({"/bin/sh", "-lc", command});
   candidates.push_back({"/bin/sh", "-c", command});
   return candidates;
-#endif
 }
+#endif
 
 #ifndef _WIN32
 // pipe() + FD_CLOEXEC, matching reproc's own posix/pipe.c fallback for
@@ -340,6 +339,163 @@ void kill_job(void *&job) {
   CloseHandle(static_cast<HANDLE>(job));
   job = nullptr;
 }
+
+// UTF-8 to UTF-16 for CreateProcessW. std::nullopt means the input was not
+// valid UTF-8.
+std::optional<std::wstring> widen(const std::string &utf8) {
+  if (utf8.empty()) {
+    return std::wstring();
+  }
+  const int length = static_cast<int>(utf8.size());
+  const int needed =
+      MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), length, nullptr, 0);
+  if (needed <= 0) {
+    return std::nullopt;
+  }
+  std::wstring wide(static_cast<size_t>(needed), L'\0');
+  if (MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), length, wide.data(),
+                          needed) != needed) {
+    return std::nullopt;
+  }
+  return wide;
+}
+
+// One pipe, with the end the parent keeps marked non-inheritable so it cannot
+// leak into this or any other child. Mirrors reproc's windows/pipe.c.
+bool make_pipe(HANDLE *read, bool inherit_read, HANDLE *write,
+               bool inherit_write) {
+  SECURITY_ATTRIBUTES attributes{};
+  attributes.nLength = sizeof(attributes);
+  attributes.bInheritHandle = TRUE;
+  if (!CreatePipe(read, write, &attributes, 0)) {
+    return false;
+  }
+  if (!inherit_read && !SetHandleInformation(*read, HANDLE_FLAG_INHERIT, 0)) {
+    return false;
+  }
+  if (!inherit_write && !SetHandleInformation(*write, HANDLE_FLAG_INHERIT, 0)) {
+    return false;
+  }
+  return true;
+}
+
+// Spawns `cmd.exe /S /C "<command>"` with `command` inserted *verbatim*, and
+// fills in `out_process` so reproc_read()/reproc_wait()/reproc_terminate()/
+// reproc_kill()/reproc_exit_status()/reproc_destroy() all keep working on it --
+// the same arrangement, and for the same kind of reason, as
+// spawn_with_own_process_group() below does on POSIX.
+//
+// reproc_start() cannot be used for a shelled-out command here. It joins argv
+// into a command line using the CRT/CommandLineToArgvW escaping rules, which
+// rewrite every `"` inside an argument as `\"` (reproc's windows/process.c,
+// argument_escape()). cmd.exe does not implement those rules: under /S it strips
+// one leading and one trailing quote and takes the rest literally, so `\"`
+// arrives as two characters. A command as ordinary as
+// `echo hi >> "C:\dir\f.txt"` therefore reached cmd.exe as
+// `echo hi >> \"C:\dir\f.txt\"` and died with "The filename, directory name, or
+// volume label syntax is incorrect" -- every director.toml command containing a
+// double quote was broken on Windows. Pre-escaping cannot work around it either,
+// because argument_escape() only ever *adds* characters: no input makes it emit
+// a bare `"`. The command line has to be built here instead.
+REPROC_ERROR spawn_shell_verbatim(reproc_t *out_process,
+                                  const std::string &command,
+                                  const char *workdir) {
+  *out_process = reproc_t{};
+
+  // Same split reproc_start() uses: the child takes the read end of stdin and
+  // the write ends of stdout/stderr, the parent keeps the opposite ends.
+  HANDLE child_in = nullptr, child_out = nullptr, child_err = nullptr;
+  HANDLE parent_in = nullptr, parent_out = nullptr, parent_err = nullptr;
+
+  const auto close_all = [&] {
+    for (HANDLE *handle : {&child_in, &child_out, &child_err, &parent_in,
+                           &parent_out, &parent_err}) {
+      if (*handle != nullptr) {
+        CloseHandle(*handle);
+        *handle = nullptr;
+      }
+    }
+  };
+
+  if (!make_pipe(&child_in, true, &parent_in, false) ||
+      !make_pipe(&parent_out, false, &child_out, true) ||
+      !make_pipe(&parent_err, false, &child_err, true)) {
+    close_all();
+    return REPROC_ERROR_SYSTEM;
+  }
+
+  auto command_line = widen("cmd.exe /S /C \"" + command + "\"");
+  std::optional<std::wstring> workdir_wide;
+  if (workdir != nullptr) {
+    workdir_wide = widen(workdir);
+  }
+  if (!command_line.has_value() ||
+      (workdir != nullptr && !workdir_wide.has_value())) {
+    close_all();
+    return REPROC_ERROR_SYSTEM;
+  }
+
+  // An explicit inherit list, so the child receives these three handles and
+  // nothing else that happens to be inheritable at this moment.
+  SIZE_T attribute_size = 0;
+  InitializeProcThreadAttributeList(nullptr, 1, 0, &attribute_size);
+  std::vector<unsigned char> attribute_buffer(attribute_size);
+  auto *attributes =
+      reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attribute_buffer.data());
+  if (!InitializeProcThreadAttributeList(attributes, 1, 0, &attribute_size)) {
+    close_all();
+    return REPROC_ERROR_SYSTEM;
+  }
+
+  HANDLE inherited[3] = {child_in, child_out, child_err};
+  bool ok = UpdateProcThreadAttribute(attributes, 0,
+                                      PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                                      inherited, sizeof(inherited), nullptr,
+                                      nullptr) != FALSE;
+
+  STARTUPINFOEXW startup{};
+  startup.StartupInfo.cb = sizeof(startup);
+  startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+  startup.StartupInfo.hStdInput = child_in;
+  startup.StartupInfo.hStdOutput = child_out;
+  startup.StartupInfo.hStdError = child_err;
+  startup.lpAttributeList = attributes;
+
+  PROCESS_INFORMATION info{};
+  if (ok) {
+    // CREATE_NEW_PROCESS_GROUP for the reason reproc sets it too: it is what
+    // reproc_terminate()'s CTRL_BREAK_EVENT is delivered to.
+    ok = CreateProcessW(nullptr, command_line->data(), nullptr, nullptr, TRUE,
+                        CREATE_NEW_PROCESS_GROUP | EXTENDED_STARTUPINFO_PRESENT,
+                        nullptr,
+                        workdir_wide.has_value() ? workdir_wide->c_str()
+                                                 : nullptr,
+                        &startup.StartupInfo, &info) != FALSE;
+  }
+  DeleteProcThreadAttributeList(attributes);
+
+  // The child has its own copies now (or there is no child); either way the
+  // parent is done with these, and stdout/stderr must not stay open here or the
+  // reader threads would never see EOF.
+  for (HANDLE *handle : {&child_in, &child_out, &child_err}) {
+    CloseHandle(*handle);
+    *handle = nullptr;
+  }
+
+  if (!ok) {
+    close_all();
+    return REPROC_ERROR_SYSTEM;
+  }
+
+  CloseHandle(info.hThread);
+  out_process->running = true;
+  out_process->id = info.dwProcessId;
+  out_process->handle = info.hProcess;
+  out_process->in = parent_in;
+  out_process->out = parent_out;
+  out_process->err = parent_err;
+  return REPROC_SUCCESS;
+}
 #endif
 
 // Reads one stream (stdout or stderr) of a managed process until it closes,
@@ -484,11 +640,28 @@ bool UpSupervisor::start_one(UpManagedProcess &mp) {
       return false;
     }
     candidates.push_back(std::move(tokens));
-  } else {
+  }
+#ifndef _WIN32
+  else {
     candidates = shell_candidates(mp.config.command);
   }
+#endif
 
   REPROC_ERROR err = REPROC_ERROR_SYSTEM;
+
+#ifdef _WIN32
+  if (!_options.no_shell) {
+    // Leaves `candidates` empty, so the argv loop below is a no-op: shelling
+    // out on Windows needs a verbatim command line, which reproc's argv API
+    // cannot express. --no-shell still goes through the loop, where reproc's
+    // CRT-style escaping is the correct convention for the program being run.
+    err = spawn_shell_verbatim(&mp.proc, mp.config.command,
+                               mp.config.workdir.empty()
+                                   ? nullptr
+                                   : mp.config.workdir.c_str());
+  }
+#endif
+
   for (const auto &argv_strings : candidates) {
     std::vector<const char *> argv;
     argv.reserve(argv_strings.size() + 1);

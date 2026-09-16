@@ -65,7 +65,14 @@ fs::path scratch_file(const std::string &tag) {
 // Appends a single line to `path`. Used so that trivial shell commands can
 // leave an observable, ordered trace of what actually ran.
 std::string append_line_cmd(const fs::path &path, const std::string &text) {
+#ifdef _WIN32
+  // cmd.exe pulls the redirection out of the line but keeps the whitespace that
+  // preceded it as part of echo's argument, so `echo a >> "f"` writes "a ".
+  // Parenthesising bounds the argument and writes exactly "a".
+  return "(echo " + text + ")>> \"" + path.string() + "\"";
+#else
   return "echo " + text + " >> \"" + path.string() + "\"";
+#endif
 }
 
 #ifdef _WIN32
