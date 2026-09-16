@@ -169,9 +169,9 @@ bool parse_director_section(const toml::table &table, DirectorConfig *config,
     if (const auto value = sample_rate_node->value<double>();
         value.has_value()) {
       sample_rate_seconds = *value;
-    } else if (const auto value = sample_rate_node->value<int64_t>();
-              value.has_value()) {
-      sample_rate_seconds = static_cast<double>(*value);
+    } else if (const auto int_value = sample_rate_node->value<int64_t>();
+              int_value.has_value()) {
+      sample_rate_seconds = static_cast<double>(*int_value);
     } else {
       *out_error =
           "Section '[director]' key 'sample_rate' must be a number of "

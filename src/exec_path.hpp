@@ -48,13 +48,15 @@ inline std::filesystem::path exec_path() {
 #if defined(_WIN32)
   GetModuleFileNameA(NULL, raw_path, MAX_PATH);
   return std::string(raw_path);
-#elif defined(__linux__) 
+#else
+#if defined(__linux__)
   realpath(PROC_SELF_EXE, raw_path);
 #elif defined(__APPLE__)
   uint32_t rawPathSize = (uint32_t)sizeof(raw_path);
   _NSGetExecutablePath(raw_path, &rawPathSize);
 #endif
   return std::filesystem::weakly_canonical(raw_path);
+#endif
 }
 
 inline std::string exec_dir(std::string relative = "") {

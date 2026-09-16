@@ -447,7 +447,6 @@ int main(int argc, char *argv[]) {
       count_err++;
       agent.runtime()->stop();
       throw std::runtime_error(string("Critical error in getting data: ") + plugin->error());
-      return 0ms;
     }
     if (!silent) {
       cerr << "\r\x1b[0KMessages processed: " << fg::green << ++count

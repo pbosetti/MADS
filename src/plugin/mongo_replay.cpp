@@ -49,7 +49,7 @@ public:
   // return_type::warning: content of _error is added to result befor publishing
   // return_type::error: the result only has a copy of _error
   // return_type::critical: execution stops
-  return_type get_output(json &out, vector<unsigned char> *blob = nullptr) override {
+  return_type get_output(json &out, vector<unsigned char> * = nullptr) override {
     out.clear();
     if (!_agent_id.empty()) out["agent_id"] = _agent_id;
     string collection_name;
@@ -175,7 +175,7 @@ MADS_REGISTER_PLUGINS(Mongo_replayPlugin)
 
 For testing purposes, when directly executing the plugin
 */
-int main(int argc, char const *argv[]) {
+int main(int, char const *[]) {
   Mongo_replayPlugin plugin;
   json output, params;
 
