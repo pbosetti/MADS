@@ -59,9 +59,7 @@ FetchContent_Declare(json
   EXCLUDE_FROM_ALL
 )
 
-FetchContent_MakeAvailable(pugg json)
-
-FetchContent_Populate(plugin
+FetchContent_Declare(plugin
   GIT_REPOSITORY https://github.com/pbosetti/mads_plugin.git
   GIT_TAG        {{plugin_git_tag}}
   GIT_SHALLOW    TRUE
@@ -70,8 +68,10 @@ FetchContent_Populate(plugin
   BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/_deps/plugin-build
 )
 
+FetchContent_MakeAvailable(pugg json plugin)
+
+
 include_directories(BEFORE 
-  ${plugin_SOURCE_DIR}/src
   ${json_SOURCE_DIR}/include
 )
 
@@ -128,7 +128,8 @@ endif()
 include_directories(${json_SOURCE_DIR}/include)
 
 # These plugins are always build and use for testing
-add_plugin({{name}})
+# Link to MADS::Plugin to get the correct include directories
+add_plugin({{name}} LIBS MADS::Plugin)
 
 
 # INSTALL ######################################################################
