@@ -18,7 +18,7 @@ The version a project builds against is fixed by one line in its
 ```cmake
 FetchContent_Declare(plugin
   GIT_REPOSITORY https://github.com/pbosetti/mads_plugin.git
-  GIT_TAG        v2.4-P8        # ← the P<N> suffix is the protocol version
+  GIT_TAG        v2.5-P8        # ← the P<N> suffix is the protocol version
   ...
 )
 ```

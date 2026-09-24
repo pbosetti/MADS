@@ -59,7 +59,7 @@ static string ucfirst(string str) {
 static json plugin_deps(string const &manifest_path) {
   json deps = {{"plugin_protocol", 8},
                {"plugin_min_protocol", 7},
-               {"plugin_git_tag", "v2.4-P8"},
+               {"plugin_git_tag", "v2.5-P8"},
                {"pugg_git_tag", "1.2.0"},
                {"json_version", "v3.12.0"}};
   ifstream mf(manifest_path);

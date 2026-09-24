@@ -83,7 +83,9 @@ This document summarizes what changed between `v2.4.3` and `v2.5.0`.
   brings `mads_plugin` in with `FetchContent_MakeAvailable()` and links the
   plugin against the `MADS::Plugin` target for its include directories,
   instead of the deprecated `FetchContent_Populate()` plus a hand-added
-  include path.
+  include path. `mads plugin --update` migrates P6/P7 plugins to the same
+  `v2.5-P8` tag, and MADS itself builds against it; plugins already on
+  `v2.4-P8` keep working as they are.
 - **Rust plugin scaffolding gives hints that work on macOS.** `mads plugin
   --rust` and the generated `README.md` used to name `lib<name>.so` on every
   platform, while cargo builds `lib<name>.dylib` on macOS. They now name the

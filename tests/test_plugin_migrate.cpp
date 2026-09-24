@@ -405,7 +405,7 @@ TEST_CASE("load_migrations chains the real P6->P7 and P7->P8 steps",
   REQUIRE(p6p7["cmake"]["pugg_git_tag"] == "1.1.0");
 
   const json &p7p8 = steps.at(7).doc;
-  REQUIRE(p7p8["cmake"]["plugin_git_tag"] == "v2.4-P8");
+  REQUIRE(p7p8["cmake"]["plugin_git_tag"] == "v2.5-P8");
   REQUIRE(p7p8["cmake"]["pugg_git_tag"] == "1.2.0");
 }
 
@@ -654,7 +654,7 @@ TEST_CASE("run() migrates P6 -> P8 end to end with the compile check disabled",
   REQUIRE(read_file(project / "CMakeLists.txt", cmake_after));
   // Both migration steps' cmake transforms applied, in order: final tag is
   // the P7->P8 target, not the intermediate P6->P7 one.
-  REQUIRE(cmake_after.find("v2.4-P8") != std::string::npos);
+  REQUIRE(cmake_after.find("v2.5-P8") != std::string::npos);
   REQUIRE(cmake_after.find("v2.3-P6") == std::string::npos);
   REQUIRE(cmake_after.find("1.2.0") != std::string::npos);
   // The nlohmann/json FetchContent block was modernized to the tarball form.
@@ -770,7 +770,7 @@ TEST_CASE("run() honours --from/--to overrides and stops short of the full chain
   std::string cmake_after;
   REQUIRE(read_file(project / "CMakeLists.txt", cmake_after));
   REQUIRE(cmake_after.find("v2.3-P7") != std::string::npos);
-  REQUIRE(cmake_after.find("v2.4-P8") == std::string::npos);
+  REQUIRE(cmake_after.find("v2.5-P8") == std::string::npos);
 
   std::string src_after;
   REQUIRE(read_file(project / "src" / "p6demo.cpp", src_after));
