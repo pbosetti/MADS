@@ -109,8 +109,8 @@ This document summarizes what changed between `v2.4.3` and `v2.5.0`.
   through one was unknown to the other's `wepoll` handle table: `epoll_ctl`
   failed with `EINVAL` and libzmq aborted. libzmq is now built as a DLL on
   Windows (and only there, since ELF and Mach-O already merge the duplicate
-  definitions). On Windows, `libzmq` is therefore a runtime dependency of
-  `MadsCore.dll` and must sit next to it.
+  definitions), so Windows installs ship a `libzmq` DLL alongside
+  `MadsCore.dll`.
 - **Windows: `mads up` tears down the whole process tree.** `reproc_kill()`
   terminated only the direct child, which for a shelled-out command is
   `cmd.exe`, so the real workload survived as an orphan still holding the
