@@ -1,6 +1,14 @@
-# Release 2.4.3
+# Release 2.5.0
 
-This is a bugfix release. Expect it to be fully compatible with previous `v2.4.x` releases.
+This document summarizes what changed between `v2.4.3` and `v2.5.0`.
+
+> **Compatibility note:** this is a minor bump, and the agent/broker settings
+> handshake is gated on `MAJOR.MINOR` (`LIB_VERSION_CHECK`), so `v2.5.x` agents
+> will not exchange settings with a `v2.4.x` broker (or vice versa): upgrade the
+> broker and agents together. The published *data* wire format is unchanged,
+> and `bag` files are unaffected. `MadsCore`'s `Agent` class gained new members,
+> so downstream C++ agents must be **recompiled**. The plugin protocol stays at
+> **P8**: existing `.plugin` binaries keep loading without being rebuilt.
 
 ## New features
 
@@ -17,22 +25,34 @@ This is a bugfix release. Expect it to be fully compatible with previous `v2.4.x
   `mads-federate`) or wants the offset measured along the data path itself;
   each pong carries the responder's own already-adopted offset, so a peer
   measurement composes onto the broker-anchored value rather than being an
-  unrelated number. Several agents sharing one host's clock
-  (`Mads::detail::clock_domain_id()`: the kernel boot id on Linux, hostname
-  elsewhere) converge on one identical adopted offset via periodic
-  announcements and a deterministic min-delay adoption rule
+  unrelated number. `clock_source = "none"` opts out entirely. Several agents
+  sharing one host's clock (`Mads::detail::clock_domain_id()`: the kernel boot
+  id on Linux, hostname elsewhere) converge on one identical adopted offset via
+  periodic announcements and a deterministic min-delay adoption rule
   (`Mads::ClockConsensus`), so N agents on one host cost one measurement per
-  re-measure interval, not N. `[agents] clock_correction` (opt-in, off by
-  default) steps `publish()`'s stamped `timestamp`/`timecode` by the adopted
-  offset and tags the payload with `clock_offset_us`/`clock_ref`, so a
-  corrected message is never silently indistinguishable from an uncorrected
-  one. `mads top` shows a passive per-host skew column fed from existing
-  traffic (no protocol at all), and `mads top --probe` turns it into an
-  active fleet-wide clock-offset table grouped by clock domain. New
-  `[agents]` keys: `clock_source`, `clock_sync_responder` (default `true`),
-  `clock_interval_ms`, `clock_announce_ms`, `clock_correction`. `clocksync`
-  joins `control`/`agent_event` as a reserved topic name, excluded from
-  `mads-record`/`mads-federate` like they already are.
+  re-measure interval, not N.
+
+  Offsets are measured, never silently applied: `[agents] clock_correction`
+  (opt-in, off by default) steps `publish()`'s stamped `timestamp`/`timecode`
+  by the adopted offset and tags the payload with `clock_offset_us`/
+  `clock_ref`, so a corrected message is never indistinguishable from an
+  uncorrected one. New `[agents]` keys: `clock_source`, `clock_sync_responder`
+  (default `true`), `clock_interval_ms` (default `0`: measure once at
+  startup), `clock_announce_ms` (default `5000`), `clock_correction`. The
+  broker side is stateless and purely additive. `clocksync` joins `control`/
+  `agent_event` as a reserved topic name: it never reaches an application's
+  `receive()` loop, and `mads-record`/`mads-federate` exclude it just as they
+  already did the other two. See `man mads-broker`.
+
+- **`mads top` shows clock skew, and `mads top --probe` measures offsets.**
+  Below the topic table, a new *Host clock skew* section lists, per host seen
+  in traffic, the minimum of (local receive time - message `timestamp`) over
+  the trailing window. It adds no protocol at all, being computed from traffic
+  that already carries `timestamp`/`hostname`, and is labelled *skew* because
+  it bounds offset plus one-way delay rather than measuring offset alone.
+  `--probe` replaces the topic table with an active, fleet-wide clock-offset
+  table grouped by clock domain, fed by `Agent::broadcast_clock_probe()`. It is
+  the one mode in which `mads top` publishes anything. See `man mads-top`.
 
 - **`mads plugin` scaffolds an agent skill alongside the plugin sources.** A
   plugin author has the plugin API -- three small headers, well commented --
@@ -46,14 +66,150 @@ This is a bugfix release. Expect it to be fully compatible with previous `v2.4.x
   settings section is the agent name and `kind()` is merely checked against the
   driver name. `mads plugin` now writes `.claude/skills/mads-plugin/` (SKILL.md
   plus reference files on the lifecycle, the full return-type matrix per host,
-  settings injection, frames/topics/blobs, testing, deployment and migration)
-  and an `AGENTS.md` pointing at it, for C++ and Rust plugins alike. The skill
-  is installed with MADS under `share/skills/`, stamped with the MADS version
-  and protocol numbers at scaffolding time, refreshed by `mads plugin --update`
-  so it never documents a protocol the project no longer targets, and skipped
-  with `--no-skill`. `share/plugin_deps.json` gained `plugin_min_protocol`,
-  which a unit test pins to `MADS_PLUGIN_MIN_PROTOCOL` in the loader so the
-  skill cannot drift from the code it describes.
+  settings injection, frames/topics/blobs, testing, deployment, migration and
+  Rust specifics) and an `AGENTS.md` pointing at it, for C++ and Rust plugins
+  alike. The skill is installed with MADS under `share/skills/`, stamped with
+  the MADS version and protocol numbers at scaffolding time, refreshed by
+  `mads plugin --update` so it never documents a protocol the project no
+  longer targets, and skipped with `--no-skill`. `share/plugin_deps.json`
+  gained `plugin_min_protocol`, which a unit test pins to
+  `MADS_PLUGIN_MIN_PROTOCOL` in the loader so the skill cannot drift from the
+  code it describes. See `man mads-plugin`.
+
+## Improvements
+
+- **Scaffolded C++ plugins pin `mads_plugin` `v2.5-P8`.** Same protocol (P8)
+  as before, so nothing needs migrating. The generated `CMakeLists.txt` now
+  brings `mads_plugin` in with `FetchContent_MakeAvailable()` and links the
+  plugin against the `MADS::Plugin` target for its include directories,
+  instead of the deprecated `FetchContent_Populate()` plus a hand-added
+  include path.
+- **Rust plugin scaffolding gives hints that work on macOS.** `mads plugin
+  --rust` and the generated `README.md` used to name `lib<name>.so` on every
+  platform, while cargo builds `lib<name>.dylib` on macOS. They now name the
+  right file, explain installing it as `<name>.plugin` so that the agent name
+  (taken from the file stem) matches the `[<name>]` settings section, and show
+  running straight from the build tree with `-n <name>`.
+
+## Fixes
+
+- **Rust source plugins no longer hand the loader an unterminated blob
+  format.** The `mads-plugin` crate's `blob_format` shim returned a Rust
+  `&str` pointer directly, and a `&str` is neither NUL-terminated nor
+  guaranteed a valid pointer when empty, so the loader could read past the end
+  of the format string. The crate now keeps a NUL-terminated copy per plugin
+  instance and returns `NULL` for an empty format; `mads_rust_plugin.h`
+  documents the ownership and termination contract. The FFI declarations also
+  use `c_char` instead of a hard-coded `i8`, so the crate builds on targets
+  where C `char` is unsigned (e.g. Linux on ARM64).
+- **Windows: one libzmq per process.** libzmq was linked statically into
+  `MadsCore.dll` *and* into every executable that also calls the ZMQ API
+  directly, and PE gives each module its own copy of a static library's
+  globals. Such a process ran two libzmq instances, and a socket created
+  through one was unknown to the other's `wepoll` handle table: `epoll_ctl`
+  failed with `EINVAL` and libzmq aborted. libzmq is now built as a DLL on
+  Windows (and only there, since ELF and Mach-O already merge the duplicate
+  definitions). On Windows, `libzmq` is therefore a runtime dependency of
+  `MadsCore.dll` and must sit next to it.
+- **Windows: `mads up` tears down the whole process tree.** `reproc_kill()`
+  terminated only the direct child, which for a shelled-out command is
+  `cmd.exe`, so the real workload survived as an orphan still holding the
+  stdout/stderr pipes, and teardown hung until it exited on its own. Managed
+  processes now run in a job object, the Windows analogue of the
+  `setpgid()`/`killpg()` pairing used on POSIX.
+- **Windows: `mads up` runs commands containing double quotes.** reproc
+  escaped each `"` as `\"` following CRT rules, which `cmd.exe` does not
+  implement, so a command as ordinary as `echo hi >> "C:\dir\f.txt"` failed
+  with *"The filename, directory name, or volume label syntax is incorrect"*.
+  The `cmd.exe` command line is now built verbatim, exactly as
+  `mads_director` does. `--no-shell` keeps the argv path, where CRT escaping is
+  the right convention.
+- **Windows: clean MSVC builds.** Fixed a handful of compiler warnings, and
+  the `/w` used to silence the vendored `glfw`/`mads-director` targets no
+  longer triggers MSVC's D9025 *"overriding '/Wn' with '/w'"* warning.
+
+## For developers
+
+- The Windows test suite now passes (521/521, down from 43 failures to 0) and
+  runs in ~24 s instead of ~204 s. The PowerShell test wrapper
+  (`tests/win_test_wrapper.ps1`) is gone, replaced by `catch_discover_tests`'
+  `DL_PATHS`.
+- The coverage CI job reserves the test suite's fixed port band (42100-44999)
+  with `net.ipv4.ip_local_reserved_ports`, which sits inside Linux's default
+  ephemeral range and caused sporadic `EADDRINUSE` failures.
+- `COMPILE.md`: the Android build on Windows also needs `pkgconfig`
+  (`choco install pkgconfiglite`), and documents building the package with
+  `-t package`.
+
+---
+
+# Release 2.4.3
+
+This document summarizes what changed between `v2.4.2` and `v2.4.3`. This is a
+patch release: the wire protocol and the settings handshake are unchanged, and
+everything new is additive and off by default. Expect it to be fully
+compatible with previous `v2.4.x` releases.
+
+## New features
+
+- **`[broker] max_open_files`, and a broker that says when it runs out of
+  descriptors.** Fleet size is bounded by the broker's open-file limit, not by
+  anything in libzmq: every connected agent holds two of the broker's
+  descriptors for as long as it stays connected -- its publisher on the XSUB
+  frontend, its subscriber on the XPUB backend -- plus a third while it fetches
+  its settings. With the usual soft `RLIMIT_NOFILE` of 1024 that caps a fleet
+  at roughly **490 agents**.
+
+  Past that ceiling the broker used to fail in the least helpful way possible.
+  libzmq's TCP listener counts `EMFILE`/`ENFILE` among the errnos `accept()`
+  may fail with harmlessly, so it raised `ZMQ_EVENT_ACCEPT_FAILED` -- which
+  nothing listened for -- and refused every new agent in complete silence. The
+  only thing that printed was the service-discovery thread, because its
+  once-a-second `getifaddrs()` and broadcast sockets are the broker's only
+  *timed* descriptor allocations and so were the first to fail. The result was
+  a broker that looked healthy while turning agents away, reporting
+  `ServiceDiscovery advertising failed: getifaddrs failed: Too many open
+  files`, which points at discovery rather than at the limit actually
+  responsible.
+
+  Three changes, all backwards-compatible:
+  - `max_open_files` under `[broker]` sets the soft limit at startup, before
+    any socket is bound. Unset (the default) leaves it untouched and merely
+    reports it; `0` asks for as much as the process is permitted. It cannot
+    exceed the hard limit -- a larger value is clamped with a warning, since
+    only `LimitNOFILE=` or a privileged `ulimit -Hn` can lift that. A value
+    *below* the current soft limit lowers it, which needs no privileges, caps
+    a broker sharing a box with other services, and is the only way to
+    exercise the descriptor-exhaustion path without root; lowering is always
+    reported as a warning, being much the rarer intent. Portable: the target
+    is capped by `kern.maxfilesperproc` on macOS and `fs.nr_open` on Linux,
+    and reported as not applicable on Windows, which has no per-process
+    descriptor limit for sockets.
+  - The broker now watches its bound sockets for `ZMQ_EVENT_ACCEPT_FAILED` and
+    reports a refused agent explicitly, naming the endpoint, the limit in
+    force, the agent count it allows and how to raise it. Rate-limited,
+    because a full descriptor table leaves the listening socket permanently
+    readable and libzmq retries the failing accept as fast as it can poll.
+  - Any discovery socket error caused by a full descriptor table now says so,
+    and the advertising loop reports an unchanged failure at most once every
+    30 seconds instead of every second.
+
+  The shipped systemd template (`mads service`) now sets `LimitNOFILE=65536`;
+  without it a unit inherits systemd's `DefaultLimitNOFILE`, which is that same
+  1024 on most distributions. `mads doctor` gained a check reporting the limit
+  in force and whether it leaves room for the fleet.
+
+- **`mads up --base-instance-id` now works.** The option was accepted but
+  never read, so passing it did nothing. It now overrides every section's
+  `base_instance_id` in `director.toml`, including sections that set the key
+  themselves, so one plan can run on several machines with disjoint `${ID}`
+  ranges without editing the file per host: `scale = 3` with
+  `--base-instance-id 100` expands `${ID}` to 100, 101 and 102. As with the
+  file's own key it shifts `${ID}` only; instance names stay `name[1]`..
+  `name[N]`. Omitting the option keeps each section's own value, whereas
+  `--base-instance-id 0` renumbers them all down to 0; a negative value is
+  rejected. Pair it with `--dry-run` to see the resolved numbering. See
+  `man mads-up`.
 
 ## Fixes
 
@@ -122,6 +278,8 @@ This is a bugfix release. Expect it to be fully compatible with previous `v2.4.x
   probe now speaks CURVE when `--crypto` is given, `--graph-live` reads the
   subscription table the same way, and when the check does fail its hint now
   names the encryption mismatch as a possible cause in both directions.
+
+---
 
 # Release 2.4.2
 
@@ -309,53 +467,6 @@ exactly as before until you opt in. Details and examples are in
   `director.toml` expands exactly as before; a negative value is rejected at
   load time. The same file therefore scales identically under the Director GUI
   and under `mads up` / `mads doctor --plan`.
-
-- **`[broker] max_open_files`, and a broker that says when it runs out of
-  descriptors.** Fleet size is bounded by the broker's open-file limit, not by
-  anything in libzmq: every connected agent holds two of the broker's
-  descriptors for as long as it stays connected -- its publisher on the XSUB
-  frontend, its subscriber on the XPUB backend -- plus a third while it fetches
-  its settings. With the usual soft `RLIMIT_NOFILE` of 1024 that caps a fleet
-  at roughly **490 agents**.
-
-  Past that ceiling the broker used to fail in the least helpful way possible.
-  libzmq's TCP listener counts `EMFILE`/`ENFILE` among the errnos `accept()`
-  may fail with harmlessly, so it raised `ZMQ_EVENT_ACCEPT_FAILED` -- which
-  nothing listened for -- and refused every new agent in complete silence. The
-  only thing that printed was the service-discovery thread, because its
-  once-a-second `getifaddrs()` and broadcast sockets are the broker's only
-  *timed* descriptor allocations and so were the first to fail. The result was
-  a broker that looked healthy while turning agents away, reporting
-  `ServiceDiscovery advertising failed: getifaddrs failed: Too many open
-  files`, which points at discovery rather than at the limit actually
-  responsible.
-
-  Three changes, all backwards-compatible:
-  - `max_open_files` under `[broker]` sets the soft limit at startup, before
-    any socket is bound. Unset (the default) leaves it untouched and merely
-    reports it; `0` asks for as much as the process is permitted. It cannot
-    exceed the hard limit -- a larger value is clamped with a warning, since
-    only `LimitNOFILE=` or a privileged `ulimit -Hn` can lift that. A value
-    *below* the current soft limit lowers it, which needs no privileges, caps
-    a broker sharing a box with other services, and is the only way to
-    exercise the descriptor-exhaustion path without root; lowering is always
-    reported as a warning, being much the rarer intent. Portable: the target
-    is capped by `kern.maxfilesperproc` on macOS and `fs.nr_open` on Linux,
-    and reported as not applicable on Windows, which has no per-process
-    descriptor limit for sockets.
-  - The broker now watches its bound sockets for `ZMQ_EVENT_ACCEPT_FAILED` and
-    reports a refused agent explicitly, naming the endpoint, the limit in
-    force, the agent count it allows and how to raise it. Rate-limited,
-    because a full descriptor table leaves the listening socket permanently
-    readable and libzmq retries the failing accept as fast as it can poll.
-  - Any discovery socket error caused by a full descriptor table now says so,
-    and the advertising loop reports an unchanged failure at most once every
-    30 seconds instead of every second.
-
-  The shipped systemd template (`mads service`) now sets `LimitNOFILE=65536`;
-  without it a unit inherits systemd's `DefaultLimitNOFILE`, which is that same
-  1024 on most distributions. `mads doctor` gained a check reporting the limit
-  in force and whether it leaves room for the fleet.
 
 ## Fixes
 
