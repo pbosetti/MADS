@@ -95,7 +95,10 @@ public:
 
   /// True while the slot still holds the published payload.
   bool valid() const {
-    return _seq && _seq->load(std::memory_order_acquire) == _expected;
+    // Seqlock read side: the fence keeps the payload reads that precede this
+    // call from being reordered after the counter load.
+    std::atomic_thread_fence(std::memory_order_acquire);
+    return _seq && _seq->load(std::memory_order_relaxed) == _expected;
   }
   explicit operator bool() const { return _data != nullptr; }
 
