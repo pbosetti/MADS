@@ -141,11 +141,19 @@ FetchContent_Declare(
   GIT_SHALLOW TRUE
 )
 
+# libzmq-ipc-socket-buffers.patch: libzmq applies ZMQ_SNDBUF/ZMQ_RCVBUF to tcp
+# sockets only, so ipc:// connections are stuck with the OS default AF_UNIX
+# buffers (8 KiB on macOS: ~1.4 GB/s instead of ~30 GB/s for 1 MiB messages,
+# slower than loopback tcp). Not in libzmq master as of 2026-10; drop the
+# patch once a release includes it.
 FetchContent_Declare(
   libzmq
   GIT_REPOSITORY https://github.com/zeromq/libzmq.git
   GIT_TAG v4.3.5
   GIT_SHALLOW TRUE
+  PATCH_COMMAND ${CMAKE_COMMAND}
+    -DPATCH_FILE=${CMAKE_CURRENT_LIST_DIR}/patches/libzmq-ipc-socket-buffers.patch
+    -P ${CMAKE_CURRENT_LIST_DIR}/patches/apply_patch.cmake
 )
 
 FetchContent_Declare(

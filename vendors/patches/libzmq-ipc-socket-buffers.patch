@@ -1,0 +1,67 @@
+diff --git a/src/ip.cpp b/src/ip.cpp
+index 98804e8..b3b2d5c 100644
+--- a/src/ip.cpp
++++ b/src/ip.cpp
+@@ -236,6 +236,18 @@ int zmq::set_nosigpipe (fd_t s_)
+     return 0;
+ }
+ 
++void zmq::set_socket_buffers (fd_t s_, int sndbuf_, int rcvbuf_)
++{
++    //  Unlike set_tcp_send_buffer() & co. this does not assert: AF_UNIX
++    //  sockets may not support SO_SNDBUF/SO_RCVBUF on every platform.
++    if (sndbuf_ >= 0)
++        setsockopt (s_, SOL_SOCKET, SO_SNDBUF,
++                    reinterpret_cast<char *> (&sndbuf_), sizeof sndbuf_);
++    if (rcvbuf_ >= 0)
++        setsockopt (s_, SOL_SOCKET, SO_RCVBUF,
++                    reinterpret_cast<char *> (&rcvbuf_), sizeof rcvbuf_);
++}
++
+ int zmq::bind_to_device (fd_t s_, const std::string &bound_device_)
+ {
+ #ifdef ZMQ_HAVE_SO_BINDTODEVICE
+diff --git a/src/ip.hpp b/src/ip.hpp
+index 9ec54fc..197d3d7 100644
+--- a/src/ip.hpp
++++ b/src/ip.hpp
+@@ -31,6 +31,11 @@ void set_socket_priority (fd_t s_, int priority_);
+ // Return 0 on success, -1 if the connection has been closed by the peer
+ int set_nosigpipe (fd_t s_);
+ 
++//  Applies ZMQ_SNDBUF/ZMQ_RCVBUF (when >= 0) to a stream socket that is not
++//  TCP, e.g. an IPC (AF_UNIX) one. Best effort: the OS default stays in place
++//  if a platform does not support resizing the buffers of this socket type.
++void set_socket_buffers (fd_t s_, int sndbuf_, int rcvbuf_);
++
+ // Binds the underlying socket to the given device, eg. VRF or interface
+ int bind_to_device (fd_t s_, const std::string &bound_device_);
+ 
+diff --git a/src/ipc_connecter.cpp b/src/ipc_connecter.cpp
+index 3f98874..4590b5d 100644
+--- a/src/ipc_connecter.cpp
++++ b/src/ipc_connecter.cpp
+@@ -101,6 +101,9 @@ int zmq::ipc_connecter_t::open ()
+     //  Set the non-blocking flag.
+     unblock_socket (_s);
+ 
++    //  Set the socket buffer limits for the underlying transport.
++    set_socket_buffers (_s, options.sndbuf, options.rcvbuf);
++
+     //  Connect to the remote peer.
+     const int rc = ::connect (_s, _addr->resolved.ipc_addr->addr (),
+                               _addr->resolved.ipc_addr->addrlen ());
+diff --git a/src/ipc_listener.cpp b/src/ipc_listener.cpp
+index 5012604..94a14ec 100644
+--- a/src/ipc_listener.cpp
++++ b/src/ipc_listener.cpp
+@@ -323,6 +323,9 @@ zmq::fd_t zmq::ipc_listener_t::accept ()
+         return retired_fd;
+     }
+ 
++    //  Set the socket buffer limits for the underlying transport.
++    set_socket_buffers (sock, options.sndbuf, options.rcvbuf);
++
+     return sock;
+ }
+ 
