@@ -62,6 +62,34 @@ public:
     if (!_agent_id.empty()) out["agent_id"] = _agent_id;
     return return_type::success;
   }
+{% if zero_copy %}
+  // Zero-copy output (protocol P9). When this agent has `shm = true` in its
+  // settings and its broker runs on this host, the host calls
+  // get_output_shared() instead of get_output(), handing out a slot of the
+  // agent's shared-memory ring: write the blob straight into it, and only a
+  // small reference travels through the broker. get_output() above stays
+  // mandatory: the host falls back to it when shared memory is off, and for
+  // a blob that does not fit the slot.
+  bool supports_shared_output() const override { return true; }
+
+  // Fill `out` as in get_output(), write at most buf.capacity bytes of blob
+  // into buf.data and set buf.size (0 = no blob). If the blob does not fit:
+  // write nothing, set buf.size to the size it needs and return retry, without
+  // consuming the pending data -- the host then calls get_output() for it.
+  // buf.data is valid only during this call.
+  return_type get_output_shared(json &out, BlobBuffer &buf) override {
+    out.clear();
+
+    // e.g. size_t n = produce_frame_into(buf.data, buf.capacity);
+    buf.size = 0; // bytes written; 0 = no blob
+
+    if (!_agent_id.empty()) out["agent_id"] = _agent_id;
+    return return_type::success;
+  }
+{% else %}
+  // Shared-memory zero-copy output (protocol P9): scaffold the plugin with
+  // `mads plugin --zero-copy` to get the get_output_shared() hook.
+{% endif %}
 
   void set_params(const json &params) override {
     // Call the parent class method to set the common parameters 
@@ -143,6 +171,13 @@ int main(int argc, char const *argv[]) {
 
   // Produce output
   cout << "Output: " << output << endl;
-
+{% if zero_copy %}
+  // Zero-copy path, with a local buffer standing in for the ring slot
+  vector<unsigned char> slot(1024);
+  BlobBuffer buf{slot.data(), slot.size(), 0};
+  plugin.get_output_shared(output, buf);
+  cout << "Shared output: " << output << " (" << buf.size << " blob bytes)"
+       << endl;
+{% endif %}
   return 0;
 }

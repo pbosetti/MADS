@@ -12,6 +12,7 @@
   [**\-o, \-\-overwrite**]
   [**\-r, \-\-rust**]
   [**\-s, \-\-datastore**]
+  [**\-z, \-\-zero-copy**]
   [**\-\-no-skill**]
   [**\-v, \-\-version**]
   [**\-h, \-\-help**]
@@ -120,11 +121,21 @@ crate version in **Cargo.toml** rather than the **\-P**\ *N* tag.
 **\-r**, **\-\-rust**
 :  Generate a Rust plugin project instead of a C++ one. Produces
    **Cargo.toml**, **src/lib.rs**, and **README.md**. The **\-\-datastore**
-   option is ignored when this flag is set.
+   and **\-\-zero-copy** options are ignored when this flag is set.
 
 **\-s**, **\-\-datastore**
 :  Enable datastore support in the generated C++ plugin (default: false).
    Not applicable to Rust plugins.
+
+**\-z**, **\-\-zero-copy**
+:  Add the shared-memory zero-copy hooks of plugin protocol P9 to the
+   generated C++ plugin (default: false): **get_output_shared()** for a
+   source, **load_data_view()** and **process_shared()** for a filter,
+   **load_data_view()** for a sink, with their contract in comments. They take
+   effect when the agent runs with **shm = true** (output) or receives
+   shared-memory blobs (input); the classic **get_output()**, **process()**
+   and **load_data()** remain as the fallback path. Not applicable to Rust
+   plugins.
 
 **\-\-no-skill**
 :  Do not write **AGENTS.md** and **.claude/skills/mads-plugin/**. With

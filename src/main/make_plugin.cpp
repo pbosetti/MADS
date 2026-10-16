@@ -115,6 +115,7 @@ int main(int argc, char **argv) {
     ("o,overwrite", "Overwrite existing files")
     ("r,rust", "Create a Rust plugin (uses mads-rsource/rfilter/rsink loader)")
     ("s,datastore", "Enable Datastore class for persistency (C++ only)")
+    ("z,zero-copy", "Add the shared-memory zero-copy hooks of protocol P9 (C++ only)")
     ("no-skill", "Do not write the mads-plugin agent skill and AGENTS.md")
     ("u,update", "Migrate an existing plugin (dir from --dir or positional) to the current protocol")
     ("dry-run", "With --update: show the changes without writing any file")
@@ -224,6 +225,7 @@ int main(int argc, char **argv) {
   } else {
     data["datastore"] = false;
   }
+  data["zero_copy"] = options_parsed.count("zero-copy") > 0;
 
   data["class_name"] = ucfirst(data["name"]) + "Plugin";
   data["parent_header"] = string(data["type"]) + ".hpp";
@@ -264,6 +266,10 @@ int main(int argc, char **argv) {
 
   if (rust && options_parsed.count("datastore") > 0) {
     cerr << fg::yellow << "Warning: --datastore is not applicable to Rust plugins, ignoring"
+         << fg::reset << endl;
+  }
+  if (rust && options_parsed.count("zero-copy") > 0) {
+    cerr << fg::yellow << "Warning: --zero-copy is not applicable to Rust plugins, ignoring"
          << fg::reset << endl;
   }
 

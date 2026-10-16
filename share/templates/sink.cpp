@@ -57,6 +57,24 @@ public:
     // Do something with the input data
     return return_type::success;
   }
+{% if zero_copy %}
+  // Zero-copy input (protocol P9). Blobs published through a producer's
+  // shared-memory ring (`shm = true` on the producer) arrive here instead of
+  // in load_data(): `blob` is a read-only view straight into the producer's
+  // memory. It stays valid until the next load_data()/load_data_view() call,
+  // and only while the producer has not overwritten the slot (the ring is
+  // lossy): copy whatever you need to keep. The host re-checks the slot after
+  // this call and counts a torn read if it was overwritten meanwhile. Return
+  // codes as in load_data(); the default implementation copies the view and
+  // calls load_data().
+  return_type load_data_view(json const &input, string topic, BlobView blob) override {
+    // Read blob.data[0 .. blob.size) in place
+    return return_type::success;
+  }
+{% else %}
+  // Shared-memory zero-copy input (protocol P9): scaffold the plugin with
+  // `mads plugin --zero-copy` to get the load_data_view() hook.
+{% endif %}
 
   void set_params(const json &params) override { 
     // Call the parent class method to set the common parameters 
@@ -136,6 +154,10 @@ int main(int argc, char const *argv[]) {
 
   // Process data
   plugin.load_data(input);
-
+{% if zero_copy %}
+  // Zero-copy path, with a local buffer standing in for the ring slot
+  vector<unsigned char> slot(1024, 0x2a);
+  plugin.load_data_view(input, "", BlobView{slot.data(), slot.size()});
+{% endif %}
   return 0;
 }

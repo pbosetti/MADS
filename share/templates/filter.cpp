@@ -56,6 +56,21 @@ public:
     // Do something with the input data
     return return_type::success;
   }
+{% if zero_copy %}
+  // Zero-copy input (protocol P9). Blobs published through a producer's
+  // shared-memory ring (`shm = true` on the producer) arrive here instead of
+  // in load_data(): `blob` is a read-only view straight into the producer's
+  // memory. It stays valid until the next load_data()/load_data_view() call,
+  // and only while the producer has not overwritten the slot (the ring is
+  // lossy): copy whatever you need to keep. The host re-checks the slot after
+  // process() and drops the output of a torn read. Return codes as in
+  // load_data(); the default implementation copies the view and calls
+  // load_data().
+  return_type load_data_view(json const &input, string topic, BlobView blob) override {
+    // Read blob.data[0 .. blob.size) in place
+    return return_type::success;
+  }
+{% endif %}
 
   // We calculate the average of the last N values for each key and store it
   // into the output json object
@@ -75,7 +90,35 @@ public:
     if (!_agent_id.empty()) out["agent_id"] = _agent_id;
     return return_type::success;
   }
-  
+{% if zero_copy %}
+  // Zero-copy output (protocol P9). When this agent has `shm = true` in its
+  // settings and its broker runs on this host, the host calls
+  // process_shared() instead of process() after each new input, handing out
+  // a slot of the agent's shared-memory ring for the output blob. process()
+  // above stays mandatory: the host falls back to it when shared memory is
+  // off, and for a blob that does not fit the slot.
+  bool supports_shared_output() const override { return true; }
+
+  // Fill `out` as in process(), write at most buf.capacity bytes of blob into
+  // buf.data and set buf.size (0 = no blob). If the blob does not fit: write
+  // nothing, set buf.size to the size it needs and return retry, keeping the
+  // loaded input -- the host then calls process() for it. buf.data is valid
+  // only during this call.
+  return_type process_shared(json &out, BlobBuffer &buf) override {
+    out.clear();
+
+    // e.g. size_t n = transform_into(buf.data, buf.capacity);
+    buf.size = 0; // bytes written; 0 = no blob
+
+    if (!_agent_id.empty()) out["agent_id"] = _agent_id;
+    return return_type::success;
+  }
+{% else %}
+  // Shared-memory zero-copy input/output (protocol P9): scaffold the plugin
+  // with `mads plugin --zero-copy` to get the load_data_view() and
+  // process_shared() hooks.
+{% endif %}
+
   void set_params(const json &params) override {
     // Call the parent class method to set the common parameters 
     // (e.g. agent_id, etc.)
@@ -167,7 +210,15 @@ int main(int argc, char const *argv[])
   // Process data
   plugin.process(output);
   cout << "Output: " << output.dump(2) << endl;
-
+{% if zero_copy %}
+  // Zero-copy paths, with local buffers standing in for the ring slots
+  vector<unsigned char> in_slot(1024, 0x2a), out_slot(1024);
+  plugin.load_data_view(input, "", BlobView{in_slot.data(), in_slot.size()});
+  BlobBuffer buf{out_slot.data(), out_slot.size(), 0};
+  plugin.process_shared(output, buf);
+  cout << "Shared output: " << output.dump(2) << " (" << buf.size
+       << " blob bytes)" << endl;
+{% endif %}
 
   return 0;
 }
