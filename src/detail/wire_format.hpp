@@ -13,6 +13,15 @@ after the topic:
 
   [ topic ] [ header ] [ payload ]            (data)
   [ topic ] [ header ] [ meta ] [ raw bytes ] (blob, has_blob flag set)
+  [ topic ] [ header ] [ meta ] [ ]           (shared-memory reference,
+                                               has_blob AND has_shm set)
+
+A shared-memory reference carries the user meta plus an "shm" ShmDescriptor
+(src/mads_shm.hpp) in its MsgPack meta part, while the bytes stay in the
+producer's ring. It is laid out as a blob with an empty bytes part, so a
+receiver that predates the shm flag (and ignores unknown flags) sees an empty
+blob with the producer's meta, never a bogus data frame. Receivers that know
+the flag must therefore test has_shm before has_blob.
 
 The header begins with the 4-byte magic "MADS" and has a fixed size, which
 makes it reliably distinguishable from legacy frames:
@@ -39,10 +48,10 @@ namespace Mads::detail {
 constexpr char WIRE_MAGIC[4] = {'M', 'A', 'D', 'S'};
 constexpr uint8_t WIRE_HDR_VERSION = 1;
 constexpr uint8_t WIRE_FLAG_BLOB = 0x01;
-// Shared-memory reference: [ topic ][ header ][ meta ], where meta carries
-// the user meta plus an "shm" ShmDescriptor (src/mads_shm.hpp) and the bytes
-// stay in the producer's ring. Always uses the extended header.
+// Shared-memory reference (see above): always sent with WIRE_FLAG_BLOB too,
+// i.e. with the WIRE_FLAGS_SHM_REF flags, and always in the extended header.
 constexpr uint8_t WIRE_FLAG_SHM = 0x02;
+constexpr uint8_t WIRE_FLAGS_SHM_REF = WIRE_FLAG_BLOB | WIRE_FLAG_SHM;
 constexpr size_t WIRE_HEADER_SIZE = 4 /*magic*/ + 1 /*ver*/ + 1 /*format*/ +
                                     1 /*compression*/ + 1 /*flags*/ +
                                     4 /*schema*/;

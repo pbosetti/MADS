@@ -1204,13 +1204,14 @@ void Agent::publish_slot(WritableSlot &slot, size_t size, nlohmann::json meta,
   meta["shm"] = d;
   if (topic.empty())
     topic = _pub_topic;
-  // [topic][header(shm)][msgpack(meta + descriptor)]: always the extended
-  // header, so only receivers that know the flag ever see one.
+  // [topic][header(blob|shm)][msgpack(meta + descriptor)][empty]: receivers
+  // that predate the shm flag take it for an empty blob (wire_format.hpp).
   zmq::multipart_t message;
   message.addstr(topic);
   message.addstr(
-      make_wire_header(WireFormat::MsgPack, Comp::None, WIRE_FLAG_SHM));
+      make_wire_header(WireFormat::MsgPack, Comp::None, WIRE_FLAGS_SHM_REF));
   message.addstr(encode_payload(meta, WireFormat::MsgPack));
+  message.addmem(nullptr, 0);
   {
     std::lock_guard<std::mutex> lock(_publish_mutex);
     message.send(_publisher);
@@ -1359,7 +1360,8 @@ message_type Agent::receive(bool dont_block) {
   WireHeader hdr;
   if (parse_wire_header(message.at(1).to_string(), hdr)) {
     if (hdr.has_shm) {
-      // Shared-memory reference: [topic][header][meta + "shm" descriptor].
+      // Shared-memory reference: [topic][header][meta + "shm" descriptor]
+      // [empty]. It has the blob flag too, so it is tested first.
       // Unresolvable references (foreign host, producer gone, overwritten)
       // and torn copies return none, like a dropped frame.
       if (parts < 3) {

@@ -95,9 +95,10 @@ struct RawInjector {
     using namespace Mads::detail;
     zmq::multipart_t m;
     m.addstr("inj");
-    m.addstr(
-        make_wire_header(Mads::WireFormat::MsgPack, Comp::None, WIRE_FLAG_SHM));
+    m.addstr(make_wire_header(Mads::WireFormat::MsgPack, Comp::None,
+                              WIRE_FLAGS_SHM_REF));
     m.addstr(encode_payload(meta, Mads::WireFormat::MsgPack));
+    m.addmem(nullptr, 0);
     m.send(pub);
   }
 };
@@ -268,6 +269,43 @@ TEST_CASE("shm producer -> non-opted consumer gets an ordinary blob",
   auto [vt, vf, vb] = sub->last_blob_view();
   CHECK(vb.size() == payload.size());
   CHECK_FALSE(sub->last_shared());
+}
+
+TEST_CASE("a reference frame reads as an empty blob to pre-shm receivers",
+          "[agent_shm]") {
+  using namespace Mads::detail;
+  mads_test::RunningGuard guard;
+  const uint16_t port = 44709;
+  auto pub = make_pub("shmpub10", port);
+  zmq::context_t ctx;
+  zmq::socket_t raw(ctx, zmq::socket_type::sub);
+  raw.set(zmq::sockopt::subscribe, "");
+  raw.set(zmq::sockopt::rcvtimeo, 50);
+  raw.connect(mads_test::loopback(port));
+
+  const auto payload = pattern(3000, 4);
+  zmq::multipart_t frame;
+  REQUIRE(retry_until(
+      [&] { pub->publish(payload, {{"format", "old"}}, "o"); },
+      [&] {
+        frame.clear();
+        return frame.recv(raw) && frame.at(0).to_string() == "o";
+      }));
+  // [topic][header][meta][empty bytes]
+  REQUIRE(frame.size() == 4);
+  WireHeader hdr;
+  REQUIRE(parse_wire_header(frame.at(1).to_string(), hdr));
+  CHECK(hdr.has_shm);
+  // What a receiver ignoring the shm flag acts on: a blob with zero bytes
+  // and the producer's meta, not a data frame.
+  CHECK(hdr.has_blob);
+  CHECK(frame.at(3).size() == 0);
+  std::string meta_text;
+  REQUIRE(decode_to_json_text(frame.at(2).to_string(), hdr.format,
+                              hdr.compression, meta_text));
+  auto meta = nlohmann::json::parse(meta_text);
+  CHECK(meta.at("format") == "old");
+  CHECK(meta.contains("shm"));
 }
 
 TEST_CASE("publish_slot() publishes bytes written in place", "[agent_shm]") {

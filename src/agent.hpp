@@ -705,7 +705,8 @@ public:
 
   /**
    * @brief Publishes the first `size` bytes written into `slot` as a
-   * shared-memory reference: [topic][header(shm)][meta + "shm" descriptor].
+   * shared-memory reference: [topic][header(blob|shm)][meta + "shm"
+   * descriptor][empty] (see detail/wire_format.hpp).
    *
    * `meta` is stamped like a blob's (timestamp, timecode, agent_id,
    * hostname). The slot is consumed.
