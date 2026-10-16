@@ -309,11 +309,11 @@ TEST_CASE("an oversize blob falls back to an inline publish", "[agent_shm]") {
                   [&] { return sub->receive(true) == message_type::blob; }));
   CHECK(std::get<2>(sub->last_blob()) == big);
   // A fitting blob from the same producer still goes through the ring.
-  const auto small = pattern(100, 2);
+  const auto fitting = pattern(100, 2);
   REQUIRE(
-      retry_until([&] { pub->publish(small, {{"format", "s"}}, "o"); },
+      retry_until([&] { pub->publish(fitting, {{"format", "s"}}, "o"); },
                   [&] { return sub->receive(true) == message_type::shared; }));
-  CHECK(sub->last_shared().size() == small.size());
+  CHECK(sub->last_shared().size() == fitting.size());
 }
 
 // ---------------------------------------------------------------------------
