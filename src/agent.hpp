@@ -1565,6 +1565,10 @@ protected:
   // `transport` reply (empty if none).
   std::string _transport_mode_override;
   std::string _transport_mode = "auto";
+  // Kernel buffers for ipc:// connections (ipc_sndbuf/ipc_rcvbuf; <= 0 keeps
+  // the OS default), resolved by _apply_socket_options().
+  int _ipc_sndbuf = 0;
+  int _ipc_rcvbuf = 0;
   std::string _transport = "tcp";
   std::string _transport_reply;
   std::string _pub_topic;

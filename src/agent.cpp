@@ -2065,6 +2065,19 @@ void Agent::_start_clock_thread() {
   });
 }
 
+// connect() for the publisher/subscriber: an ipc:// endpoint gets the ipc
+// kernel buffers (for that endpoint only, see detail::with_ipc_buffers()).
+static void connect_endpoint(zmq::socket_t &socket, string const &endpoint,
+                             int ipc_sndbuf, int ipc_rcvbuf) {
+  auto e = Mads::detail::parse_endpoint(endpoint);
+  if (!e || !e->is_ipc()) {
+    socket.connect(endpoint);
+    return;
+  }
+  Mads::detail::with_ipc_buffers(socket, {ipc_sndbuf, ipc_rcvbuf},
+                                 [&] { socket.connect(endpoint); });
+}
+
 void Agent::connect_pub(chrono::milliseconds delay) {
   // Must be attached before connect()/bind(), or libzmq may fire (and this
   // miss) the very first lifecycle event. attach() rather than start(): the
@@ -2081,7 +2094,7 @@ void Agent::connect_pub(chrono::milliseconds delay) {
     if (delay.count() > 0)
       this_thread::sleep_for(delay);
   } else {
-    _publisher.connect(_pub_endpoint);
+    connect_endpoint(_publisher, _pub_endpoint, _ipc_sndbuf, _ipc_rcvbuf);
     if (delay.count() > 0) {
       // A real ZMQ_EVENT_HANDSHAKE_SUCCEEDED replaces the blind sleep the
       // PUB/SUB slow-joiner problem used to require (ZMQ_DEVELOPMENT.md
@@ -2137,7 +2150,7 @@ void Agent::connect_sub() {
     _pub_endpoint = "tcp://*:" + port;
     _subscriber.bind(_pub_endpoint);
   } else
-    _subscriber.connect(_sub_endpoint);
+    connect_endpoint(_subscriber, _sub_endpoint, _ipc_sndbuf, _ipc_rcvbuf);
   // P2 (MQTT-style wildcards): a sub_topic entry with no '+'/'#' subscribes
   // exactly as before -- identical subscribe() call, identical wire
   // SUBSCRIBE frame. Only entries containing a wildcard token take the
@@ -2466,6 +2479,9 @@ void Agent::_apply_socket_options() {
   auto opts = Mads::detail::SocketOptions::resolve(_config["agents"], _config[_name]);
   opts.apply(_publisher);
   opts.apply(_subscriber);
+  auto ipc = Mads::detail::IpcBuffers::resolve(_config["agents"], _config[_name]);
+  _ipc_sndbuf = ipc.sndbuf;
+  _ipc_rcvbuf = ipc.rcvbuf;
 }
 
 void Agent::set_delivery(Delivery d) {

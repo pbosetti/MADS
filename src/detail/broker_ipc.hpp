@@ -19,6 +19,7 @@ Socket-file lifecycle, as libzmq 4.3.5 handles it (src/ipc_listener.cpp):
 #include "endpoint.hpp"
 #include "host_token.hpp"
 #include "runtime_dir.hpp"
+#include "socket_options.hpp"
 #include "transport.hpp"
 
 #include <cstdint>
@@ -221,7 +222,8 @@ private:
 // Returns true if the ipc endpoint is bound.
 inline bool bind_broker_ipc(zmq::socket_t &socket, std::string &endpoint,
                             IpcSocketFile &file,
-                            std::vector<std::string> &warnings) {
+                            std::vector<std::string> &warnings,
+                            IpcBuffers const &buffers = {}) {
   if (endpoint.empty())
     return false;
   auto e = parse_endpoint(endpoint);
@@ -246,7 +248,7 @@ inline bool bind_broker_ipc(zmq::socket_t &socket, std::string &endpoint,
     break;
   }
   try {
-    socket.bind(endpoint);
+    with_ipc_buffers(socket, buffers, [&] { socket.bind(endpoint); });
   } catch (zmq::error_t const &err) {
     warnings.push_back("could not bind " + endpoint + ": " + err.what());
     endpoint.clear();

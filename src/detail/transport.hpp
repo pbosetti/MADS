@@ -24,6 +24,11 @@ Configuration keys
   [agents]  transport     string  "auto" (default) | "tcp" | "ipc";
   [<agent>] transport             the agent section wins over [agents];
                                   the --transport CLI option wins over both
+  [agents]  ipc_sndbuf    int     kernel buffers of ipc:// connections only
+            ipc_rcvbuf    int     (default 1 MiB, 0 = OS default; agent
+                                  section first, then [agents]; the broker
+                                  reads [broker], then [agents]); see
+                                  detail::IpcBuffers in socket_options.hpp
   [<agent>] shm           bool    default false; publish blobs via a
                                   shared-memory ring
             shm_slots     int     default 8

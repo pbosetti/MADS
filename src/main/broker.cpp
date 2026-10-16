@@ -785,6 +785,9 @@ int main(int argc, char **argv) {
       config[name], frontend_address, backend_address, settings_address);
   Mads::detail::IpcSocketFile frontend_ipc_file, backend_ipc_file,
       settings_ipc_file;
+  // Kernel buffers for the ipc endpoints only (ipc_sndbuf/ipc_rcvbuf).
+  const auto ipc_buffers =
+      Mads::detail::IpcBuffers::resolve(config["agents"], config[name]);
   // Called on every orderly exit path: libzmq does not remove the socket
   // files on close (see detail/broker_ipc.hpp). A crash leaves stale files,
   // which the next broker's bind() replaces.
@@ -814,7 +817,8 @@ int main(int argc, char **argv) {
     accept_watch.watch(frontend, watch_label(frontend_address, ipc.frontend));
     frontend.bind(frontend_address);
     if (Mads::detail::bind_broker_ipc(frontend, ipc.frontend,
-                                      frontend_ipc_file, ipc.warnings))
+                                      frontend_ipc_file, ipc.warnings,
+                                      ipc_buffers))
       std::cout << "Binding broker frontend (XSUB) at " << style::bold
                 << ipc.frontend << style::reset << endl;
     std::cout << "Binding broker backend (XPUB) at " << style::bold
@@ -822,7 +826,7 @@ int main(int argc, char **argv) {
     accept_watch.watch(backend, watch_label(backend_address, ipc.backend));
     backend.bind(backend_address);
     if (Mads::detail::bind_broker_ipc(backend, ipc.backend, backend_ipc_file,
-                                      ipc.warnings))
+                                      ipc.warnings, ipc_buffers))
       std::cout << "Binding broker backend (XPUB) at " << style::bold
                 << ipc.backend << style::reset << endl;
     report_ipc_warnings();
@@ -887,7 +891,8 @@ int main(int argc, char **argv) {
                      watch_label(settings_address, ipc.settings));
   settings_router.bind(settings_address);
   const bool settings_ipc_bound = Mads::detail::bind_broker_ipc(
-      settings_router, ipc.settings, settings_ipc_file, ipc.warnings);
+      settings_router, ipc.settings, settings_ipc_file, ipc.warnings,
+      ipc_buffers);
   accept_watch.start_reporting(fd_soft_limit, daemon);
   cout << "Binding broker shared settings (ROUTER, " << settings_workers
        << " worker" << (settings_workers == 1 ? "" : "s") << ") at "

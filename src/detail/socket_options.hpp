@@ -115,4 +115,55 @@ struct SocketOptions {
   }
 };
 
+// Kernel socket buffers for ipc:// endpoints (keys ipc_sndbuf/ipc_rcvbuf,
+// bytes; 0 or less keeps the OS default). They matter far more than for tcp:
+// AF_UNIX stream sockets default to 8 KiB on macOS, which caps a broker hop
+// at ~1.4 GB/s, while 1 MiB lifts it to ~30 GB/s. Needs the libzmq patch in
+// vendors/patches (stock libzmq applies ZMQ_SNDBUF/ZMQ_RCVBUF to tcp only).
+constexpr int IPC_SOCKBUF_DEFAULT = 1 << 20;
+
+struct IpcBuffers {
+  int sndbuf = IPC_SOCKBUF_DEFAULT;
+  int rcvbuf = IPC_SOCKBUF_DEFAULT;
+
+  static IpcBuffers resolve(toml::node_view<toml::node> fleet_cfg,
+                            toml::node_view<toml::node> agent_cfg) {
+    IpcBuffers b;
+    if (auto v = resolve_setting<int>(fleet_cfg, agent_cfg, "ipc_sndbuf"))
+      b.sndbuf = *v;
+    if (auto v = resolve_setting<int>(fleet_cfg, agent_cfg, "ipc_rcvbuf"))
+      b.rcvbuf = *v;
+    return b;
+  }
+};
+
+// Runs `fn` -- a single ipc:// bind() or connect() on `socket` -- with
+// ZMQ_SNDBUF/ZMQ_RCVBUF set to the ipc buffer sizes, then puts the socket's
+// previous values back. libzmq copies the socket options into each listener
+// (bind) and session (connect) as it creates them, so the sizes apply to
+// that endpoint only: the tcp endpoints of the same socket keep the plain
+// sndbuf/rcvbuf settings, or the OS default and its autotuning.
+template <typename F>
+void with_ipc_buffers(zmq::socket_t &socket, IpcBuffers const &buffers,
+                      F &&fn) {
+  const int prev_snd = socket.get(zmq::sockopt::sndbuf);
+  const int prev_rcv = socket.get(zmq::sockopt::rcvbuf);
+  struct Restore {
+    zmq::socket_t &s;
+    int snd, rcv;
+    ~Restore() {
+      try {
+        s.set(zmq::sockopt::sndbuf, snd);
+        s.set(zmq::sockopt::rcvbuf, rcv);
+      } catch (...) { // never throw from a destructor
+      }
+    }
+  } restore{socket, prev_snd, prev_rcv};
+  if (buffers.sndbuf > 0)
+    socket.set(zmq::sockopt::sndbuf, buffers.sndbuf);
+  if (buffers.rcvbuf > 0)
+    socket.set(zmq::sockopt::rcvbuf, buffers.rcvbuf);
+  fn();
+}
+
 } // namespace Mads::detail

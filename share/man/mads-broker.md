@@ -61,7 +61,19 @@ unedited settings file behaves exactly as before they existed.
 :  Kernel socket buffer size, useful for tuning high-rate sources. Unset by
    default, which leaves the OS/libzmq default untouched. Same
    `[agents]`-then-per-agent-override resolution as the keepalive settings
-   above.
+   above. Applies to tcp and, unless overridden by the two keys below, to
+   ipc connections too.
+
+**ipc_sndbuf**, **ipc_rcvbuf** (`[agents]`, integer, bytes, default 1048576)
+:  Kernel socket buffer size of **ipc://** connections only: the broker's ipc
+   endpoints and the agents that connect to them; tcp endpoints of the same
+   sockets are unaffected. The OS default for Unix-domain sockets is small (8
+   KiB on macOS), which limits a broker hop to about 1.4 GB/s and makes ipc
+   slower than loopback tcp for messages of a few hundred KiB and up; 1 MiB
+   lifts the limit (about 30 GB/s on the same machine). 0 keeps the OS
+   default. Resolved like **sndbuf**; the broker reads `[broker]`, then
+   `[agents]`. Needs the libzmq patch MADS builds with (stock libzmq 4.3.5
+   applies socket buffer sizes to tcp only).
 
 **heartbeat_ivl**, **heartbeat_ttl**, **heartbeat_timeout** (`[agents]`, integer, milliseconds)
 :  Makes libzmq exchange ZMTP `PING`/`PONG` commands, the only
