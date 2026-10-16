@@ -31,6 +31,9 @@ Configuration keys
 */
 #pragma once
 
+#include "endpoint.hpp"
+
+#include <cctype>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -109,6 +112,54 @@ inline std::optional<TransportInfo> parse_transport_reply(std::string_view s) {
   if (j.is_discarded() || !j.is_object())
     return std::nullopt;
   return j.get<TransportInfo>();
+}
+
+// Whether a shared-memory producer may publish ring references: its broker
+// (and hence, normally, its consumers) must run on this host. Returns "" if
+// so, or the reason why not. Pure, for testability; Agent passes its own
+// state and Mads::detail::host_token().
+//
+//   - transport "ipc", or an ipc/inproc endpoint: local by construction;
+//   - a `transport` reply naming the broker's host token: authoritative (so
+//     an ssh tunnel on localhost that reaches a remote broker is not local);
+//   - otherwise, from the tcp address: loopback, a wildcard bind, or this
+//     host's name (the part of `own_token` before '/').
+inline std::string shm_unusable_reason(std::string_view transport,
+                                       std::string_view pub_endpoint,
+                                       std::string_view transport_reply,
+                                       std::string const &own_token) {
+  if (transport == "ipc")
+    return {};
+  auto ep = parse_endpoint(pub_endpoint);
+  if (ep && (ep->is_ipc() || ep->is_inproc()))
+    return {};
+  if (auto info = parse_transport_reply(transport_reply);
+      info && !info->host_token.empty()) {
+    if (info->host_token == own_token)
+      return {};
+    return "the broker runs on another host (" + info->host_token + ")";
+  }
+  if (!ep)
+    return "cannot tell where the broker runs (endpoint '" +
+           std::string(pub_endpoint) + "')";
+  auto lower = [](std::string s) {
+    for (auto &c : s)
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+  };
+  std::string host = lower(ep->host);
+  if (host.size() > 2 && host.front() == '[' && host.back() == ']')
+    host = host.substr(1, host.size() - 2);
+  if (host == "localhost" || host == "::1" || host == "*" ||
+      host == "0.0.0.0" || host.rfind("127.", 0) == 0)
+    return {};
+  // This host's name, short or fully qualified on either side.
+  std::string own_host = lower(own_token.substr(0, own_token.find('/')));
+  if (!own_host.empty() &&
+      (host == own_host || own_host.rfind(host + ".", 0) == 0 ||
+       host.rfind(own_host + ".", 0) == 0))
+    return {};
+  return "the broker at " + ep->host + " is not on this host";
 }
 
 } // namespace Mads::detail

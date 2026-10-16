@@ -13,6 +13,7 @@
 #include <nlohmann/json.hpp>
 
 #include "agent.hpp"
+#include "detail/wire_format.hpp"
 #include "mads_test_helpers.hpp"
 
 using namespace std::chrono_literals;
@@ -262,4 +263,59 @@ TEST_CASE("dropped_messages() counts malformed frames and the agent stays "
   REQUIRE(topic == "mal");
   REQUIRE(doc.at("ok") == true);
   REQUIRE(sub->dropped_messages() == dropped_after_bad); // no further drops
+}
+
+// ---------------------------------------------------------------------------
+// Shared-memory reference frames: [topic][header(shm)][meta + descriptor]
+// (pub/sub coverage in tests/test_agent_shm.cpp)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("wire header carries the shm flag independently of the blob flag",
+          "[agent_wire][shm]") {
+  using namespace Mads::detail;
+  WireHeader h;
+  REQUIRE(parse_wire_header(
+      make_wire_header(Mads::WireFormat::MsgPack, Comp::None, WIRE_FLAG_SHM),
+      h));
+  CHECK(h.has_shm);
+  CHECK_FALSE(h.has_blob);
+  CHECK(h.format == static_cast<uint8_t>(Mads::WireFormat::MsgPack));
+  REQUIRE(parse_wire_header(
+      make_wire_header(Mads::WireFormat::Json, Comp::None, true), h));
+  CHECK(h.has_blob);
+  CHECK_FALSE(h.has_shm);
+  // The legacy bool overload never sets the shm flag.
+  REQUIRE(parse_wire_header(
+      make_wire_header(Mads::WireFormat::Json, Comp::Snappy, false), h));
+  CHECK_FALSE(h.has_shm);
+  CHECK_FALSE(h.has_blob);
+}
+
+TEST_CASE("shm descriptor round-trips through the encoded meta",
+          "[agent_wire][shm]") {
+  using namespace Mads::detail;
+  Mads::ShmDescriptor d;
+  d.segment = "/mads_0000002a00000001";
+  d.slot = 3;
+  d.seq = 42;
+  d.size = 1234567;
+  d.nonce = "00112233445566778899aabbccddeeff";
+  d.host = "host/id";
+  nlohmann::json meta = {{"format", "raw"}, {"shm", d}};
+  CHECK(meta["shm"].at("seg") == d.segment);
+  for (auto fmt : {Mads::WireFormat::MsgPack, Mads::WireFormat::Json}) {
+    std::string text;
+    REQUIRE(decode_to_json_text(encode_payload(meta, fmt),
+                                static_cast<uint8_t>(fmt),
+                                static_cast<uint8_t>(Comp::None), text));
+    auto back =
+        nlohmann::json::parse(text).at("shm").get<Mads::ShmDescriptor>();
+    CHECK(back.segment == d.segment);
+    CHECK(back.slot == d.slot);
+    CHECK(back.seq == d.seq);
+    CHECK(back.size == d.size);
+    CHECK(back.nonce == d.nonce);
+    CHECK(back.host == d.host);
+  }
+  CHECK_THROWS(nlohmann::json{{"seg", "x"}}.get<Mads::ShmDescriptor>());
 }

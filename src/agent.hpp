@@ -45,6 +45,7 @@ Author(s): Paolo Bosetti
 #include <zmq_addon.hpp>
 #include <mutex>
 #include <condition_variable>
+#include <array>
 #include <optional>
 #include <span>
 #include <atomic>
@@ -52,6 +53,7 @@ Author(s): Paolo Bosetti
 #include "clock_offset.hpp"
 #include "curve.hpp"
 #include "exec_path.hpp"
+#include "mads_shm.hpp"
 #include "socket_monitor.hpp"
 #include "topic_match.hpp"
 
@@ -65,6 +67,11 @@ using namespace rang;
 #endif
 
 namespace Mads {
+
+namespace shm {
+class SharedRing;
+class SegmentCache;
+} // namespace shm
 
 template<typename T> struct SharedLatest {
   std::mutex mtx;
@@ -599,6 +606,13 @@ public:
    * apply); this is purely a difference in how the received frame is
    * exposed to the caller, not in what gets delivered.
    *
+   * One exception to "verbatim": a shared-memory reference (whose bytes live
+   * in the producer's ring, and mean nothing once recorded) is materialized
+   * into an ordinary MsgPack blob frame [header][meta][bytes]. If the
+   * reference cannot be resolved, or the slot is overwritten while copying,
+   * the message is dropped (counted in shm_failed()/shm_torn()) and this
+   * returns false.
+   *
    * @param topic Out param: the topic frame.
    * @param parts Out param: every frame after the topic, in wire order.
    *   Cleared and repopulated on a successful receive; left untouched if
@@ -630,6 +644,141 @@ public:
   void publish_raw_message(const std::string &topic,
                            const std::vector<std::string> &parts);
 
+  /*
+   ____  _                        _
+  / ___|| |__   __ _ _ __ ___  __| |  _ __ ___   ___ _ __ ___
+  \___ \| '_ \ / _` | '__/ _ \/ _` | | '_ ` _ \ / _ \ '_ ` _ \
+   ___) | | | | (_| | | |  __/ (_| | | | | | | |  __/ | | | | |
+  |____/|_| |_|\__,_|_|  \___|\__,_| |_| |_| |_|\___|_| |_| |_|
+
+  Shared-memory data plane (see mads_shm.hpp). A producer agent with shared
+  output enabled writes blobs into a ring of slots in a shared-memory segment
+  and publishes only a small descriptor; consumers on the same host read the
+  bytes in place (accept_shared_views(true)) or get an ordinary blob copy.
+  */
+
+  /**
+   * @brief Enables shared-memory output: creates a ring of `slots` slots of
+   * `slot_size` bytes each. From then on, blob publishes that fit a slot are
+   * sent as shared-memory references.
+   *
+   * Called by init() when the agent's section (or [agents]) has
+   * `shm = true`, with `shm_slots` and `shm_slot_size`.
+   *
+   * Only takes effect when the broker runs on this host: transport() is
+   * "ipc"; or the broker's `transport` reply carries this host's token; or,
+   * with no such reply, the tcp broker address is loopback or this host's
+   * name. Otherwise it prints a warning and blobs stay inline. A ring that
+   * cannot be created (OS error) is also reported with a warning. Check
+   * shared_output_enabled() for the outcome. Calling it again replaces the
+   * ring (consumers still holding views of the old one keep them).
+   *
+   * @param slots Number of ring slots (>= 2).
+   * @param slot_size Bytes per slot (> 0).
+   * @throws AgentError if not initialized, or on invalid geometry.
+   */
+  void enable_shared_output(uint32_t slots, size_t slot_size);
+
+  /**
+   * @brief Whether blob publishes go through the shared-memory ring.
+   */
+  bool shared_output_enabled() const { return _shm_ring != nullptr; }
+
+  /**
+   * @brief Capacity in bytes of each shared-memory slot, or 0 if shared
+   * output is disabled.
+   */
+  size_t shared_slot_size() const;
+
+  /**
+   * @brief Takes the next ring slot for writing (zero-copy publishing).
+   *
+   * Write at most `slot.capacity` bytes at `slot.data`, then hand the slot to
+   * publish_slot(), or give it back with abandon_slot(). Slots are taken in
+   * round-robin order: a slot is overwritten after `slots` further
+   * acquisitions, so publish it before acquiring that many more. Blob
+   * publishing with shared output enabled is meant for one thread.
+   *
+   * @throws AgentError if shared output is not enabled.
+   */
+  WritableSlot acquire_slot();
+
+  /**
+   * @brief Publishes the first `size` bytes written into `slot` as a
+   * shared-memory reference: [topic][header(shm)][meta + "shm" descriptor].
+   *
+   * `meta` is stamped like a blob's (timestamp, timecode, agent_id,
+   * hostname). The slot is consumed.
+   *
+   * @throws AgentError if not initialized, if shared output is not enabled,
+   *   if `size` exceeds the slot capacity (the slot is then abandoned), or if
+   *   `slot` is not being written (already published or abandoned, or
+   *   overwritten by a wrap).
+   */
+  void publish_slot(WritableSlot &slot, size_t size,
+                    nlohmann::json meta = nlohmann::json{{"format", "raw"}},
+                    std::string topic = "");
+
+  /**
+   * @brief Gives back a slot taken with acquire_slot() without publishing
+   * it; the next acquire_slot() reuses it. Views of the slot's previous
+   * contents stay invalid (see mads_shm.hpp). No-op if shared output is
+   * disabled or the slot was already consumed.
+   */
+  void abandon_slot(WritableSlot &slot);
+
+  /**
+   * @brief Opts this consumer into zero-copy shared-memory views (default
+   * false).
+   *
+   * When true, receive() returns message_type::shared for a shared-memory
+   * reference and the payload is available as last_shared(). When false,
+   * the payload is copied and receive() returns message_type::blob exactly
+   * as for an inline blob.
+   */
+  void accept_shared_views(bool accept) { _accept_shared_views = accept; }
+
+  /**
+   * @brief Whether receive() hands out shared-memory views.
+   */
+  bool accepts_shared_views() const { return _accept_shared_views; }
+
+  /**
+   * @brief The last shared-memory view received (receive() returned
+   * message_type::shared). Its meta() is the producer's blob meta.
+   *
+   * The referenced object is overwritten by the next receive() of a shared
+   * message; copy the SharedView (cheap, and the copy keeps the mapping
+   * alive) to keep it. As for any view, check valid() after reading the
+   * bytes.
+   */
+  SharedView const &last_shared() const { return _last_shared; }
+
+  /**
+   * @brief Topic of the message last_shared() came with.
+   */
+  std::string last_shared_topic() const;
+
+  /**
+   * @brief Shared-memory payloads dropped because the producer overwrote
+   * the slot while it was being read (torn reads): copies made by a
+   * non-opted-in receive() or by receive_raw_message(), and views reported
+   * with record_torn_view().
+   */
+  size_t shm_torn() const { return _shm_torn.load(); }
+
+  /**
+   * @brief Shared-memory references that could not be resolved (foreign
+   * host, producer gone, slot already overwritten, bad descriptor);
+   * receive() returns message_type::none for them.
+   */
+  size_t shm_failed() const { return _shm_failed.load(); }
+
+  /**
+   * @brief Counts (and logs, rate-limited) a torn read noticed by the caller:
+   * a view from last_shared() that was no longer valid() after use.
+   */
+  void record_torn_view();
 
   /*
     _                      
@@ -1362,6 +1511,32 @@ protected:
   /// "<name>@<pid>" so consensus works even when --agent-id was never set.
   std::string _clock_agent_identity() const;
 
+  /// Causes of shared-memory receive problems, each logged rate-limited.
+  enum class ShmIssue : size_t {
+    ForeignHost,
+    Unavailable,
+    Overwritten,
+    Torn,
+    Count
+  };
+
+  /// Decodes the meta part of a shared-memory reference frame and resolves
+  /// its descriptor into a view whose meta() is the user meta (without the
+  /// "shm" key). On failure counts it, logs it and returns nullopt.
+  std::optional<SharedView> _resolve_shm(const std::string &meta_part,
+                                         uint8_t format, uint8_t compression);
+
+  /// True if `view` is still valid after its bytes were copied; otherwise
+  /// counts and logs a torn read.
+  bool _shm_copy_valid(const SharedView &view);
+
+  /// Prints `msg` on the 1st, 10th, 100th, ... occurrence of `cause`.
+  void _shm_warn(ShmIssue cause, const std::string &msg);
+
+  /// Adds timestamp/timecode/agent_id/hostname (and the clock-correction
+  /// fields) to a blob's meta, unless already present.
+  void _stamp_blob_meta(nlohmann::json &meta);
+
   // Member variables
   std::string _hostname;
   std::string _name;
@@ -1484,6 +1659,22 @@ protected:
   // the design): guarded by _clocksync_mtx too.
   std::map<std::string, std::chrono::steady_clock::time_point>
       _clocksync_last_reply;
+
+  // ---- Shared-memory data plane (see mads_shm.hpp) -------------------
+  // Producer ring (null = blobs inline) and consumer segment cache, held by
+  // shared_ptr so this header needs only forward declarations.
+  std::shared_ptr<Mads::shm::SharedRing> _shm_ring;
+  std::mutex _shm_ring_mutex; // serializes acquire/commit/abandon
+  std::shared_ptr<Mads::shm::SegmentCache> _shm_cache;
+  bool _accept_shared_views = false;
+  // Guarded by _message_state_mutex, like _last_blob.
+  SharedView _last_shared;
+  std::string _last_shared_topic;
+  std::atomic<size_t> _shm_torn{0};
+  std::atomic<size_t> _shm_failed{0};
+  std::atomic<bool> _shm_oversize_warned{false};
+  std::array<std::atomic<size_t>, static_cast<size_t>(ShmIssue::Count)>
+      _shm_issue_count{};
 
 public:
   bool dummy = false;

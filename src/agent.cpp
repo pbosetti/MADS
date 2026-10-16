@@ -29,6 +29,7 @@
 #include "detail/wire_format.hpp"
 #include "exec_path.hpp"
 #include "mads.hpp"
+#include "shm/shared_ring.hpp"
 
 #ifdef _WIN32
 #include <process.h>
@@ -479,6 +480,21 @@ void Agent::init(bool crypto, bool install_watchdog) {
 
   _init_done = true;
 
+  // Shared-memory output (opt-in): [<agent>] keys win over [agents].
+  if (resolve_setting<bool>(all_cfg, cfg, "shm").value_or(false)) {
+    const auto slots = resolve_setting<int64_t>(all_cfg, cfg, "shm_slots")
+                           .value_or(SHM_SLOTS_DEFAULT);
+    const auto slot_size =
+        resolve_setting<int64_t>(all_cfg, cfg, "shm_slot_size")
+            .value_or(SHM_SLOT_SIZE_DEFAULT);
+    if (slots < 2 || slots > UINT32_MAX || slot_size <= 0)
+      throw AgentError("Invalid shared-memory geometry for " + _name +
+                       ": shm_slots = " + std::to_string(slots) +
+                       ", shm_slot_size = " + std::to_string(slot_size));
+    enable_shared_output(static_cast<uint32_t>(slots),
+                         static_cast<size_t>(slot_size));
+  }
+
   // Initial clock-offset measurement (source A only -- source "peer" needs
   // a connected socket that does not exist until connect(), so its first
   // attempt happens at the top of _start_clock_thread() instead). Skipped
@@ -768,6 +784,11 @@ void Agent::info(ostream &out) {
               : _compression == Compression::Snappy ? "snappy"
                                                     : "snappy (auto)")
       << endl;
+  if (_shm_ring) {
+    out << "  Shared memory:    " << style::bold << _shm_ring->slot_count()
+        << " x " << _shm_ring->slot_size() << " bytes" << style::reset << " ("
+        << _shm_ring->segment_name() << ")" << endl;
+  }
   if (!_agent_id.empty()) {
     out << "  Agent ID:         " << style::bold << _agent_id << style::reset
         << endl;
@@ -1021,11 +1042,7 @@ void Agent::publish(nlohmann::json payload, string topic) {
   }
 }
 
-void Agent::publish(const char *payload, size_t len,
-           nlohmann::json meta, string topic) {
-  if (!_init_done)
-    throw AgentError("Agent not initialized");
-  zmq::multipart_t message;
+void Agent::_stamp_blob_meta(nlohmann::json &meta) {
   chrono::system_clock::time_point now = chrono::system_clock::now();
   ClockOffsetResult clock_adj;
   if (_clock_correction) {
@@ -1047,6 +1064,38 @@ void Agent::publish(const char *payload, size_t len,
     meta["clock_offset_us"] = clock_adj.offset_us;
     meta["clock_ref"] = clock_adj.clock_ref();
   }
+}
+
+void Agent::publish(const char *payload, size_t len, nlohmann::json meta,
+                    string topic) {
+  if (!_init_done)
+    throw AgentError("Agent not initialized");
+  // Shared output: copy into a ring slot and publish the reference. A blob
+  // larger than a slot goes inline (warned once).
+  if (_shm_ring) {
+    if (len <= _shm_ring->slot_size()) {
+      WritableSlot slot = acquire_slot();
+      if (len > 0)
+        std::memcpy(slot.data, payload, len);
+      publish_slot(slot, len, std::move(meta), std::move(topic));
+      return;
+    }
+    if (!_shm_oversize_warned.exchange(true)) {
+#ifndef MADS_AGENT_NO_INFO
+      cerr << fg::yellow;
+#endif
+      cerr << "Warning: blob of " << len << " bytes exceeds the "
+           << _shm_ring->slot_size()
+           << "-byte shared-memory slot; publishing it inline (raise "
+              "shm_slot_size to avoid this). Reported once.";
+#ifndef MADS_AGENT_NO_INFO
+      cerr << fg::reset;
+#endif
+      cerr << endl;
+    }
+  }
+  zmq::multipart_t message;
+  _stamp_blob_meta(meta);
   if (topic.empty())
     topic = _pub_topic;
   if (_wire_format == WireFormat::MsgPack) {
@@ -1079,6 +1128,171 @@ void Agent::publish(const vector<unsigned char> &payload,
   publish(data, payload.size(), meta, topic);
 }
 
+/*
+ * Shared-memory data plane, producer side (see mads_shm.hpp)
+ */
+
+void Agent::enable_shared_output(uint32_t slots, size_t slot_size) {
+  if (!_init_done)
+    throw AgentError("Agent not initialized");
+  auto warn = [](string const &msg) {
+#ifndef MADS_AGENT_NO_INFO
+    cerr << fg::yellow << "Warning: " << msg << fg::reset << endl;
+#else
+    cerr << "Warning: " << msg << endl;
+#endif
+  };
+  const string why_not = shm_unusable_reason(_transport, _pub_endpoint,
+                                             _transport_reply, host_token());
+  if (!why_not.empty()) {
+    warn("shared-memory output disabled for " + _name + ": " + why_not +
+         "; blobs are published inline");
+    return;
+  }
+  shared_ptr<shm::SharedRing> ring;
+  try {
+    ring = shm::SharedRing::create(slots, slot_size);
+  } catch (std::invalid_argument const &e) {
+    throw AgentError(string("Invalid shared-memory geometry: ") + e.what());
+  } catch (std::exception const &e) {
+    warn("cannot create the shared-memory ring for " + _name + " (" + e.what() +
+         "); blobs are published inline");
+    return;
+  }
+  std::lock_guard<std::mutex> lock(_shm_ring_mutex);
+  _shm_ring = std::move(ring);
+  _shm_oversize_warned = false;
+}
+
+size_t Agent::shared_slot_size() const {
+  return _shm_ring ? _shm_ring->slot_size() : 0;
+}
+
+WritableSlot Agent::acquire_slot() {
+  if (!_shm_ring)
+    throw AgentError("Shared-memory output is not enabled");
+  std::lock_guard<std::mutex> lock(_shm_ring_mutex);
+  return _shm_ring->acquire();
+}
+
+void Agent::abandon_slot(WritableSlot &slot) {
+  if (!_shm_ring)
+    return;
+  std::lock_guard<std::mutex> lock(_shm_ring_mutex);
+  _shm_ring->abandon(slot);
+}
+
+void Agent::publish_slot(WritableSlot &slot, size_t size, nlohmann::json meta,
+                         string topic) {
+  if (!_init_done)
+    throw AgentError("Agent not initialized");
+  if (!_shm_ring)
+    throw AgentError("Shared-memory output is not enabled");
+  ShmDescriptor d;
+  {
+    std::lock_guard<std::mutex> lock(_shm_ring_mutex);
+    try {
+      d = _shm_ring->commit(slot, size);
+    } catch (std::length_error const &e) {
+      _shm_ring->abandon(slot);
+      throw AgentError(e.what());
+    } catch (std::logic_error const &e) {
+      throw AgentError(e.what());
+    }
+  }
+  _stamp_blob_meta(meta);
+  meta["shm"] = d;
+  if (topic.empty())
+    topic = _pub_topic;
+  // [topic][header(shm)][msgpack(meta + descriptor)]: always the extended
+  // header, so only receivers that know the flag ever see one.
+  zmq::multipart_t message;
+  message.addstr(topic);
+  message.addstr(
+      make_wire_header(WireFormat::MsgPack, Comp::None, WIRE_FLAG_SHM));
+  message.addstr(encode_payload(meta, WireFormat::MsgPack));
+  {
+    std::lock_guard<std::mutex> lock(_publish_mutex);
+    message.send(_publisher);
+  }
+}
+
+/*
+ * Shared-memory data plane, consumer side
+ */
+
+void Agent::_shm_warn(ShmIssue cause, string const &msg) {
+  const size_t n = ++_shm_issue_count[static_cast<size_t>(cause)];
+  size_t p = 1;
+  while (p < n && p <= SIZE_MAX / 10)
+    p *= 10;
+  if (p != n)
+    return;
+#ifndef MADS_AGENT_NO_INFO
+  cerr << fg::yellow;
+#endif
+  cerr << "Warning: " << msg;
+  if (n > 1)
+    cerr << " (" << n << " times)";
+#ifndef MADS_AGENT_NO_INFO
+  cerr << fg::reset;
+#endif
+  cerr << endl;
+}
+
+optional<SharedView> Agent::_resolve_shm(string const &meta_part,
+                                         uint8_t format, uint8_t compression) {
+  string meta_text;
+  nlohmann::json meta;
+  ShmDescriptor d;
+  try {
+    if (!decode_to_json_text(meta_part, format, compression, meta_text))
+      throw std::runtime_error("undecodable meta");
+    meta = nlohmann::json::parse(meta_text);
+    d = meta.at("shm").get<ShmDescriptor>();
+    meta.erase("shm");
+  } catch (...) {
+    _dropped_messages++;
+    return std::nullopt;
+  }
+  if (d.host != host_token()) {
+    _shm_failed++;
+    _shm_warn(ShmIssue::ForeignHost,
+              "shm reference from a foreign host (" + d.host +
+                  "); disable shm on the producer or use a bridge");
+    return std::nullopt;
+  }
+  if (!_shm_cache)
+    _shm_cache = make_shared<shm::SegmentCache>();
+  string error;
+  auto view = _shm_cache->view(d, std::move(meta), &error);
+  if (!view) {
+    _shm_failed++;
+    const bool overwritten = error.find("overwritten") != string::npos;
+    _shm_warn(overwritten ? ShmIssue::Overwritten : ShmIssue::Unavailable,
+              "dropping shm reference: " + error);
+  }
+  return view;
+}
+
+bool Agent::_shm_copy_valid(SharedView const &view) {
+  if (view.valid())
+    return true;
+  record_torn_view();
+  return false;
+}
+
+void Agent::record_torn_view() {
+  _shm_torn++;
+  _shm_warn(ShmIssue::Torn, "shm payload overwritten by the producer while "
+                            "being read (torn read); dropped. The consumer "
+                            "is too slow for the ring: raise shm_slots");
+}
+
+string Agent::last_shared_topic() const {
+  std::lock_guard<std::mutex> lock(_message_state_mutex);
+  return _last_shared_topic;
+}
 
 inline bool Agent::receive_raw(zmq::multipart_t &message, bool dont_block) {
   bool r = false;
@@ -1144,6 +1358,32 @@ message_type Agent::receive(bool dont_block) {
   // Extended, self-describing frame? (§1.3)
   WireHeader hdr;
   if (parse_wire_header(message.at(1).to_string(), hdr)) {
+    if (hdr.has_shm) {
+      // Shared-memory reference: [topic][header][meta + "shm" descriptor].
+      // Unresolvable references (foreign host, producer gone, overwritten)
+      // and torn copies return none, like a dropped frame.
+      if (parts < 3) {
+        _dropped_messages++;
+        return message_type::none;
+      }
+      auto view =
+          _resolve_shm(message.at(2).to_string(), hdr.format, hdr.compression);
+      if (!view)
+        return message_type::none;
+      if (_accept_shared_views) {
+        std::lock_guard<std::mutex> lock(_message_state_mutex);
+        _last_shared = std::move(*view);
+        _last_shared_topic = std::move(topic);
+        return message_type::shared;
+      }
+      vector<unsigned char> bytes(view->data(), view->data() + view->size());
+      if (!_shm_copy_valid(*view))
+        return message_type::none;
+      std::lock_guard<std::mutex> lock(_message_state_mutex);
+      _last_blob =
+          make_tuple(std::move(topic), view->meta().dump(), std::move(bytes));
+      return message_type::blob;
+    }
     if (hdr.has_blob) {
       if (parts < 4) {
         _dropped_messages++;
@@ -1266,6 +1506,27 @@ bool Agent::receive_raw_message(string &topic, vector<string> &parts,
   const size_t n = message.size();
   if (n == 0)
     return false;
+
+  // A shared-memory reference is materialized into an ordinary MsgPack blob
+  // frame: its bytes live in the producer's ring, and a recorded descriptor
+  // would be useless.
+  WireHeader hdr;
+  if (n >= 3 && parse_wire_header(message.at(1).to_string(), hdr) &&
+      hdr.has_shm) {
+    auto view =
+        _resolve_shm(message.at(2).to_string(), hdr.format, hdr.compression);
+    if (!view)
+      return false;
+    string bytes(reinterpret_cast<const char *>(view->data()), view->size());
+    if (!_shm_copy_valid(*view))
+      return false;
+    topic = message.at(0).to_string();
+    parts.clear();
+    parts.push_back(make_wire_header(WireFormat::MsgPack, Comp::None, true));
+    parts.push_back(encode_payload(view->meta(), WireFormat::MsgPack));
+    parts.push_back(std::move(bytes));
+    return true;
+  }
 
   topic = message.at(0).to_string();
   parts.clear();
