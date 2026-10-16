@@ -61,6 +61,16 @@ int agent_init(agent_t agent, bool crypto) {
   return 0;
 }
 
+void agent_set_pub_endpoint(agent_t agent, const char *endpoint) {
+  Agent *ag = reinterpret_cast<Agent *>(agent);
+  ag->set_pub_endpoint(string(endpoint));
+}
+
+void agent_set_sub_endpoint(agent_t agent, const char *endpoint) {
+  Agent *ag = reinterpret_cast<Agent *>(agent);
+  ag->set_sub_endpoint(string(endpoint));
+}
+
 void agent_install_loop_watchdog(agent_t agent) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
   ag->install_loop_watchdog();

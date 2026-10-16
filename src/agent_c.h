@@ -143,6 +143,22 @@ MADS_EXPORT int agent_init(agent_t agent, bool crypto);
 MADS_EXPORT void agent_destroy(agent_t agent);
 
 /**
+ * @brief Sets the public endpoint for the agent.
+ *
+ * @param agent Agent handle.
+ * @param endpoint Null-terminated string representing the endpoint.
+ */
+MADS_EXPORT void agent_set_pub_endpoint(agent_t agent, const char *endpoint);
+
+/**
+ * @brief Sets the subscription endpoint for the agent.
+ *
+ * @param agent Agent handle.
+ * @param endpoint Null-terminated string representing the endpoint.
+ */
+MADS_EXPORT void agent_set_sub_endpoint(agent_t agent, const char *endpoint);
+
+/**
  * @brief Sets the agent identifier.
  *
  * @param agent Agent handle.
