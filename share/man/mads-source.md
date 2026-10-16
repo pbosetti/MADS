@@ -13,6 +13,7 @@
   [**\-p, \-\-period** *sampling_period*]
   [**\-s, \-\-settings** *URI*]
   [**\-r, \-\-room** [*room*]]
+  [**\-\-transport** *mode*]
   [**\-S, \-\-save-settings** *filename*]
   [**\-o, \-\-option** *key=value*]
   [**\-\-silent**]
@@ -110,7 +111,10 @@ pub_topic = "my_plugin"
 :  if larger than 0, waits that amount of ms before sending the first message. This is useful to deal with ZeroMQ slow joiner problem, i.e. when the agent starts sending PUB messages before fully establishing the connection, with the result that those messages are lost. The delay is applied only at the beginning of the agent's life; the agent already waits a small amount of time to take care about this problem, but this option allows to increase it in case of excessive network latency.
 
 **\-s**, **\-\-settings** *URI*
-:  Path to the settings file (ini format). It can be a valid ZeroMQ url in the form tcp://host:port.
+:  Path to the settings file (ini format). It can be a valid ZeroMQ url in the form tcp://host:port, or ipc://path to fetch the settings through the broker's local settings socket (which also implies ipc for the data sockets).
+
+**\-\-transport** *mode*
+:  How to reach the broker's data sockets: **auto** (default) uses the broker's ipc:// endpoints when the broker runs on this host and its socket files are visible, tcp otherwise; **tcp** always uses the tcp addresses from the settings; **ipc** fails at startup if ipc cannot be used. Overrides the `transport` key of the agent's settings section, which in turn overrides the one in `[agents]`. The transport in use is shown in the agent's info block. See **mads-broker**(1), LOCAL TRANSPORT.
 
 **\-r**, **\-\-room** [*room*]
 :  Discover the broker settings port by listening for a broker advertisement in the named service-discovery room. If *room* is omitted, the default room is **mads**. This behavior is opt-in: when **\-\-room** is not given, the source keeps the usual settings lookup behavior and uses **\-\-settings** or the compiled default settings URI.
@@ -144,6 +148,39 @@ pub_topic = "my_plugin"
 
 **\-h**, **\-\-help**
 :  show summary of options.
+
+# SHARED MEMORY
+
+A source that publishes large binary blobs (images, point clouds) can keep
+them in shared memory instead of pushing the bytes through the broker. Set,
+in the agent's settings section:
+
+**shm** (boolean, default `false`)
+:  Publish blobs through a shared-memory ring owned by this agent. Only a
+   small descriptor travels over ZeroMQ; consumers on the same host map the
+   ring and read the bytes in place.
+
+**shm_slots** (integer, default `8`)
+:  Number of slots in the ring. The ring is **lossy**: once all slots are
+   used the oldest is overwritten, and a consumer still reading it detects
+   the overwrite and drops that message (it is counted, never delivered
+   torn). More slots give slow consumers more headroom.
+
+**shm_slot_size** (integer, bytes, default `16777216`)
+:  Size of each slot. A blob larger than a slot is sent inline, as an
+   ordinary message.
+
+Shared memory is used only when the broker runs on this host. Consumers that
+have not opted in to zero-copy, including **mads-record** and the C API,
+receive an ordinary copy of the blob, so they need no change. A consumer on
+another host cannot read the ring and reports an error: enable `shm` only
+when every consumer of the topic runs on this host.
+
+Plugins built against protocol P9 can write their output straight into a
+ring slot by overriding `supports_shared_output()` and
+`get_output_shared()`; plugins that do not keep working unchanged through
+`get_output()`, at the cost of one copy into the slot. See **mads-plugin**(1)
+and the mads_plugin README.
 
 # DEFAULT PLUGIN
 

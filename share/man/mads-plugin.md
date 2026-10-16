@@ -79,6 +79,13 @@ base-class signatures. **mads plugin \-\-update** *dir* automates this:
    manual follow-up checklist, then (unless **\-\-no-check**) compiles the
    migrated plugin so the compiler flags anything the rewrite could not handle.
 
+Some steps only move the pin. P8 to P9, for instance, adds the opt-in
+shared-memory (zero-copy) blob API with copying defaults, so a P8 plugin
+needs no source change, just a rebuild; the follow-up notes explain how to
+override `load_data_view()` or `supports_shared_output()` and
+`get_output_shared()`/`process_shared()` to opt in (see **mads-source**(1),
+SHARED MEMORY).
+
 Rust plugins are not handled by **\-\-update**: they track the **mads-plugin**
 crate version in **Cargo.toml** rather than the **\-P**\ *N* tag.
 

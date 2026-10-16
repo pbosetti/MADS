@@ -13,6 +13,7 @@
   [**\-b, \-\-dont-block**]
   [**\-s, \-\-settings** *URI*]
   [**\-r, \-\-room** [*room*]]
+  [**\-\-transport** *mode*]
   [**\-S, \-\-save-settings** *filename*]
   [**\-o, \-\-option** *key=value*]
   [**\-\-silent**]
@@ -110,7 +111,10 @@ pub_topic = "my_plugin"
 :  Do not block on read.
 
 **\-s**, **\-\-settings** *URI*
-:  Path to the settings file (ini format). It can be a valid ZeroMQ url in the form tcp://host:port.
+:  Path to the settings file (ini format). It can be a valid ZeroMQ url in the form tcp://host:port, or ipc://path to fetch the settings through the broker's local settings socket (which also implies ipc for the data sockets).
+
+**\-\-transport** *mode*
+:  How to reach the broker's data sockets: **auto** (default) uses the broker's ipc:// endpoints when the broker runs on this host and its socket files are visible, tcp otherwise; **tcp** always uses the tcp addresses from the settings; **ipc** fails at startup if ipc cannot be used. Overrides the `transport` key of the agent's settings section, which in turn overrides the one in `[agents]`. The transport in use is shown in the agent's info block. See **mads-broker**(1), LOCAL TRANSPORT.
 
 **\-r**, **\-\-room** [*room*]
 :  Discover the broker settings port by listening for a broker advertisement in the named service-discovery room. If *room* is omitted, the default room is **mads**. This behavior is opt-in: when **\-\-room** is not given, the sink keeps the usual settings lookup behavior and uses **\-\-settings** or the compiled default settings URI.
@@ -144,6 +148,19 @@ pub_topic = "my_plugin"
 
 **\-h**, **\-\-help**
 :  show summary of options.
+
+# SHARED MEMORY
+
+When a producer on this host publishes a blob through its shared-memory
+ring (`shm = true`, see **mads-source**(1), SHARED MEMORY), the sink reads it
+in place; nothing needs configuring. A plugin built against protocol P9 that
+overrides `load_data_view()` gets a read-only view of the bytes with no copy
+at all; any other plugin gets them through `load_data()` after one copy. The
+view is valid only during the call: copy what you need to keep. The ring is
+lossy, so a message whose slot the producer overwrote while it was being read
+is dropped and counted, never delivered torn. A shared-memory message from a
+producer on another host cannot be read and is reported as an error. See
+**mads-plugin**(1).
 
 # DEFAULT PLUGIN
 

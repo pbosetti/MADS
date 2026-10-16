@@ -14,6 +14,7 @@
   [**\-b, \-\-dont-block**]
   [**\-s, \-\-settings** *URI*]
   [**\-r, \-\-room** [*room*]]
+  [**\-\-transport** *mode*]
   [**\-S, \-\-save-settings** *filename*]
   [**\-o, \-\-option** *key=value*]
   [**\-\-silent**]
@@ -114,7 +115,10 @@ pub_topic = "my_plugin"
 :  If set, the agent will not block waiting for input and can ask the plugin for the next output even when no message has been received. Typically, this is used when a plugin can act both as a filter and as a source, i.e. it can produce messages on its own, depending on circumstances. If the **period** option is set, the agent will wait for that amount of time before asking the plugin for the next output.
 
 **\-s**, **\-\-settings** *URI*
-:  Path to the settings file (ini format). It can be a valid ZeroMQ url in the form tcp://host:port.
+:  Path to the settings file (ini format). It can be a valid ZeroMQ url in the form tcp://host:port, or ipc://path to fetch the settings through the broker's local settings socket (which also implies ipc for the data sockets).
+
+**\-\-transport** *mode*
+:  How to reach the broker's data sockets: **auto** (default) uses the broker's ipc:// endpoints when the broker runs on this host and its socket files are visible, tcp otherwise; **tcp** always uses the tcp addresses from the settings; **ipc** fails at startup if ipc cannot be used. Overrides the `transport` key of the agent's settings section, which in turn overrides the one in `[agents]`. The transport in use is shown in the agent's info block. See **mads-broker**(1), LOCAL TRANSPORT.
 
 **\-r**, **\-\-room** [*room*]
 :  Discover the broker settings port by listening for a broker advertisement in the named service-discovery room. If *room* is omitted, the default room is **mads**. This behavior is opt-in: when **\-\-room** is not given, the filter keeps the usual settings lookup behavior and uses **\-\-settings** or the compiled default settings URI.
@@ -148,6 +152,36 @@ pub_topic = "my_plugin"
 
 **\-h**, **\-\-help**
 :  show summary of options.
+
+# SHARED MEMORY
+
+A filter can be on both ends of the shared-memory data plane.
+
+As a **consumer**, nothing needs configuring: when a producer on this host
+publishes a blob through its shared-memory ring, the filter reads it in
+place. A plugin built against protocol P9 that overrides `load_data_view()`
+gets a read-only view of the bytes with no copy at all; any other plugin
+gets them through `load_data()` after one copy. The view is valid only
+during the call (and the following `process()`). The ring is lossy, so a
+message whose slot the producer overwrote while it was being read is
+dropped and counted, never delivered torn. A shared-memory message from a
+producer on another host cannot be read and is reported as an error.
+
+As a **producer**, set in the agent's settings section:
+
+**shm** (boolean, default `false`)
+:  Publish output blobs through a shared-memory ring owned by this agent.
+
+**shm_slots** (integer, default `8`)
+:  Number of slots in the ring.
+
+**shm_slot_size** (integer, bytes, default `16777216`)
+:  Size of each slot; larger blobs are sent inline.
+
+A P9 plugin that returns `true` from `supports_shared_output()` writes its
+output straight into a slot through `process_shared()`. See
+**mads-source**(1), SHARED MEMORY, for the full semantics, and
+**mads-plugin**(1).
 
 # DEFAULT PLUGIN
 

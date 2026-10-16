@@ -150,6 +150,60 @@ unedited settings file behaves exactly as before they existed.
    `fs.nr_open`. `mads doctor` reports the limit in force and whether it
    leaves room for the fleet.
 
+**ipc** (`[broker]`, boolean, default `true`)
+:  Also bind the frontend, backend and settings sockets on `ipc://`
+   endpoints (Unix-domain sockets), next to their `tcp://` ones. Agents on
+   the broker's host then connect through them instead of the loopback tcp
+   stack; see LOCAL TRANSPORT below. Ignored, with a warning, when the
+   libzmq build has no ipc transport: the broker then serves tcp only.
+
+**ipc_dir** (`[broker]`, string, default the runtime directory)
+:  Directory for the socket files. The default is the per-user runtime
+   directory: `$XDG_RUNTIME_DIR/mads`, else `/tmp/mads-<uid>`
+   (`%LOCALAPPDATA%\mads\run` on Windows), created owner-only (mode 0700). A
+   socket path must fit in 100 bytes (the `sun_path` limit), so keep it
+   short.
+
+**frontend_ipc**, **backend_ipc**, **settings_ipc** (`[broker]`, string)
+:  Explicit `ipc://` endpoints for one socket, overriding the path derived
+   from `ipc_dir`. Needed for a socket whose tcp address has no numeric port.
+   A value that is not an `ipc://` endpoint is ignored with a warning.
+
+# LOCAL TRANSPORT
+
+With `ipc = true` (the default) the broker binds each socket a second time,
+at `<ipc_dir>/broker-<port>-<role>.ipc`, where *port* is that socket's tcp
+port and *role* is `front`, `back` or `settings`: several brokers on one host
+therefore never collide. The startup banner and the **N** key list the ipc
+endpoints next to the tcp ones. Service discovery (**\-\-room**) still
+advertises tcp only.
+
+An ipc problem never affects tcp service: if an endpoint cannot be bound it
+is simply not offered. Before binding, the broker probes the path: a stale
+file left by a crashed broker is replaced, but a socket another live process
+still accepts connections on, or a path that is not a socket, is left alone
+and that endpoint is skipped with a warning. On an orderly exit (**Q**,
+**X**, SIGINT/SIGTERM in daemon mode) the broker removes its socket files,
+but only if they are still the ones it created.
+
+The broker answers a `transport` command on the settings socket with a
+one-frame JSON object: its host token (hostname and machine id), the ipc
+endpoint of each role (empty when not offered), and whether CURVE is on.
+Agents send it at startup and, with `transport = "auto"` (the default),
+connect over ipc when the broker runs on their host and the socket files are
+visible to them; see **mads-source**(1). A broker that predates the command
+answers with its bare version, which agents read as "tcp only".
+
+The `ip_whitelist` does not apply to ipc peers, since they have no IP
+address: the owner-only runtime directory is their access control. CURVE,
+when enabled with **\-\-crypto**, applies to the ipc endpoints exactly as to
+the tcp ones.
+
+On Windows, ipc uses AF_UNIX sockets and needs Windows 10 or later and a
+libzmq built against the Windows 10 SDK (`afunix.h`). Without it the broker
+serves tcp only, and agents fall back silently. `mads doctor` reports what
+the broker advertises and what an agent on this host would use.
+
 # CLOCK OFFSET
 
 The broker answers a `clock` command on the settings socket (the same
@@ -173,7 +227,7 @@ The upstream bug tracker can be found at https://github.com/pbosetti/MADS/issues
 
 # SEE ALSO
 
-**mads**(1), **mads-logger**(1), **mads-source**(1), **mads-sink**(1), **mads-filter**(1)
+**mads**(1), **mads-logger**(1), **mads-source**(1), **mads-sink**(1), **mads-filter**(1), **mads-doctor**(1)
 
 # FILES
 

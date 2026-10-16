@@ -29,7 +29,7 @@ things that most commonly go wrong in the first hour of using a pub-sub framewor
 URI, a stale settings file, a plugin protocol mismatch, a port already in use -- and reports each one
 as **[PASS]**, **[WARN]**, or **[FAIL]** with a one-line fix hint. It never starts a broker or an
 agent, never calls a plugin's `process()`/`get_output()`/`load_data()`, and never writes anything
-except the one narrow case **\-\-fix** covers.
+except the narrow cases **\-\-fix** covers.
 
 By default it checks, in order:
 
@@ -63,6 +63,22 @@ By default it checks, in order:
 7. **Local port-availability sanity check.** Probes the settings file's `[broker]`
    `frontend_address`/`backend_address`/`settings_address` ports on `127.0.0.1`; a port already
    answering is reported as a likely broker-already-running collision.
+8. **Local transport (ipc).** Reports whether this libzmq supports `ipc://`, and whether the
+   per-user runtime directory holding the socket files (`$XDG_RUNTIME_DIR/mads` or `/tmp/mads-<uid>`,
+   `%LOCALAPPDATA%\mads\run` on Windows) exists, belongs to the current user and is owner-only: its
+   permissions are the only access control on ipc endpoints. When the broker is reachable, doctor
+   also sends it the `transport` command, lists the ipc endpoints it advertises and whether their
+   socket files exist on this host, and predicts the transport an agent started here would select,
+   applying the agent's own rules and the settings file's `[agents] transport` value. A broker that
+   predates the command is reported as offering tcp only.
+9. **Shared-memory registry** (POSIX only). Lists `<runtime dir>/shm`, where every producer
+   running with `shm = true` registers its segments with its pid, and counts the orphans: segments
+   whose owner is no longer running, typically after a crash, which hold memory until reboot.
+   Orphans are a **[WARN]** that **\-\-fix** clears. Windows frees a segment with its last handle
+   and keeps no registry.
+10. **Open-file limit.** Reports this process's descriptor limit and the number of agents a
+    broker started the same way could serve (two descriptors per agent); see **mads-broker**(1),
+    `max_open_files`.
 
 **mads-doctor** exits **0** only if every check reported **[PASS]** or **[WARN]**; any **[FAIL]**
 makes it exit **1**.
@@ -169,9 +185,14 @@ never reported as undeclared.
 
 ## `--fix`
 
-**\-\-fix** attempts the one check with an unambiguous, non-destructive auto-fix: if the settings file
-is missing, it is scaffolded from the same template `mads ini` renders. **\-\-fix** only ever
-*creates* a missing file -- it never deletes or overwrites an existing one, however broken.
+**\-\-fix** attempts the checks with an unambiguous, non-destructive auto-fix:
+
+- if the settings file is missing, it is scaffolded from the same template `mads ini` renders.
+  **\-\-fix** only ever *creates* a missing file -- it never deletes or overwrites an existing one,
+  however broken;
+- if the shared-memory registry lists orphaned segments, they are unlinked and their registry
+  entries removed, exactly as a new producer does at startup. Segments whose owner is still running
+  are never touched.
 
 # OPTIONS
 
@@ -255,6 +276,13 @@ Check a specific settings file and CURVE keys, scaffolding the file if it is mis
 
 ```
 mads doctor -s /etc/mads/mads.ini --crypto --fix
+```
+
+Check which transport local agents would use against a broker on non-default ports, and clean up
+the shared-memory segments of crashed producers:
+
+```
+mads doctor --broker tcp://localhost:19292 --fix
 ```
 
 Sanity-check a whole deployment plan before running it for real:
