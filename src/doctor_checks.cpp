@@ -3,12 +3,20 @@
 #include "broker_probe.hpp"
 #include "detail/endpoint.hpp"
 #include "detail/fd_limit.hpp"
+#include "detail/runtime_dir.hpp"
+#include "detail/transport.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <sstream>
 #include <toml++/toml.hpp>
 #include <zmq.h>
+
+#ifndef _WIN32
+#include <cerrno>
+#include <signal.h>
+#endif
 
 namespace Mads {
 namespace Doctor {
@@ -403,6 +411,307 @@ CheckResult check_fd_limit(std::optional<int64_t> configured) {
   const auto limits = Mads::detail::query_fd_limits();
   return evaluate_fd_limit(limits.supported, limits.soft, limits.hard,
                            configured);
+}
+
+/* ---- 9. Local transport (ipc://) ------------------------------------------ */
+
+CheckResult evaluate_ipc_support(bool zmq_has_ipc) {
+  CheckResult r;
+  r.name = "ipc_support";
+  if (zmq_has_ipc) {
+    r.status = Status::Pass;
+    r.message = "This libzmq supports the ipc:// transport.";
+    return r;
+  }
+  r.status = Status::Warn;
+  r.message = "This libzmq has no ipc:// transport: agents on the broker's "
+              "host fall back to tcp loopback.";
+#ifdef _WIN32
+  r.fix_hint = "On Windows, ipc needs a libzmq built against the Windows 10+ "
+               "SDK (afunix.h); rebuild the vendored libzmq with it.";
+#else
+  r.fix_hint = "Rebuild libzmq with ipc enabled (it is on by default on "
+               "Linux and macOS).";
+#endif
+  return r;
+}
+
+RuntimeDirFacts probe_runtime_dir() {
+  RuntimeDirFacts f;
+  try {
+    const fs::path dir = Mads::detail::runtime_dir();
+    f.path = dir.string();
+    f.usable = true;
+#ifdef _WIN32
+    // %LOCALAPPDATA% is per-user by ACL; std::filesystem cannot see that.
+    f.owner_only = true;
+#else
+    std::error_code ec;
+    const auto perms = fs::status(dir, ec).permissions();
+    f.owner_only =
+        !ec && (perms & (fs::perms::group_all | fs::perms::others_all)) ==
+                   fs::perms::none;
+#endif
+  } catch (const std::exception &e) {
+    f.error = e.what();
+  }
+  return f;
+}
+
+CheckResult evaluate_runtime_dir(const RuntimeDirFacts &facts) {
+  CheckResult r;
+  r.name = "runtime_dir";
+  if (!facts.usable) {
+    r.status = Status::Fail;
+    r.message = "Runtime directory unusable: " +
+                (facts.error.empty() ? std::string("unknown error")
+                                     : facts.error);
+    r.fix_hint = "Remove or chown the directory named above (it must belong "
+                 "to the user running MADS), or set XDG_RUNTIME_DIR.";
+    return r;
+  }
+  if (!facts.owner_only) {
+    r.status = Status::Warn;
+    r.message = "Runtime directory " + facts.path +
+                " is accessible to other users: its permissions are the only "
+                "access control on ipc:// endpoints.";
+    r.fix_hint = "chmod 700 " + facts.path;
+    return r;
+  }
+  r.status = Status::Pass;
+  r.message = "Runtime directory " + facts.path + " is owner-only.";
+  return r;
+}
+
+BrokerTransportFacts collect_broker_transport(
+    const std::string &uri, const std::optional<std::string> &reply,
+    const std::string &local_host_token, bool local_has_ipc) {
+  BrokerTransportFacts f;
+  f.uri = uri;
+  f.local_host_token = local_host_token;
+  f.local_has_ipc = local_has_ipc;
+  f.replied = reply.has_value();
+  std::optional<detail::TransportInfo> info;
+  if (reply)
+    info = detail::parse_transport_reply(*reply);
+  f.supported = info.has_value();
+  if (info) {
+    f.broker_host_token = info->host_token;
+    f.curve = info->curve;
+  }
+  const std::pair<const char *, std::string> roles[] = {
+      {"frontend", info ? info->frontend_ipc : std::string()},
+      {"backend", info ? info->backend_ipc : std::string()},
+      {"settings", info ? info->settings_ipc : std::string()}};
+  for (const auto &[role, endpoint] : roles) {
+    BrokerTransportFacts::IpcEndpoint ep;
+    ep.role = role;
+    ep.endpoint = endpoint;
+    if (auto e = detail::parse_endpoint(endpoint); e && e->is_ipc()) {
+      // symlink_status(): a Windows AF_UNIX socket file is a reparse point
+      // that status() may fail to follow (same as the agent's own test).
+      std::error_code ec;
+      ep.file_exists = fs::exists(fs::symlink_status(e->path, ec));
+    }
+    f.endpoints.push_back(std::move(ep));
+  }
+  return f;
+}
+
+namespace {
+bool offers_data_ipc(const BrokerTransportFacts &f) {
+  int n = 0;
+  for (const auto &ep : f.endpoints)
+    if ((ep.role == "frontend" || ep.role == "backend") && !ep.endpoint.empty())
+      ++n;
+  return n == 2;
+}
+} // namespace
+
+CheckResult evaluate_broker_ipc_endpoints(const BrokerTransportFacts &facts) {
+  CheckResult r;
+  r.name = "broker_ipc";
+  if (!facts.replied) {
+    r.status = Status::Warn;
+    r.message = "No answer to the `transport` command from " + facts.uri +
+                "; cannot tell which local transports the broker offers.";
+    r.fix_hint = "Check the broker-reachable result above.";
+    return r;
+  }
+  if (!facts.supported) {
+    r.status = Status::Warn;
+    r.message = "The broker at " + facts.uri +
+                " predates the `transport` command: it offers tcp only.";
+    r.fix_hint = "Upgrade the broker to use ipc for local agents.";
+    return r;
+  }
+  bool any = false;
+  std::vector<std::string> missing;
+  std::ostringstream list;
+  for (const auto &ep : facts.endpoints) {
+    if (ep.endpoint.empty())
+      continue;
+    any = true;
+    list << "\n         " << ep.role << ": " << ep.endpoint
+         << (ep.file_exists ? "" : "  (socket file not found here)");
+    if (!ep.file_exists)
+      missing.push_back(ep.role);
+  }
+  if (!any) {
+    r.status = Status::Pass;
+    r.message = "The broker offers no ipc endpoints (ipc disabled, or its "
+                "libzmq has no ipc): agents use tcp.";
+    return r;
+  }
+  const bool same_host = facts.broker_host_token == facts.local_host_token;
+  if (!missing.empty() && same_host) {
+    r.status = Status::Warn;
+    r.message = "The broker advertises ipc endpoints, but some socket files "
+                "are missing on this host:" +
+                list.str();
+    r.fix_hint = "Another process may have removed them, or the broker runs "
+                 "in a container with its own filesystem; restart the broker "
+                 "or set ipc_dir to a shared directory.";
+    return r;
+  }
+  r.status = Status::Pass;
+  r.message = std::string("The broker advertises ipc endpoints") +
+              (same_host ? "" : " (on another host)") + ":" + list.str();
+  return r;
+}
+
+CheckResult evaluate_agent_transport(const BrokerTransportFacts &facts,
+                                     const std::string &mode) {
+  CheckResult r;
+  r.name = "agent_transport";
+  if (mode != "auto" && mode != "tcp" && mode != "ipc") {
+    r.status = Status::Fail;
+    r.message = "Invalid [agents] transport = \"" + mode +
+                "\": agents will refuse to start.";
+    r.fix_hint = "Use \"auto\", \"tcp\" or \"ipc\".";
+    return r;
+  }
+  if (mode == "tcp") {
+    r.status = Status::Pass;
+    r.message = "Agents on this host use tcp (transport = \"tcp\").";
+    return r;
+  }
+
+  const bool settings_over_ipc =
+      facts.uri.rfind("ipc://", 0) == 0;
+  std::string why_not;
+  if (!facts.local_has_ipc) {
+    why_not = "this libzmq has no ipc transport";
+  } else if (!facts.replied) {
+    why_not = "the broker did not answer";
+  } else if (!facts.supported) {
+    why_not = "the broker predates the transport command";
+  } else if (!offers_data_ipc(facts)) {
+    why_not = "the broker offers no ipc endpoints";
+  } else if (!settings_over_ipc &&
+             facts.broker_host_token != facts.local_host_token) {
+    why_not = "the broker runs on another host";
+  } else {
+    for (const auto &ep : facts.endpoints) {
+      if ((ep.role == "frontend" || ep.role == "backend") && !ep.file_exists) {
+        why_not = "the ipc socket " + ep.endpoint + " is not reachable here";
+        break;
+      }
+    }
+  }
+
+  if (why_not.empty()) {
+    r.status = Status::Pass;
+    r.message = "Agents on this host would use ipc (transport = \"" + mode +
+                "\").";
+    return r;
+  }
+  if (mode == "ipc" || settings_over_ipc) {
+    r.status = Status::Fail;
+    r.message = "Agents on this host would refuse to start: " +
+                std::string(mode == "ipc" ? "transport = \"ipc\"" :
+                                            "settings fetched over ipc") +
+                ", but " + why_not + ".";
+    r.fix_hint = "Set transport = \"auto\" (or \"tcp\") in [agents], or use a "
+                 "tcp:// settings URI.";
+    return r;
+  }
+  r.status = Status::Pass;
+  r.message = "Agents on this host would use tcp: " + why_not + ".";
+  return r;
+}
+
+/* ---- 10. Shared-memory segment registry ----------------------------------- */
+
+bool pid_alive(int64_t pid) {
+#ifdef _WIN32
+  (void)pid;
+  return true;
+#else
+  if (pid <= 0)
+    return true;
+  return ::kill(static_cast<pid_t>(pid), 0) == 0 || errno != ESRCH;
+#endif
+}
+
+std::vector<ShmRegistryEntry>
+scan_shm_registry(const fs::path &dir,
+                  const std::function<bool(int64_t)> &is_alive) {
+  std::vector<ShmRegistryEntry> out;
+  std::error_code ec;
+  for (const auto &entry : fs::directory_iterator(dir, ec)) {
+    std::string name = entry.path().filename().string();
+    if (name.rfind("mads_", 0) != 0)
+      continue;
+    ShmRegistryEntry e;
+    e.name = std::move(name);
+    std::ifstream f(entry.path());
+    long long pid = 0;
+    if (f >> pid && pid > 0) {
+      e.owner_pid = pid;
+      e.owner_alive = is_alive(pid);
+    }
+    out.push_back(std::move(e));
+  }
+  std::sort(out.begin(), out.end(),
+            [](const auto &a, const auto &b) { return a.name < b.name; });
+  return out;
+}
+
+CheckResult evaluate_shm_registry(const std::string &dir,
+                                  const std::vector<ShmRegistryEntry> &entries,
+                                  std::optional<size_t> swept) {
+  CheckResult r;
+  r.name = "shm_registry";
+  size_t live = 0, orphans = 0, unknown = 0;
+  for (const auto &e : entries) {
+    if (e.owner_pid < 0)
+      ++unknown;
+    else if (e.owner_alive)
+      ++live;
+    else
+      ++orphans;
+  }
+  std::ostringstream ss;
+  ss << "Shared-memory registry " << dir << ": " << live << " live segment(s)";
+  if (orphans)
+    ss << ", " << orphans << " orphan(s) (owner dead)";
+  if (unknown)
+    ss << ", " << unknown << " unreadable entr" << (unknown == 1 ? "y" : "ies");
+  if (swept)
+    ss << "; swept " << *swept << " orphan(s)";
+  ss << ".";
+  r.message = ss.str();
+  if (orphans) {
+    r.status = Status::Warn;
+    r.fix_hint = "Run `mads doctor --fix` to unlink orphaned segments (a "
+                 "producer crashed without cleaning up; they hold memory "
+                 "until reboot).";
+    r.fixable = true;
+    return r;
+  }
+  r.status = Status::Pass;
+  return r;
 }
 
 } // namespace Doctor

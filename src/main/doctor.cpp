@@ -24,6 +24,8 @@ Author(s): Paolo Bosetti
 */
 #include "../broker_probe.hpp"
 #include "../detail/endpoint.hpp"
+#include "../detail/host_token.hpp"
+#include "../shm/shared_segment.hpp"
 #include "../director_config.hpp"
 #include "../doctor_checks.hpp"
 #include "../exec_path.hpp"
@@ -40,6 +42,8 @@ Author(s): Paolo Bosetti
 #include <sink.hpp>
 #include <source.hpp>
 #include <toml++/toml.hpp>
+#include <zmq.h>
+#include <zmq.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -443,7 +447,7 @@ int main(int argc, char *argv[]) {
     ("graph", "Emit a Graphviz DOT topology graph of the settings file's declared pub/sub topics to the given path (default: stdout) and exit", value<string>()->implicit_value(""))
     ("graph-fanout", "With --graph: draw one edge per publisher into every subscribe-all (sub_topic = [\"\"]) subscriber, instead of collapsing them into a count")
     ("graph-live", "With --graph: overlay live subscriber counts read from the broker's subscription table (requires [broker] subscription_table = true) onto the declared graph")
-    ("fix", "Attempt safe, non-destructive auto-fixes (currently: scaffold a missing settings file)")
+    ("fix", "Attempt safe, non-destructive auto-fixes (currently: scaffold a missing settings file, unlink orphaned shared-memory segments)")
     ("v,version", "Print version")
     ("h,help", "Print usage");
   // clang-format on
@@ -549,7 +553,10 @@ int main(int argc, char *argv[]) {
         (*config)["broker"]["settings_address"].value_or(string(kDefaultBrokerUri));
     broker_uri = to_probe_uri(settings_address);
   }
-  print_result(Doctor::check_broker_reachable(broker_uri, timeout, curve_cfg));
+  const CheckResult broker_result =
+      Doctor::check_broker_reachable(broker_uri, timeout, curve_cfg);
+  print_result(broker_result);
+  const bool broker_reachable = broker_result.status == Status::Pass;
 
   // --- 3 & 4. declared plugin(s) resolve/load + protocol match ------------
   // Resolved up front (CLI --plugin resolves like plugin_loader.cpp's own
@@ -644,6 +651,71 @@ int main(int argc, char *argv[]) {
         << "  (settings file unavailable; skipping port-availability check)"
         << style::reset << fg::reset << endl;
   }
+
+  // --- 9. local transport (ipc://) -----------------------------------------
+  // What this host supports, where its ipc sockets live, what the broker
+  // advertises through the `transport` command, and -- the question an
+  // operator actually has -- whether an agent started here would use ipc.
+  {
+    const bool has_ipc = zmq_has("ipc") != 0;
+    print_result(Doctor::evaluate_ipc_support(has_ipc));
+    print_result(Doctor::evaluate_runtime_dir(Doctor::probe_runtime_dir()));
+    if (broker_reachable) {
+      auto reply = Mads::fetch_broker_transport(broker_uri, timeout, curve_cfg);
+      auto facts = Doctor::collect_broker_transport(
+          broker_uri, reply, Mads::detail::host_token(), has_ipc);
+      print_result(Doctor::evaluate_broker_ipc_endpoints(facts));
+      string mode = "auto";
+      if (config.has_value()) {
+        mode = (*config)["agents"]["transport"].value_or(mode);
+      }
+      print_result(Doctor::evaluate_agent_transport(facts, mode));
+    } else {
+      cout << fg::gray << style::italic
+           << "  (broker unreachable; skipping advertised-transport checks)"
+           << style::reset << fg::reset << endl;
+    }
+  }
+
+  // --- 10. shared-memory segment registry ----------------------------------
+  // POSIX only: Windows frees a segment with its last handle and keeps no
+  // registry. --fix unlinks the segments of dead producers, exactly what a
+  // new producer does on startup (Mads::shm::sweep_orphans()).
+#ifndef _WIN32
+  try {
+    const fs::path registry =
+        Mads::shm::registry_file("mads_doctor").parent_path();
+    auto entries = Doctor::scan_shm_registry(registry, Doctor::pid_alive);
+    auto shm_result = Doctor::evaluate_shm_registry(registry.string(), entries);
+    if (shm_result.fixable && parsed.count("fix")) {
+      auto orphans = [](const vector<Doctor::ShmRegistryEntry> &es) {
+        return static_cast<size_t>(
+            count_if(es.begin(), es.end(), [](const auto &e) {
+              return e.owner_pid > 0 && !e.owner_alive;
+            }));
+      };
+      const size_t before = orphans(entries);
+      // sweep_orphans() counts only the segments it actually unlinked; an
+      // entry whose segment is already gone (e.g. after a reboot) is cleaned
+      // up as well, so report the registry difference instead.
+      const size_t unlinked = Mads::shm::sweep_orphans();
+      entries = Doctor::scan_shm_registry(registry, Doctor::pid_alive);
+      const size_t swept = before - std::min(before, orphans(entries));
+      cout << fg::magenta << "  [FIX]  Swept " << swept
+           << " orphaned shared-memory registry entr"
+           << (swept == 1 ? "y" : "ies") << ", unlinking " << unlinked
+           << " segment(s) still present" << fg::reset << endl;
+      shm_result =
+          Doctor::evaluate_shm_registry(registry.string(), entries, swept);
+    }
+    print_result(shm_result);
+  } catch (const exception &e) {
+    print_result(CheckResult{"shm_registry", Status::Warn,
+                             string("Cannot read the shared-memory registry: ") +
+                                 e.what(),
+                             "", false});
+  }
+#endif
 
   // --- 8. open-file limit --------------------------------------------------
   // Last because it is the only check about the machine rather than the

@@ -34,8 +34,10 @@ Author(s): Paolo Bosetti
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace Mads {
 namespace Doctor {
@@ -48,7 +50,7 @@ enum class Status { Pass, Warn, Fail };
 /// One check's result: a status, a human-readable message, and (when
 /// actionable) a one-line fix hint. `fixable` marks the small set of checks
 /// `--fix` knows how to safely auto-remediate (currently: a missing settings
-/// file).
+/// file, and orphaned shared-memory segments).
 struct CheckResult {
   std::string name;
   Status status = Status::Pass;
@@ -191,6 +193,98 @@ CheckResult evaluate_fd_limit(bool supported, uint64_t soft, uint64_t hard,
                               std::optional<int64_t> configured);
 
 CheckResult check_fd_limit(std::optional<int64_t> configured);
+
+/* ---- 9. Local transport (ipc://) ------------------------------------------
+   The broker binds ipc:// endpoints next to its tcp ones and advertises them
+   through the `transport` settings command (src/detail/transport.hpp);
+   agents on the broker's host switch to them automatically. These checks
+   report what this host can do, what the broker offers, and what an agent
+   started here would end up using. Facts are plain strings and booleans so
+   this installed header stays free of src/detail/. */
+
+CheckResult evaluate_ipc_support(bool zmq_has_ipc);
+
+/// The per-user runtime directory holding ipc socket files and the
+/// shared-memory registry (Mads::detail::runtime_dir()).
+struct RuntimeDirFacts {
+  std::string path;        // empty if it could not be determined
+  bool usable = false;     // exists (created if needed) and owned by us
+  bool owner_only = false; // no group/other permission bits (POSIX)
+  std::string error;       // why it is not usable
+};
+
+RuntimeDirFacts probe_runtime_dir();
+CheckResult evaluate_runtime_dir(const RuntimeDirFacts &facts);
+
+/// What the broker answered to `transport`, plus what this host can see of
+/// the endpoints it advertised.
+struct BrokerTransportFacts {
+  std::string uri;                // settings endpoint queried
+  bool replied = false;           // anything came back in time
+  bool supported = false;         // the reply was a transport JSON object
+  std::string broker_host_token;  // as advertised by the broker
+  std::string local_host_token;   // Mads::detail::host_token() here
+  bool curve = false;             // the broker says CURVE is on
+  bool local_has_ipc = false;     // zmq_has("ipc") in this process
+  struct IpcEndpoint {
+    std::string role;             // "frontend" | "backend" | "settings"
+    std::string endpoint;         // "" when not offered
+    bool file_exists = false;     // socket file visible from this host
+  };
+  std::vector<IpcEndpoint> endpoints; // always the three roles, in order
+};
+
+/// Parses a `transport` reply (nullopt = no reply at all) and inspects the
+/// advertised socket files on this host's filesystem.
+BrokerTransportFacts collect_broker_transport(
+    const std::string &uri, const std::optional<std::string> &reply,
+    const std::string &local_host_token, bool local_has_ipc);
+
+/// Lists the advertised ipc endpoints and whether their socket files exist.
+CheckResult evaluate_broker_ipc_endpoints(const BrokerTransportFacts &facts);
+
+/**
+ * @brief Predicts the transport an agent started on this host would select,
+ * using the same rules as Agent::_select_transport() (src/agent.cpp): ipc
+ * when the mode is not "tcp", this libzmq has ipc, the broker offers
+ * frontend and backend ipc endpoints, the broker's host token matches ours
+ * (skipped when settings are themselves fetched over ipc) and the socket
+ * files are visible. `mode` is the [agents] transport value ("auto" when
+ * unset); an unknown value fails, like it does in the agent.
+ */
+CheckResult evaluate_agent_transport(const BrokerTransportFacts &facts,
+                                     const std::string &mode);
+
+/* ---- 10. Shared-memory segment registry -----------------------------------
+   POSIX producers register every shared-memory segment they create as
+   <runtime_dir>/shm/<name>, holding the owner pid. A producer that crashes
+   leaves its segment behind until reboot; Mads::shm::sweep_orphans() (and
+   `mads doctor --fix`) unlinks those whose owner is dead. Windows frees a
+   segment with its last handle and keeps no registry. */
+
+struct ShmRegistryEntry {
+  std::string name;        // segment name without the leading '/'
+  int64_t owner_pid = -1;  // -1 if the file could not be read
+  bool owner_alive = false;
+};
+
+/// Lists `dir` (the registry directory), mirroring sweep_orphans()'s own
+/// selection: only `mads_*` files, and an unreadable/garbage pid is listed
+/// with owner_pid = -1 and never counted as an orphan. `is_alive` decides
+/// whether a pid is still running (injectable for tests). A missing
+/// directory yields an empty list.
+std::vector<ShmRegistryEntry>
+scan_shm_registry(const std::filesystem::path &dir,
+                  const std::function<bool(int64_t)> &is_alive);
+
+/// True if process `pid` exists (POSIX kill(pid, 0); EPERM counts as alive,
+/// matching sweep_orphans()). Always true on Windows.
+bool pid_alive(int64_t pid);
+
+/// `swept` is how many segments a --fix sweep just unlinked, if one ran.
+CheckResult evaluate_shm_registry(const std::string &dir,
+                                  const std::vector<ShmRegistryEntry> &entries,
+                                  std::optional<size_t> swept = std::nullopt);
 
 } // namespace Doctor
 } // namespace Mads

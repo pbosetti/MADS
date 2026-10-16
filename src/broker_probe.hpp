@@ -142,6 +142,22 @@ fetch_subscription_table(const std::string &sub_uri,
                          std::chrono::milliseconds timeout,
                          const std::optional<ProbeCurveKeys> &curve = std::nullopt);
 
+/**
+ * @brief Asks the broker's settings endpoint which local transports it
+ * offers, with the same `transport` command an agent sends during startup
+ * (see src/detail/transport.hpp for the request/reply contract).
+ *
+ * @param uri the broker's settings endpoint (tcp:// or ipc://).
+ * @param timeout time budget for the round trip.
+ * @param curve CURVE credentials, needed exactly as for probe_broker().
+ * @return the reply's single frame -- a JSON object from a broker that knows
+ * the command, an empty string from one that predates it -- or nullopt if
+ * nothing answered in time. Never throws.
+ */
+std::optional<std::string>
+fetch_broker_transport(const std::string &uri, std::chrono::milliseconds timeout,
+                       const std::optional<ProbeCurveKeys> &curve = std::nullopt);
+
 } // namespace Mads
 
 #endif // MADS_BROKER_PROBE_HPP

@@ -187,6 +187,45 @@ bool probe_broker(const std::string &uri, std::chrono::milliseconds timeout,
   }
 }
 
+std::optional<std::string>
+fetch_broker_transport(const std::string &uri, std::chrono::milliseconds timeout,
+                       const std::optional<ProbeCurveKeys> &curve) {
+  try {
+    zmq::context_t context;
+    zmq::socket_t socket(context, zmq::socket_type::req);
+    socket.set(zmq::sockopt::linger, 0);
+    apply_curve(socket, context, curve);
+    const int timeout_ms = static_cast<int>(
+        std::max<std::chrono::milliseconds::rep>(0, timeout.count()));
+    socket.set(zmq::sockopt::rcvtimeo, timeout_ms);
+    socket.set(zmq::sockopt::sndtimeo, timeout_ms);
+    socket.connect(uri);
+
+    zmq::multipart_t request;
+    request.addstr(std::string(LIB_VERSION));
+    request.addstr(std::string("transport"));
+    request.addstr(std::string("__mads_doctor__"));
+    if (!request.send(socket)) {
+      socket.close();
+      return std::nullopt;
+    }
+    zmq::multipart_t reply;
+    if (!reply.recv(socket) || reply.empty()) {
+      socket.close();
+      return std::nullopt;
+    }
+    // A broker predating the command answers with a bare [LIB_VERSION]:
+    // report that as an empty reply, "answered, but offers no ipc".
+    std::string first = reply.at(0).to_string();
+    if (first == LIB_VERSION || first.empty() || first.front() != '{')
+      first.clear();
+    socket.close();
+    return first;
+  } catch (const std::exception &) {
+    return std::nullopt;
+  }
+}
+
 CurveProbeResult
 probe_curve_handshake(const std::string &uri,
                       const std::filesystem::path &key_dir,

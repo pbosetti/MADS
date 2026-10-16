@@ -22,7 +22,13 @@
 #include <fstream>
 #include <string>
 #include <thread>
+#include <vector>
 
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+
+#include <nlohmann/json.hpp>
 #include <zmq.hpp>
 #include <zmq_addon.hpp>
 
@@ -562,3 +568,246 @@ TEST_CASE("evaluate_fd_limit ignores a configured value the limit can satisfy",
   auto r = Mads::Doctor::evaluate_fd_limit(true, 65536, 1048576, 65536);
   REQUIRE(r.status == Status::Pass);
 }
+
+/* ---- 9. Local transport (ipc://) ----------------------------------------- */
+
+namespace {
+
+// A `transport` reply as Mads::detail::transport_reply() builds it. Paths
+// go through nlohmann::json so that Windows backslashes are escaped.
+std::string transport_json(const std::string &host, const std::string &front,
+                           const std::string &back,
+                           const std::string &settings = "") {
+  nlohmann::json j = {
+      {"host_token", host},
+      {"ipc", {{"frontend", front}, {"backend", back}, {"settings", settings}}},
+      {"curve", false}};
+  return j.dump();
+}
+
+// Paths built with std::filesystem joins, so the native separator is used.
+std::string ipc_uri(const fs::path &p) { return "ipc://" + p.string(); }
+
+} // namespace
+
+TEST_CASE("evaluate_ipc_support passes with ipc and warns without",
+          "[doctor][ipc]") {
+  REQUIRE(Mads::Doctor::evaluate_ipc_support(true).status == Status::Pass);
+  auto r = Mads::Doctor::evaluate_ipc_support(false);
+  REQUIRE(r.status == Status::Warn);
+  REQUIRE_FALSE(r.fix_hint.empty());
+}
+
+TEST_CASE("evaluate_runtime_dir reports unusable, shared and owner-only dirs",
+          "[doctor][ipc]") {
+  Mads::Doctor::RuntimeDirFacts f;
+  f.error = "not owned by the current user";
+  REQUIRE(Mads::Doctor::evaluate_runtime_dir(f).status == Status::Fail);
+
+  f = {};
+  f.path = "/tmp/mads-501";
+  f.usable = true;
+  f.owner_only = false;
+  auto shared = Mads::Doctor::evaluate_runtime_dir(f);
+  REQUIRE(shared.status == Status::Warn);
+  REQUIRE(shared.fix_hint.find("chmod 700") != std::string::npos);
+
+  f.owner_only = true;
+  REQUIRE(Mads::Doctor::evaluate_runtime_dir(f).status == Status::Pass);
+}
+
+TEST_CASE("probe_runtime_dir returns a usable owner-only directory",
+          "[doctor][ipc]") {
+  auto f = Mads::Doctor::probe_runtime_dir();
+  REQUIRE(f.usable);
+  REQUIRE(fs::is_directory(f.path));
+  REQUIRE(f.owner_only);
+}
+
+TEST_CASE("collect_broker_transport parses the reply and checks socket files",
+          "[doctor][ipc]") {
+  TempDir dir("transport_files");
+  const auto front = dir.path / "broker-1-front.ipc";
+  write_file(front, ""); // any file stands in for the socket here
+  const std::string front_ep = ipc_uri(front);
+  const std::string back_ep = ipc_uri(dir.path / "missing.ipc");
+
+  auto f = Mads::Doctor::collect_broker_transport(
+      "tcp://localhost:9092", transport_json("h/1", front_ep, back_ep), "h/1",
+      true);
+  REQUIRE(f.replied);
+  REQUIRE(f.supported);
+  REQUIRE(f.broker_host_token == "h/1");
+  REQUIRE(f.endpoints.size() == 3);
+  REQUIRE(f.endpoints[0].role == "frontend");
+  REQUIRE(f.endpoints[0].endpoint == front_ep);
+  REQUIRE(f.endpoints[0].file_exists);
+  REQUIRE_FALSE(f.endpoints[1].file_exists);
+  REQUIRE(f.endpoints[2].endpoint.empty());
+
+  SECTION("no reply") {
+    auto none = Mads::Doctor::collect_broker_transport(
+        "tcp://localhost:9092", std::nullopt, "h/1", true);
+    REQUIRE_FALSE(none.replied);
+    REQUIRE_FALSE(none.supported);
+    REQUIRE(none.endpoints.size() == 3);
+  }
+  SECTION("legacy broker (empty reply)") {
+    auto legacy = Mads::Doctor::collect_broker_transport(
+        "tcp://localhost:9092", std::string(), "h/1", true);
+    REQUIRE(legacy.replied);
+    REQUIRE_FALSE(legacy.supported);
+  }
+}
+
+TEST_CASE("evaluate_broker_ipc_endpoints covers every broker answer",
+          "[doctor][ipc]") {
+  TempDir dir("transport_eval");
+  const auto front = dir.path / "f.ipc";
+  const auto back = dir.path / "b.ipc";
+  write_file(front, "");
+  write_file(back, "");
+  const std::string fe = ipc_uri(front);
+  const std::string be = ipc_uri(back);
+  const std::string uri = "tcp://localhost:9092";
+  using Mads::Doctor::collect_broker_transport;
+  using Mads::Doctor::evaluate_broker_ipc_endpoints;
+
+  REQUIRE(evaluate_broker_ipc_endpoints(
+              collect_broker_transport(uri, std::nullopt, "h", true))
+              .status == Status::Warn);
+  auto legacy = evaluate_broker_ipc_endpoints(
+      collect_broker_transport(uri, std::string(), "h", true));
+  REQUIRE(legacy.status == Status::Warn);
+  REQUIRE(legacy.message.find("predates") != std::string::npos);
+
+  auto none = evaluate_broker_ipc_endpoints(
+      collect_broker_transport(uri, transport_json("h", "", ""), "h", true));
+  REQUIRE(none.status == Status::Pass);
+  REQUIRE(none.message.find("no ipc") != std::string::npos);
+
+  auto ok = evaluate_broker_ipc_endpoints(
+      collect_broker_transport(uri, transport_json("h", fe, be), "h", true));
+  REQUIRE(ok.status == Status::Pass);
+  REQUIRE(ok.message.find(fe) != std::string::npos);
+
+  fs::remove(back);
+  auto missing = evaluate_broker_ipc_endpoints(
+      collect_broker_transport(uri, transport_json("h", fe, be), "h", true));
+  REQUIRE(missing.status == Status::Warn);
+  REQUIRE(missing.message.find("not found") != std::string::npos);
+
+  // Files missing because the broker is elsewhere is expected, not a problem.
+  auto remote = evaluate_broker_ipc_endpoints(collect_broker_transport(
+      uri, transport_json("other", fe, be), "h", true));
+  REQUIRE(remote.status == Status::Pass);
+  REQUIRE(remote.message.find("another host") != std::string::npos);
+}
+
+TEST_CASE("evaluate_agent_transport mirrors the agent's selection rules",
+          "[doctor][ipc]") {
+  TempDir dir("transport_agent");
+  const auto front = dir.path / "f.ipc";
+  const auto back = dir.path / "b.ipc";
+  write_file(front, "");
+  write_file(back, "");
+  const std::string fe = ipc_uri(front);
+  const std::string be = ipc_uri(back);
+  const std::string tcp = "tcp://localhost:9092";
+  using Mads::Doctor::collect_broker_transport;
+  using Mads::Doctor::evaluate_agent_transport;
+  auto same =
+      collect_broker_transport(tcp, transport_json("h", fe, be), "h", true);
+
+  auto ipc = evaluate_agent_transport(same, "auto");
+  REQUIRE(ipc.status == Status::Pass);
+  REQUIRE(ipc.message.find("would use ipc") != std::string::npos);
+
+  auto forced_tcp = evaluate_agent_transport(same, "tcp");
+  REQUIRE(forced_tcp.status == Status::Pass);
+  REQUIRE(forced_tcp.message.find("use tcp") != std::string::npos);
+
+  REQUIRE(evaluate_agent_transport(same, "carrier-pigeon").status ==
+          Status::Fail);
+
+  auto remote =
+      collect_broker_transport(tcp, transport_json("other", fe, be), "h", true);
+  auto r = evaluate_agent_transport(remote, "auto");
+  REQUIRE(r.status == Status::Pass);
+  REQUIRE(r.message.find("another host") != std::string::npos);
+  // transport = "ipc" that cannot be satisfied is a hard error in the agent.
+  REQUIRE(evaluate_agent_transport(remote, "ipc").status == Status::Fail);
+
+  // Settings over ipc: the host token is not compared (containers sharing a
+  // socket directory need not share a hostname).
+  auto via_ipc = collect_broker_transport(
+      ipc_uri(dir.path / "s.ipc"), transport_json("other", fe, be), "h", true);
+  REQUIRE(evaluate_agent_transport(via_ipc, "auto").status == Status::Pass);
+
+  auto no_ipc =
+      collect_broker_transport(tcp, transport_json("h", fe, be), "h", false);
+  auto n = evaluate_agent_transport(no_ipc, "auto");
+  REQUIRE(n.status == Status::Pass);
+  REQUIRE(n.message.find("no ipc transport") != std::string::npos);
+
+  fs::remove(back);
+  auto gone =
+      collect_broker_transport(tcp, transport_json("h", fe, be), "h", true);
+  auto g = evaluate_agent_transport(gone, "auto");
+  REQUIRE(g.message.find("not reachable") != std::string::npos);
+}
+
+/* ---- 10. Shared-memory segment registry ----------------------------------- */
+
+TEST_CASE("scan_shm_registry lists mads_ entries and their owners",
+          "[doctor][shm]") {
+  TempDir dir("shm_registry");
+  write_file(dir.path / "mads_0000000100000000", "100");
+  write_file(dir.path / "mads_0000000200000000", "200");
+  write_file(dir.path / "mads_garbage", "not a pid");
+  write_file(dir.path / "unrelated", "300");
+
+  auto entries = Mads::Doctor::scan_shm_registry(
+      dir.path, [](int64_t pid) { return pid == 100; });
+  REQUIRE(entries.size() == 3);
+  REQUIRE(entries[0].name == "mads_0000000100000000");
+  REQUIRE(entries[0].owner_pid == 100);
+  REQUIRE(entries[0].owner_alive);
+  REQUIRE(entries[1].owner_pid == 200);
+  REQUIRE_FALSE(entries[1].owner_alive);
+  REQUIRE(entries[2].name == "mads_garbage");
+  REQUIRE(entries[2].owner_pid == -1);
+
+  REQUIRE(Mads::Doctor::scan_shm_registry(dir.path / "absent",
+                                          Mads::Doctor::pid_alive)
+              .empty());
+}
+
+TEST_CASE("evaluate_shm_registry warns about orphans and offers --fix",
+          "[doctor][shm]") {
+  using Mads::Doctor::ShmRegistryEntry;
+  std::vector<ShmRegistryEntry> entries = {
+      {"mads_a", 100, true}, {"mads_b", 200, false}, {"mads_c", -1, false}};
+  auto r = Mads::Doctor::evaluate_shm_registry("/reg", entries);
+  REQUIRE(r.status == Status::Warn);
+  REQUIRE(r.fixable);
+  REQUIRE(r.message.find("1 orphan") != std::string::npos);
+  REQUIRE(r.message.find("1 unreadable entry") != std::string::npos);
+  REQUIRE(r.fix_hint.find("--fix") != std::string::npos);
+
+  auto clean = Mads::Doctor::evaluate_shm_registry("/reg", {entries[0]}, 1);
+  REQUIRE(clean.status == Status::Pass);
+  REQUIRE_FALSE(clean.fixable);
+  REQUIRE(clean.message.find("swept 1") != std::string::npos);
+
+  REQUIRE(Mads::Doctor::evaluate_shm_registry("/reg", {}).status ==
+          Status::Pass);
+}
+
+#ifndef _WIN32
+TEST_CASE("pid_alive tells this process from a dead one", "[doctor][shm]") {
+  REQUIRE(Mads::Doctor::pid_alive(static_cast<int64_t>(::getpid())));
+  // Beyond pid_max on Linux (at most 2^22) and macOS (99999).
+  REQUIRE_FALSE(Mads::Doctor::pid_alive(int64_t{1} << 30));
+}
+#endif
