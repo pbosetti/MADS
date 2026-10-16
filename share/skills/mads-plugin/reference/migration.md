@@ -18,7 +18,7 @@ The version a project builds against is fixed by one line in its
 ```cmake
 FetchContent_Declare(plugin
   GIT_REPOSITORY https://github.com/pbosetti/mads_plugin.git
-  GIT_TAG        v2.5-P8        # ← the P<N> suffix is the protocol version
+  GIT_TAG        v2.6-P9        # ← the P<N> suffix is the protocol version
   ...
 )
 ```
@@ -34,6 +34,7 @@ That tag is how tooling detects a project's protocol: `GIT_TAG v*-P<N>`.
 | `INSTALL_SOURCE_DRIVER` / `INSTALL_FILTER_DRIVER` / `INSTALL_SINK_DRIVER` in the source | Pre-P8 registration macros. They still compile (they forward to `MADS_REGISTER_PLUGINS`, ignoring their type arguments) but should be replaced. |
 | `create()` returning a raw pointer | Pre-P8. Drivers now return `std::unique_ptr`. |
 | A `kind()` that selects a settings section | Pre-P8 behaviour. Since P8 the section is the agent name and `kind()` is only a consistency check. |
+| No `load_data_view()` / `supports_shared_output()` overrides | Fine on P9. The zero-copy API is opt-in and its defaults copy; a P8 plugin only needs the `GIT_TAG` bump and a rebuild. See `reference/io.md`. |
 | `json_found` differs from `json_expected` in `inspect_plugin` | Not a protocol issue but the same class of problem: rebuild against the pinned `nlohmann/json`. |
 
 ## Migrating

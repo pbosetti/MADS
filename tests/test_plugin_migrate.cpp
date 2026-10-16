@@ -372,12 +372,13 @@ TEST_CASE("apply_regex honours the case-insensitive flag", "[plugin_migrate][tra
 // 4. load_migrations against the real share/plugin_migrations directory
 // ---------------------------------------------------------------------------
 
-TEST_CASE("load_migrations chains the real P6->P7 and P7->P8 steps",
+TEST_CASE("load_migrations chains the real P6->P7, P7->P8 and P8->P9 steps",
           "[plugin_migrate][migrations]") {
   auto steps = load_migrations(migrations_dir());
-  REQUIRE(steps.size() == 2);
+  REQUIRE(steps.size() == 3);
   REQUIRE(steps.count(6) == 1);
   REQUIRE(steps.count(7) == 1);
+  REQUIRE(steps.count(8) == 1);
   REQUIRE(steps.at(6).from == 6);
   REQUIRE(steps.at(6).to == 7);
   REQUIRE(steps.at(6).lang == "cpp");
@@ -407,6 +408,16 @@ TEST_CASE("load_migrations chains the real P6->P7 and P7->P8 steps",
   const json &p7p8 = steps.at(7).doc;
   REQUIRE(p7p8["cmake"]["plugin_git_tag"] == "v2.5-P8");
   REQUIRE(p7p8["cmake"]["pugg_git_tag"] == "1.2.0");
+
+  // P8->P9 only moves the pin: the zero-copy API is opt-in, with copying
+  // defaults, so there is nothing to rewrite in the plugin sources.
+  REQUIRE(steps.at(8).from == 8);
+  REQUIRE(steps.at(8).to == 9);
+  const json &p8p9 = steps.at(8).doc;
+  REQUIRE(p8p9["cmake"]["plugin_git_tag"] == "v2.6-P9");
+  REQUIRE(p8p9["cmake"]["pugg_git_tag"] == "1.2.0");
+  REQUIRE(p8p9["source"].empty());
+  REQUIRE_FALSE(p8p9["notes"].empty());
 }
 
 TEST_CASE("load_migrations returns an empty map for a non-existent directory",
@@ -639,7 +650,7 @@ TEST_CASE("run() dry-run leaves every file untouched", "[plugin_migrate][run]") 
   REQUIRE_FALSE(fs::exists(project / "src" / "p6demo.cpp.bak"));
 }
 
-TEST_CASE("run() migrates P6 -> P8 end to end with the compile check disabled",
+TEST_CASE("run() migrates P6 -> P9 end to end with the compile check disabled",
           "[plugin_migrate][run]") {
   fs::path project = copy_fixture("full");
   ScopedPath cleanup(project);
@@ -652,9 +663,10 @@ TEST_CASE("run() migrates P6 -> P8 end to end with the compile check disabled",
 
   std::string cmake_after;
   REQUIRE(read_file(project / "CMakeLists.txt", cmake_after));
-  // Both migration steps' cmake transforms applied, in order: final tag is
-  // the P7->P8 target, not the intermediate P6->P7 one.
-  REQUIRE(cmake_after.find("v2.5-P8") != std::string::npos);
+  // Every migration step's cmake transforms applied, in order: final tag is
+  // the P8->P9 target, not an intermediate one.
+  REQUIRE(cmake_after.find("v2.6-P9") != std::string::npos);
+  REQUIRE(cmake_after.find("v2.5-P8") == std::string::npos);
   REQUIRE(cmake_after.find("v2.3-P6") == std::string::npos);
   REQUIRE(cmake_after.find("1.2.0") != std::string::npos);
   // The nlohmann/json FetchContent block was modernized to the tarball form.
@@ -779,6 +791,41 @@ TEST_CASE("run() honours --from/--to overrides and stops short of the full chain
   // ...but P7->P8 did not run.
   REQUIRE(src_after.find("INSTALL_SOURCE_DRIVER") != std::string::npos);
   REQUIRE(src_after.find("MADS_REGISTER_PLUGINS") == std::string::npos);
+}
+
+TEST_CASE("run() migrates P8 -> P9 by moving the pin only",
+          "[plugin_migrate][run]") {
+  fs::path project = copy_fixture("p8p9");
+  ScopedPath cleanup(project);
+
+  // Bring the P6 fixture up to P8 first, exactly as a P8 project looks.
+  Options to_p8;
+  to_p8.check = false;
+  to_p8.to_override = 8;
+  REQUIRE(run(project, migrations_dir(), deps_manifest(), to_p8) == 0);
+
+  std::string cmake_p8, src_p8;
+  REQUIRE(read_file(project / "CMakeLists.txt", cmake_p8));
+  REQUIRE(read_file(project / "src" / "p6demo.cpp", src_p8));
+  REQUIRE(detect_protocol(cmake_p8) == 8);
+  REQUIRE(cmake_p8.find("v2.5-P8") != std::string::npos);
+
+  // Then the default target: the newest step, P8 -> P9.
+  Options opts;
+  opts.check = false;
+  REQUIRE(run(project, migrations_dir(), deps_manifest(), opts) == 0);
+
+  std::string cmake_after, src_after;
+  REQUIRE(read_file(project / "CMakeLists.txt", cmake_after));
+  REQUIRE(read_file(project / "src" / "p6demo.cpp", src_after));
+  REQUIRE(detect_protocol(cmake_after) == 9);
+  REQUIRE(cmake_after.find("v2.6-P9") != std::string::npos);
+  REQUIRE(cmake_after.find("v2.5-P8") == std::string::npos);
+  // pugg and nlohmann/json pins are unchanged by this step.
+  REQUIRE(cmake_after.find("1.2.0") != std::string::npos);
+  REQUIRE(cmake_after.find("v3.12.0") != std::string::npos);
+  // The zero-copy API is opt-in with copying defaults: no source rewrite.
+  REQUIRE(src_after == src_p8);
 }
 
 TEST_CASE("run() fails when a migration step is missing from the chain",

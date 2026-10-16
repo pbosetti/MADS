@@ -57,9 +57,9 @@ static string ucfirst(string str) {
 // with a missing manifest; keep them mirroring the manifest, or a scaffolded
 // plugin silently ends up one protocol behind.
 static json plugin_deps(string const &manifest_path) {
-  json deps = {{"plugin_protocol", 8},
+  json deps = {{"plugin_protocol", 9},
                {"plugin_min_protocol", 7},
-               {"plugin_git_tag", "v2.5-P8"},
+               {"plugin_git_tag", "v2.6-P9"},
                {"pugg_git_tag", "1.2.0"},
                {"json_version", "v3.12.0"}};
   ifstream mf(manifest_path);

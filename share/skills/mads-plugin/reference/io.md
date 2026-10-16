@@ -71,6 +71,52 @@ return_type get_output(json &out, vector<unsigned char> *blob) override {
 - Sending both a blob and JSON-only data on alternate ticks is fine — the host
   decides per tick, based on whether `blob` is empty.
 
+## Zero-copy blobs (protocol P9, opt-in)
+
+When the producing agent runs with `shm = true`, large blobs stay in a
+shared-memory ring owned by that agent and only a small descriptor travels over
+ZeroMQ. Same-host consumers read the bytes in place. Nothing changes for a
+plugin that does not opt in: input blobs still arrive through `load_data()`
+(the default `load_data_view()` makes one copy), output still goes through
+`get_output()`/`process()`.
+
+Zero-copy **input** (filters and sinks): override `load_data_view()`.
+
+```cpp
+return_type load_data_view(json const &meta, std::string topic,
+                           BlobView blob) override {
+  // blob.data / blob.size: read-only, valid only during this call
+  // (for a filter: through the following process()). Copy what you keep.
+  _checksum = crc32(blob.data, blob.size);
+  return return_type::success;
+}
+```
+
+Zero-copy **output** (sources and filters): write straight into a ring slot.
+
+```cpp
+bool supports_shared_output() const override { return true; }
+
+return_type get_output_shared(json &out, BlobBuffer &buf) override {
+  size_t n = _frame.size();
+  if (n > buf.capacity) {        // does not fit in a slot:
+    buf.size = n;                // tell the host how much is needed,
+    return return_type::retry;   // it falls back to get_output() this tick
+  }
+  std::memcpy(buf.data, _frame.data(), n);
+  buf.size = n;
+  out["size"] = n;
+  return return_type::success;
+}
+```
+
+- The ring is **lossy**: a slow consumer can see its slot overwritten. The host
+  re-checks the slot after `load_data_view()` returns and drops (and counts) a
+  torn read, so never act on data you could not finish reading.
+- A filter's `process_shared()` mirrors `get_output_shared()`.
+- Shared output is used only when the agent's settings section has
+  `shm = true`; consumers on another host get an error, not the data.
+
 ## Dummy / no-hardware mode
 
 Design every hardware-facing plugin so it runs without the hardware. The

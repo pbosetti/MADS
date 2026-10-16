@@ -1,0 +1,21 @@
+{
+  "_comment": "Migration step for the plugin protocol jump P8 -> P9. Consumed by `mads plugin --update`. P9 adds the shared-memory (zero-copy) blob API -- BlobView/BlobBuffer, Source::supports_shared_output()/get_output_shared(), Filter::load_data_view()/supports_shared_output()/process_shared(), Sink::load_data_view() -- as virtual methods whose defaults copy, so no plugin source changes are needed: only the mads_plugin pin moves and the plugin is recompiled. See src/main/plugin_migrate.hpp for the transform semantics.",
+  "from": 8,
+  "to": 9,
+  "lang": "cpp",
+
+  "cmake": {
+    "plugin_git_tag": "v2.6-P9",
+    "pugg_git_tag": "1.2.0"
+  },
+
+  "source": [],
+
+  "notes": [
+    "No source changes are required: P9 only adds virtual methods with copying defaults. Rebuild the plugin against mads_plugin v2.6-P9 and it keeps working as before; incoming blobs reach load_data() through the default load_data_view(), which makes one copy.",
+    "Zero-copy input (filters and sinks) is opt-in: override load_data_view(Tin const &data, std::string topic, BlobView blob) and read blob.data in place. The view is read-only and valid only for that call (for filters, through the following process()); copy anything you need to keep. The host re-checks the shared-memory slot after the call and drops torn reads.",
+    "Zero-copy output (sources and filters) is opt-in: return true from supports_shared_output() and implement get_output_shared(out, buf) / process_shared(out, buf), writing at most buf.capacity bytes into buf.data and setting buf.size. If the blob does not fit, set buf.size to the required size and return return_type::retry: the host falls back to get_output()/process() in the same loop iteration.",
+    "Shared output is only used when the agent runs with `shm = true` in its settings section, and only for consumers on the same host; see `man mads-source` and the shared-memory guide.",
+    "If you have heavily customized CMakeLists.txt, compare it with that of a freshly generated plugin (e.g., using `git diff` or a file comparison tool)."
+  ]
+}
