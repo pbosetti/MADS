@@ -286,7 +286,9 @@ enum class event_type {
  * @brief Enumeration of message types for agents.
  *
  */
-enum class message_type { none = 0, json = 1, blob, error };
+// `shared` is returned only to agents that opted in with
+// Agent::accept_shared_views(true); see src/mads_shm.hpp.
+enum class message_type { none = 0, json = 1, blob, error, shared };
 
 /**
  * @brief On-the-wire payload encoding.

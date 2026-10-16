@@ -39,6 +39,10 @@ namespace Mads::detail {
 constexpr char WIRE_MAGIC[4] = {'M', 'A', 'D', 'S'};
 constexpr uint8_t WIRE_HDR_VERSION = 1;
 constexpr uint8_t WIRE_FLAG_BLOB = 0x01;
+// Shared-memory reference: [ topic ][ header ][ meta ], where meta carries
+// the user meta plus an "shm" ShmDescriptor (src/mads_shm.hpp) and the bytes
+// stay in the producer's ring. Always uses the extended header.
+constexpr uint8_t WIRE_FLAG_SHM = 0x02;
 constexpr size_t WIRE_HEADER_SIZE = 4 /*magic*/ + 1 /*ver*/ + 1 /*format*/ +
                                     1 /*compression*/ + 1 /*flags*/ +
                                     4 /*schema*/;
@@ -50,23 +54,29 @@ struct WireHeader {
   uint8_t format = static_cast<uint8_t>(WireFormat::Json);
   uint8_t compression = static_cast<uint8_t>(Comp::None);
   bool has_blob = false;
+  bool has_shm = false;
   uint32_t schema = LIB_VERSION_NUM;
 };
 
-inline std::string make_wire_header(WireFormat fmt, Comp comp, bool has_blob) {
+inline std::string make_wire_header(WireFormat fmt, Comp comp, uint8_t flags) {
   std::string h;
   h.reserve(WIRE_HEADER_SIZE);
   h.append(WIRE_MAGIC, 4);
   h.push_back(static_cast<char>(WIRE_HDR_VERSION));
   h.push_back(static_cast<char>(fmt));
   h.push_back(static_cast<char>(comp));
-  h.push_back(static_cast<char>(has_blob ? WIRE_FLAG_BLOB : 0));
+  h.push_back(static_cast<char>(flags));
   uint32_t schema = LIB_VERSION_NUM;
   h.push_back(static_cast<char>((schema >> 24) & 0xFF));
   h.push_back(static_cast<char>((schema >> 16) & 0xFF));
   h.push_back(static_cast<char>((schema >> 8) & 0xFF));
   h.push_back(static_cast<char>(schema & 0xFF));
   return h;
+}
+
+inline std::string make_wire_header(WireFormat fmt, Comp comp, bool has_blob) {
+  return make_wire_header(fmt, comp,
+                          static_cast<uint8_t>(has_blob ? WIRE_FLAG_BLOB : 0));
 }
 
 // Returns true and fills `out` if `part` is a valid frame header.
@@ -79,6 +89,7 @@ inline bool parse_wire_header(const std::string &part, WireHeader &out) {
   out.format = static_cast<uint8_t>(part[5]);
   out.compression = static_cast<uint8_t>(part[6]);
   out.has_blob = (static_cast<uint8_t>(part[7]) & WIRE_FLAG_BLOB) != 0;
+  out.has_shm = (static_cast<uint8_t>(part[7]) & WIRE_FLAG_SHM) != 0;
   out.schema = (static_cast<uint32_t>(static_cast<uint8_t>(part[8])) << 24) |
                (static_cast<uint32_t>(static_cast<uint8_t>(part[9])) << 16) |
                (static_cast<uint32_t>(static_cast<uint8_t>(part[10])) << 8) |
