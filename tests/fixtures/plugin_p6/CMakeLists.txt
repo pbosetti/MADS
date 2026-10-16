@@ -9,6 +9,9 @@
 # but pinned at protocol P6, i.e. pre-P6->P7 migration.
 cmake_minimum_required(VERSION 3.28)
 project(p6demo VERSION 0.1.0 LANGUAGES CXX)
+if(CMAKE_BUILD_TYPE STREQUAL "")
+  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

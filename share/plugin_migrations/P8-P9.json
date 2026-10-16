@@ -1,18 +1,24 @@
 {
-  "_comment": "Migration step for the plugin protocol jump P8 -> P9. Consumed by `mads plugin --update`. P9 adds the shared-memory (zero-copy) blob API -- BlobView/BlobBuffer, Source::supports_shared_output()/get_output_shared(), Filter::load_data_view()/supports_shared_output()/process_shared(), Sink::load_data_view() -- as virtual methods whose defaults copy, so no plugin source changes are needed: only the mads_plugin pin moves and the plugin is recompiled. See src/main/plugin_migrate.hpp for the transform semantics.",
+  "_comment": "Migration step for the plugin protocol jump P8 -> P9. Consumed by `mads plugin --update`. P9 adds the shared-memory (zero-copy) blob API -- BlobView/BlobBuffer, Source::supports_shared_output()/get_output_shared(), Filter::load_data_view()/supports_shared_output()/process_shared(), Sink::load_data_view() -- as virtual methods whose defaults copy, so no plugin source changes are needed: the mads_plugin pin moves, the Release build-type default moves before project() (see the replacement below), and the plugin is recompiled. See src/main/plugin_migrate.hpp for the transform semantics.",
   "from": 8,
   "to": 9,
   "lang": "cpp",
-
   "cmake": {
     "plugin_git_tag": "v2.6-P9",
-    "pugg_git_tag": "1.2.0"
+    "pugg_git_tag": "1.2.0",
+    "replacements": [
+      {
+        "_comment": "Up to P8 the template defaulted CMAKE_BUILD_TYPE to Release *after* project(), where MSVC with a single-config generator (Ninja, NMake) has already set it to Debug: such plugins were built Debug against a Release MADS. Captures the project() line ($1) and the old if(...) block after it, and puts the new default first. Does not match again once applied.",
+        "description": "Default the build type to Release before project() (MSVC otherwise builds Debug)",
+        "regex": "(project\\s*\\([^)]*\\))\\s*\\n\\s*if\\s*\\(\\s*CMAKE_BUILD_TYPE\\s+STREQUAL\\s+\"\"\\s*\\)[\\s\\S]*?endif\\s*\\(\\s*\\)",
+        "replacement": "# Release by default. This must come before project(): there, single-config\n# generators with MSVC already initialize CMAKE_BUILD_TYPE to Debug, and a\n# Debug plugin cannot share std::string/json objects with a Release MADS\n# (different C runtimes).\nif(NOT DEFINED CMAKE_BUILD_TYPE AND NOT DEFINED CMAKE_CONFIGURATION_TYPES)\n  set(CMAKE_BUILD_TYPE \"Release\" CACHE STRING \"Choose the type of build.\")\nendif()\n$1"
+      }
+    ]
   },
-
   "source": [],
-
   "notes": [
     "No source changes are required: P9 only adds virtual methods with copying defaults. Rebuild the plugin against mads_plugin v2.6-P9 and it keeps working as before; incoming blobs reach load_data() through the default load_data_view(), which makes one copy.",
+    "CMakeLists.txt: the Release build-type default now comes before project(). On Windows, MSVC with a single-config generator (e.g. Ninja) initialized the build type to Debug first, so plugins were built Debug against a Release MADS, which uses a different C runtime. If your CMakeLists.txt sets the build type differently, check that a plain `cmake -Bbuild` on Windows now builds Release.",
     "Zero-copy input (filters and sinks) is opt-in: override load_data_view(Tin const &data, std::string topic, BlobView blob) and read blob.data in place. The view is read-only and valid only for that call (for filters, through the following process()); copy anything you need to keep. The host re-checks the shared-memory slot after the call and drops torn reads.",
     "Zero-copy output (sources and filters) is opt-in: return true from supports_shared_output() and implement get_output_shared(out, buf) / process_shared(out, buf), writing at most buf.capacity bytes into buf.data and setting buf.size. If the blob does not fit, set buf.size to the required size and return return_type::retry: the host falls back to get_output()/process() in the same loop iteration.",
     "Shared output is only used when the agent runs with `shm = true` in its settings section, and only for consumers on the same host; see `man mads-source` and the shared-memory guide.",

@@ -409,13 +409,15 @@ TEST_CASE("load_migrations chains the real P6->P7, P7->P8 and P8->P9 steps",
   REQUIRE(p7p8["cmake"]["plugin_git_tag"] == "v2.5-P8");
   REQUIRE(p7p8["cmake"]["pugg_git_tag"] == "1.2.0");
 
-  // P8->P9 only moves the pin: the zero-copy API is opt-in, with copying
-  // defaults, so there is nothing to rewrite in the plugin sources.
+  // P8->P9 moves the pin and the Release build-type default (before
+  // project()); the zero-copy API is opt-in, with copying defaults, so there
+  // is nothing to rewrite in the plugin sources.
   REQUIRE(steps.at(8).from == 8);
   REQUIRE(steps.at(8).to == 9);
   const json &p8p9 = steps.at(8).doc;
   REQUIRE(p8p9["cmake"]["plugin_git_tag"] == "v2.6-P9");
   REQUIRE(p8p9["cmake"]["pugg_git_tag"] == "1.2.0");
+  REQUIRE(p8p9["cmake"]["replacements"].size() == 1);
   REQUIRE(p8p9["source"].empty());
   REQUIRE_FALSE(p8p9["notes"].empty());
 }
@@ -793,7 +795,8 @@ TEST_CASE("run() honours --from/--to overrides and stops short of the full chain
   REQUIRE(src_after.find("MADS_REGISTER_PLUGINS") == std::string::npos);
 }
 
-TEST_CASE("run() migrates P8 -> P9 by moving the pin only",
+TEST_CASE("run() migrates P8 -> P9: pin and build-type default, no source "
+          "changes",
           "[plugin_migrate][run]") {
   fs::path project = copy_fixture("p8p9");
   ScopedPath cleanup(project);
@@ -824,6 +827,27 @@ TEST_CASE("run() migrates P8 -> P9 by moving the pin only",
   // pugg and nlohmann/json pins are unchanged by this step.
   REQUIRE(cmake_after.find("1.2.0") != std::string::npos);
   REQUIRE(cmake_after.find("v3.12.0") != std::string::npos);
+  // The Release default moved before project(), where MSVC cannot preempt
+  // it; the old after-project() block is gone.
+  REQUIRE(cmake_p8.find("CMAKE_BUILD_TYPE STREQUAL \"\"") != std::string::npos);
+  REQUIRE(cmake_after.find("CMAKE_BUILD_TYPE STREQUAL \"\"") ==
+          std::string::npos);
+  const auto release_default = cmake_after.find(
+      "if(NOT DEFINED CMAKE_BUILD_TYPE AND NOT DEFINED "
+      "CMAKE_CONFIGURATION_TYPES)");
+  const auto project_line = cmake_after.find("project(p6demo");
+  REQUIRE(release_default != std::string::npos);
+  REQUIRE(project_line != std::string::npos);
+  REQUIRE(release_default < project_line);
+
+  // Idempotent: running the step again changes nothing.
+  Options again;
+  again.check = false;
+  again.from_override = 8;
+  REQUIRE(run(project, migrations_dir(), deps_manifest(), again) == 0);
+  std::string cmake_again;
+  REQUIRE(read_file(project / "CMakeLists.txt", cmake_again));
+  REQUIRE(cmake_again == cmake_after);
   // The zero-copy API is opt-in with copying defaults: no source rewrite.
   REQUIRE(src_after == src_p8);
 }

@@ -6,10 +6,14 @@
 #                 |___/         
 {% include "header.tpl" %}
 cmake_minimum_required(VERSION 3.28)
-project({{name}} VERSION {{mads_version}} LANGUAGES CXX)
-if(CMAKE_BUILD_TYPE STREQUAL "")
-  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
+# Release by default. This must come before project(): there, single-config
+# generators with MSVC already initialize CMAKE_BUILD_TYPE to Debug, and a
+# Debug plugin cannot share std::string/json objects with a Release MADS
+# (different C runtimes).
+if(NOT DEFINED CMAKE_BUILD_TYPE AND NOT DEFINED CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build.")
 endif()
+project({{name}} VERSION {{mads_version}} LANGUAGES CXX)
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
   execute_process(
     COMMAND mads -p

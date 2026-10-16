@@ -547,19 +547,19 @@ int main(int argc, char *argv[]) {
       if (slot_bytes > 0) {
         if (!out.contains("format"))
           out["format"] = out_format;
-        auto topic = out.value("topic", "");
-        agent.publish_slot(guard.slot, slot_bytes, std::move(out), topic);
+        auto out_topic = out.value("topic", "");
+        agent.publish_slot(guard.slot, slot_bytes, std::move(out), out_topic);
         break;
       }
 #endif
       if (blob.size() > 0) {
         if (!out.contains("format"))
           out["format"] = out_format;
-        auto topic = out.value("topic", "");
-        agent.publish(blob, std::move(out), topic);
+        auto out_topic = out.value("topic", "");
+        agent.publish(blob, std::move(out), out_topic);
       } else if (!out.empty()) {
-        auto topic = out.value("topic", "");
-        agent.publish(std::move(out), topic);
+        auto out_topic = out.value("topic", "");
+        agent.publish(std::move(out), out_topic);
       }
       break;
     case return_type::retry:
@@ -750,19 +750,19 @@ int main(int argc, char *argv[]) {
     if (slot_bytes > 0) {
       if (!out.contains("format"))
         out["format"] = "raw";
-      auto topic = out.value("topic", "");
-      agent.publish_slot(guard.slot, slot_bytes, std::move(out), topic);
+      auto out_topic = out.value("topic", "");
+      agent.publish_slot(guard.slot, slot_bytes, std::move(out), out_topic);
       goto status_line;
     }
 #endif
     if (!blob.empty()) {
       if (!out.contains("format"))
         out["format"] = "raw";
-      auto topic = out.value("topic", "");
-      agent.publish(blob, std::move(out), topic);
+      auto out_topic = out.value("topic", "");
+      agent.publish(blob, std::move(out), out_topic);
     } else {
-      auto topic = out.value("topic", "");
-      agent.publish(std::move(out), topic);
+      auto out_topic = out.value("topic", "");
+      agent.publish(std::move(out), out_topic);
     }
   status_line:
     if (!silent) {
