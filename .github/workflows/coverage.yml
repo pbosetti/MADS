@@ -40,7 +40,7 @@ jobs:
             -DMADS_BUILD_TESTS=ON \
             -DMADS_COVERAGE=ON \
             -DMADS_BUILD_APPS=OFF \
-            -DMADS_DIRECTOR=OFF \
+            -DMADS_ENABLE_GUI=OFF \
             -DMADS_ENABLE_MONGOCXX=OFF
 
       - name: Build

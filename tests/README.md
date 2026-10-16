@@ -11,7 +11,7 @@ Tests that exercise ZeroMQ messaging do so entirely in-process, over
 CC=clang CXX=clang++ cmake -B build-cov -GNinja \
   -DCMAKE_BUILD_TYPE=Debug \
   -DMADS_BUILD_TESTS=ON -DMADS_COVERAGE=ON \
-  -DMADS_BUILD_APPS=OFF -DMADS_DIRECTOR=OFF -DMADS_ENABLE_MONGOCXX=OFF
+  -DMADS_BUILD_APPS=OFF -DMADS_ENABLE_GUI=OFF -DMADS_ENABLE_MONGOCXX=OFF
 cmake --build build-cov -j
 ctest --test-dir build-cov --output-on-failure
 ```

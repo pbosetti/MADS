@@ -28,17 +28,17 @@ git clone https://github.com/pbosetti/MADS.git
 cd MADS
 # Optional:
 # git switch <your desired branch>
-cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=products -DMADS_DIRECTOR=ON -GNinja -Wno-dev
+cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=products -DMADS_ENABLE_GUI=ON -GNinja -Wno-dev
 cmake --build build -j6
 ```
 
 On macOS, fat binaries can be compiled (for Intel and Silicon architectures) by doing:
 
 ```bash
-cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=products -DMADS_DIRECTOR=ON -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -GNinja -Wno-dev
+cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=products -DMADS_ENABLE_GUI=ON -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -GNinja -Wno-dev
 ```
 
-> NOTE: the `mads-director` GUI won't compile on Raspbian. Be sure to set it `OFF` on that platform.
+> NOTE: the GUI apps (`mads-director`, `mads-chat`) won't compile on Raspbian. Be sure to set `MADS_ENABLE_GUI=OFF` on that platform.
 
 ### Install
 
@@ -71,12 +71,12 @@ git clone https://github.com/pbosetti/MADS.git
 cd MADS
 # Optional:
 # git switch <your desired branch>
-cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=products -DMADS_DIRECTOR=ON -GNinja -Wno-dev
+cmake -Bbuild -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=products -DMADS_ENABLE_GUI=ON -GNinja -Wno-dev
 cmake --build build -j6
 ```
 
 > NOTE: It is strongly suggested to use Ninja as a generator rather than the default Visual Studio: the compile time can be greatly reduced.
-> If you don't need the `mads-director` GUI, you can set `MADS_DIRECTOR=OFF`.
+> If you don't need the `mads-director` and `mads-chat` GUI apps, you can set `MADS_ENABLE_GUI=OFF`. On Linux, `MADS_GUI_ENABLE_WAYLAND=ON` selects the GLFW Wayland backend (default OFF).
 
 ### Install
 
@@ -136,7 +136,7 @@ cmake -S . -B build-android-auto -G Ninja `
   -DCMAKE_INSTALL_PREFIX="products/android/$ABI-auto" `
   -DMADS_ENABLE_MONGOCXX=OFF `
   -DMADS_BUILD_APPS=OFF `
-  -DMADS_DIRECTOR=OFF
+  -DMADS_ENABLE_GUI=OFF
 
 cmake --build build-android-auto --target MadsCore
 cmake --install build-android-auto
@@ -159,4 +159,4 @@ products/android/arm64-v8a-auto/lib/libMadsCore.so
 
 - The currently validated configuration is `arm64-v8a` with `android-24`.
 - `MADS_ENABLE_MONGOCXX=OFF` is required for Android.
-- `MADS_BUILD_APPS=OFF` and `MADS_DIRECTOR=OFF` are recommended, since the Android flow is for the core native library rather than the desktop tools.
+- `MADS_BUILD_APPS=OFF` and `MADS_ENABLE_GUI=OFF` are recommended, since the Android flow is for the core native library rather than the desktop tools.

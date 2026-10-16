@@ -21,7 +21,7 @@
 # DESCRIPTION
 
 **mads-up** is a headless executor for `director.toml`, the process-plan format already used by
-**mads_director**'s interactive GUI (https://github.com/mads-net/mads_director). It is not a new
+the bundled **mads-director** GUI (built from `src/gui/director`). The format is shared with that GUI and parsed by the same MadsCore code. It is not a new
 compose format: develop and tune an agent set interactively in the Director GUI, commit the resulting
 `director.toml`, then run that exact same file unattended in CI, on an edge box, or under `systemd`
 (`Type=simple`) with **mads-up**.
@@ -81,8 +81,8 @@ It gates starting a process's dependents on an actual readiness signal instead o
 - **`delay:<duration>`** -- waits a fixed duration (e.g. `500ms`, `2s`, `1.5s`, `3m`; a bare number means
   seconds), unconditionally.
 
-`ready` is additive and silently ignored by Director's own parser, so a `director.toml` carrying it still
-loads fine in the GUI.
+`ready` is parsed and validated by the same MadsCore code the Director GUI uses, so a `director.toml`
+carrying it loads fine in the GUI too (which simply does not wait on it).
 
 ## Encrypted fleets
 
@@ -97,8 +97,8 @@ mads up --crypto --keys_dir /etc/mads/keys
 **\-\-crypto** takes no argument here and applies to every `ready = "broker"` probe in the plan; the key
 files follow the same convention as every other **mads-*** executable (`<key_client>.key` and
 `.pub` for this probe's own identity, `<key_broker>.pub` for the broker it encrypts toward). They are
-deliberately *not* `director.toml` keys: the plan format is shared with Director's GUI, where a
-top-level table that is not a process definition is a hard parse error, and a per-process key would be
+deliberately *not* `director.toml` keys: the plan format is shared with Director's GUI, where
+every top-level table other than `[director]` is read as a process definition, and a per-process key would be
 repeated on every process that gates on the broker.
 
 The encryption mode has to match the broker's, and a mismatch is indistinguishable from a broker that
@@ -235,8 +235,8 @@ The upstream bug tracker can be found at https://github.com/pbosetti/MADS/issues
 
 # FILES
 
-**director.toml**: the process plan, in the same format used by `mads_director`'s GUI (see
-https://github.com/mads-net/mads_director), plus the additive `ready` key described above.
+**director.toml**: the process plan, in the same format used by the bundled `mads-director` GUI and
+parsed by the same MadsCore code, plus the additive `ready` key described above.
 
 # AUTHOR
 

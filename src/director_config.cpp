@@ -1,10 +1,12 @@
-// Reference: mads_director tag v2.4.2 (this repo pins that exact tag in the
-// top-level CMakeLists.txt, `FetchContent_Declare(mads-director ... GIT_TAG
-// v2.4.2 ...)`). Verified by shallow-cloning that tag and reading
-// src/config.cpp, src/process_manager.cpp and src/platform_process_{posix,
-// windows}.cpp directly (not the README on `main`, which can drift). Summary
-// of what v2.4.2 actually does, so a future reader knows what to re-check if
-// Director moves:
+// This is the only director.toml parser in MADS: `mads up`, `mads doctor
+// --plan` and the `mads-director` GUI (src/gui/director, whose own parser and
+// expansion code were dropped when it moved in-tree) all go through it, so a
+// schema change here applies to all of them at once.
+//
+// Its behaviour was originally matched against mads_director v2.4.2
+// (src/config.cpp, src/process_manager.cpp and
+// src/platform_process_{posix,windows}.cpp, now under src/gui/director).
+// Summary of that reference behaviour, which the GUI relies on:
 //
 //  - Schema: a `[director]` table (optional; keys `terminal` string and
 //    `sample_rate` number of seconds, both optional) plus one table per
@@ -49,9 +51,6 @@
 //    choice (NEW_FEATURES.md P5 "Parser ownership"), not a fidelity target.
 //  - `terminal`/`tty` are GUI-only (attach windows); headless execution
 //    ignores them, matching NEW_FEATURES.md.
-//
-// If mads_director's pinned tag moves past v2.4.2, re-diff its src/config.cpp
-// and src/process_manager.cpp against the summary above.
 
 #include "director_config.hpp"
 

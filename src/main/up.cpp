@@ -7,10 +7,9 @@
        |_|
 
 `mads up`: a headless, scriptable executor for `director.toml`, the config
-format already owned by mads_director (https://github.com/mads-net/mads_director).
-Parses/validates/expands the file itself (src/director_config.hpp -- see that
-file's top comment for exactly what was verified against Director's pinned
-v2.4.2 tag), then starts, supervises and tears down the described processes
+format shared with the `mads-director` GUI (src/gui/director).
+Parses/validates/expands the file with the same MadsCore parser the GUI uses
+(src/director_config.hpp), then starts, supervises and tears down the described processes
 via src/up_supervisor.hpp. Foreground-only by design: no daemonization, no PID
 file, no `mads down` -- SIGINT/SIGTERM tears everything down and this process
 exits, exactly what systemd Type=simple / Docker / CI expect.

@@ -81,7 +81,18 @@ endif()
 include(GNUInstallDirs)
 option(MADS_ENABLE_MONGOCXX "Enable MongoDB C++ driver dependency" ON)
 option(MADS_BUILD_APPS "Build executables" ${PROJECT_IS_TOP_LEVEL})
-option(MADS_DIRECTOR "Also build the director app (requires graphical interface)" ON)
+if(ANDROID)
+  set(_mads_gui_default OFF)
+else()
+  set(_mads_gui_default ON)
+endif()
+option(MADS_ENABLE_GUI "Build the GUI apps (mads-chat, mads-director); requires a graphical interface" ${_mads_gui_default})
+# One-shot migration of the former MADS_DIRECTOR option in existing build dirs.
+if(DEFINED CACHE{MADS_DIRECTOR})
+  message(DEPRECATION "MADS_DIRECTOR is deprecated, use MADS_ENABLE_GUI instead (migrating value ${MADS_DIRECTOR})")
+  set(MADS_ENABLE_GUI ${MADS_DIRECTOR} CACHE BOOL "Build the GUI apps (mads-chat, mads-director); requires a graphical interface" FORCE)
+  unset(MADS_DIRECTOR CACHE)
+endif()
 option(MADS_BUILD_TESTS "Build unit tests (Catch2)" OFF)
 option(MADS_COVERAGE "Instrument MadsCore and tests for coverage analysis" OFF)
 
@@ -137,44 +148,6 @@ endforeach()
 #            |_|
 #
 add_subdirectory(vendors)
-if(MADS_DIRECTOR)
-  set(GLFW_BUILD_DOCS OFF)
-  set(GLFW_LIBRARY_TYPE "STATIC")
-  set(MADS_DIRECTOR_EXAMPLE_CONFIG ON)
-  FetchContent_Declare(mads-director
-    GIT_REPOSITORY https://github.com/mads-net/mads_director.git
-    GIT_TAG v2.4.2
-    GIT_SHALLOW TRUE
-  )
-  FetchContent_MakeAvailable(mads-director)
-  if (MSVC)
-    # glfw sets its own /W3, and mads-director's own executable sets /W4;
-    # appending /w on top of either makes MSVC emit a D9025 command-line
-    # warning ("overriding '/Wn' with '/w'"). Strip the existing /Wn flag
-    # from each target before silencing it so the warning level ends up
-    # at /w cleanly, with no command-line conflict.
-    if(MADS_CMD_PREFIX STREQUAL "")
-      set(_mads_director_target director)
-    else()
-      set(_mads_director_target "${MADS_CMD_PREFIX}-director")
-    endif()
-    foreach(_mads_silence_target glfw ${_mads_director_target})
-      if(TARGET ${_mads_silence_target})
-        get_target_property(_mads_silence_opts ${_mads_silence_target} COMPILE_OPTIONS)
-        if(_mads_silence_opts)
-          list(FILTER _mads_silence_opts EXCLUDE REGEX "^/W[0-4]$|^/Wall$")
-          set_target_properties(${_mads_silence_target} PROPERTIES COMPILE_OPTIONS "${_mads_silence_opts}")
-        endif()
-        target_compile_options(${_mads_silence_target} PRIVATE /w)
-      endif()
-    endforeach()
-    unset(_mads_director_target)
-    unset(_mads_silence_opts)
-  else()
-    target_compile_options(glfw PUBLIC -w)
-  endif()
-endif()
-
 if(MSVC)
   add_compile_options(/W4 /permissive- /wd4505 /wd4005 /wd4244 /wd4996 /wd4459)
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
@@ -443,6 +416,9 @@ if(MADS_BUILD_APPS)
   )
   add_subdirectory(${SOURCE_DIR}/main)
   add_subdirectory(${SOURCE_DIR}/plugin)
+  if(MADS_ENABLE_GUI)
+    add_subdirectory(${SOURCE_DIR}/gui)
+  endif()
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/share/man)
 endif()
 
@@ -630,10 +606,22 @@ elseif(WIN32)
   
 
 else()
-  if(MADS_DIRECTOR)
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libzstd1, libgnutls30, openssl, libsodium23, libxrandr2, libxinerama1, libxcursor1, libxi6, libxext6")
+  # Runtime dependencies are computed by dpkg-shlibdeps from the binaries
+  # actually packaged (vendored libraries such as libsodium/libzmq are linked
+  # statically, the system ones are OpenSSL, libc/libstdc++ and, with the GUI,
+  # X11/GL), so the GUI and headless packages each get exactly what they need.
+  set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+  if(MADS_ENABLE_GUI)
+    # GLFW loads the X11 libraries with dlopen(), invisible to dpkg-shlibdeps:
+    # declare them explicitly (CPack merges these with the computed ones).
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libx11-6, libxrandr2, libxinerama1, libxcursor1, libxi6, libxext6")
+    # mads-chat file dialogs (portable-file-dialogs) shell out to zenity at
+    # runtime, which dpkg-shlibdeps cannot see.
+    set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "zenity")
   else()
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libzstd1, libgnutls30, openssl")
+    # GUI-less variant (no mads-chat/mads-director, no X11/GL deps): CI packages
+    # it from the same build tree, reconfigured with MADS_ENABLE_GUI=OFF.
+    set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_FILE_NAME}_headless")
   endif()
   set(CPACK_DEBIAN_PACKAGE_NAME MADS)
   set(CPACK_GENERATOR "DEB;TGZ")

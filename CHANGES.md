@@ -1,3 +1,21 @@
+# Unreleased
+
+## Improvements
+
+- **mads-director and mads-chat are merged into the source tree** (`src/gui`),
+  sharing one GLFW/DearImGui (v1.92.6) build. There is no more FetchContent of
+  `mads_director`.
+- **mads-director now uses MadsCore's `director.toml` parser** (the same one
+  `mads up` uses): the process list is shown in dependency order, non-table
+  top-level entries are warnings, and invalid `ready` values are errors.
+- **mads-director is restyled to match mads-chat** (colors, fonts, status footer).
+
+## For developers
+
+- **New option `MADS_ENABLE_GUI` replaces `MADS_DIRECTOR`.** An old cache value
+  is migrated automatically, with a deprecation warning.
+- **Packages no longer ship GLFW headers, static library or CMake config.**
+
 # Release 2.5.0
 
 This document summarizes what changed between `v2.4.3` and `v2.5.0`.

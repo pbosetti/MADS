@@ -32,7 +32,7 @@ ENV CC=/usr/bin/clang
 ENV CXX=/usr/bin/clang++
 
 RUN cd ${BUILDDIR} && \
-    cmake -Bbuild -DMADS_DIRECTOR=OFF -DCMAKE_BUILD_TYPE=Release && \
+    cmake -Bbuild -DMADS_ENABLE_GUI=OFF -DCMAKE_BUILD_TYPE=Release && \
     cmake --build build -j6 && \
     cmake --install build --prefix /usr/local && \
     rm -rf build

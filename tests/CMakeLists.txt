@@ -34,6 +34,11 @@ endif()
 # shared entry point linked into every one of them below, not a suite itself.
 file(GLOB MADS_TEST_SOURCES ${CMAKE_CURRENT_LIST_DIR}/test_*.cpp)
 list(REMOVE_ITEM MADS_TEST_SOURCES ${CMAKE_CURRENT_LIST_DIR}/test_main.cpp)
+# The director adapter suite needs mads_director_core, which only exists when
+# the GUI and apps are built; drop it from the glob otherwise.
+if(NOT (MADS_ENABLE_GUI AND MADS_BUILD_APPS))
+  list(REMOVE_ITEM MADS_TEST_SOURCES ${CMAKE_CURRENT_LIST_DIR}/test_director_adapter.cpp)
+endif()
 if(WIN32)
   set(MADS_TEST_DL_PATHS $<TARGET_FILE_DIR:Mads::Mads>)
 endif()
@@ -47,6 +52,9 @@ foreach(test_src IN LISTS MADS_TEST_SOURCES)
     mads_test_flags
     ${MADS_TEST_SSL_LIBS}
   )
+  if(test_name STREQUAL "test_director_adapter")
+    target_link_libraries(${test_name} PRIVATE mads_director_core)
+  endif()
   target_include_directories(${test_name} PRIVATE ${CMAKE_SOURCE_DIR}/src)
   target_compile_definitions(${test_name} PRIVATE
     MADS_TEST_FIXTURES_DIR="${CMAKE_CURRENT_LIST_DIR}/fixtures"

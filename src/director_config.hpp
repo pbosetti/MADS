@@ -11,15 +11,14 @@
   \____\___/|_| |_|_| |_|\__, |
                          |___/
 
-Pure config module for `mads up` (src/main/up.cpp): parses `director.toml` (the
-config format owned by https://github.com/mads-net/mads_director), validates
-it, expands `scale`/`${PWD}`/`${ID}` templating, and orders processes so that
-every dependency (`after`) starts before its dependents.
+The single `director.toml` parser of MADS, shared by `mads up`
+(src/main/up.cpp), `mads doctor --plan` and the `mads-director` GUI
+(src/gui/director): parses the file, validates it, expands
+`scale`/`${PWD}`/`${ID}` templating, and orders processes so that every
+dependency (`after`) starts before its dependents.
 
 No ZMQ, no process spawning, no `Mads::Agent` dependency here on purpose (see
-the "Parser ownership" decision in NEW_FEATURES.md's P5 section): this file is
-meant to be liftable wholesale into a future shared header, or contributed
-upstream to mads_director.
+the "Parser ownership" decision in NEW_FEATURES.md's P5 section).
 
 Author(s): Paolo Bosetti
 */
@@ -54,10 +53,9 @@ enum class ReadyKind { Broker, Port, Log, Delay };
  * @brief A parsed, validated `ready = "..."` value.
  *
  * Grammar (see NEW_FEATURES.md P5): `"broker"` | `"broker:<uri>"` |
- * `"port:<n>"` | `"log:<regex>"` | `"delay:<dur>"`. This key is additive and
- * silently ignored by Director's own parser (it never validates unknown keys
- * inside a process table -- confirmed against mads_director v2.4.2's
- * src/config.cpp, see the comment at the top of director_config.cpp).
+ * `"port:<n>"` | `"log:<regex>"` | `"delay:<dur>"`. Only `mads up` acts on
+ * it; the `mads-director` GUI parses (and so validates) it but does not wait
+ * on it.
  */
 struct ReadySpec {
   ReadyKind kind = ReadyKind::Delay;
@@ -93,12 +91,12 @@ struct ProcessConfig {
   bool relaunch = false;
   bool tty = false; // parsed for fidelity; headless mads-up ignores it
   // The value `${ID}` expanded to: `base_instance_id + <0-based index>`,
-  // matching Director's own substitution. Plain 0-based when the section
+  // matching mads_director v2.4.2's substitution. Plain 0-based when the section
   // leaves `base_instance_id` at its 0 default.
   int instance_id = 0;
   // Resolved dependency instance names (a base process with scale>1 that
   // another depends on via `after` expands to *all* of its instances, exactly
-  // as mads_director's ProcessManager::build_process_definitions does).
+  // as mads_director v2.4.2's ProcessManager::build_process_definitions did).
   std::vector<std::string> after;
   std::optional<ReadySpec> ready;
 };
@@ -147,9 +145,8 @@ struct DirectorLoadOptions {
  *
  * Unknown top-level keys/sections/tables and unknown keys inside a process
  * table are ignored, never fatal -- a deliberate design choice (see
- * NEW_FEATURES.md's P5 "Parser ownership" decision), not a fidelity match to
- * Director's own parser (which is stricter about non-table top-level
- * entries; see the comment at the top of director_config.cpp).
+ * NEW_FEATURES.md's P5 "Parser ownership" decision); they are reported via
+ * `out_warnings`.
  */
 std::optional<DirectorConfig>
 load_director_config(const std::string &path, std::string *out_error,
