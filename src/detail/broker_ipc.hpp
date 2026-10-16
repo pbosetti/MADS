@@ -146,9 +146,12 @@ enum class IpcSocketState {
 // (libzmq replaces it on bind, as it always did).
 inline IpcSocketState probe_ipc_socket(std::string const &path) {
 #ifdef _WIN32
+  // symlink_status(): AF_UNIX socket files are reparse points that status()
+  // may fail to follow.
   std::error_code ec;
-  return std::filesystem::exists(path, ec) ? IpcSocketState::Stale
-                                           : IpcSocketState::Absent;
+  return std::filesystem::exists(std::filesystem::symlink_status(path, ec))
+             ? IpcSocketState::Stale
+             : IpcSocketState::Absent;
 #else
   struct stat st {};
   if (::lstat(path.c_str(), &st) != 0)

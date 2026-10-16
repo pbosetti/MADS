@@ -135,8 +135,10 @@ bool ipc_file_exists(const string &endpoint) {
   auto e = parse_endpoint(endpoint);
   if (!e || !e->is_ipc())
     return false;
+  // symlink_status(): a Windows AF_UNIX socket file is a reparse point that
+  // status() may fail to follow.
   std::error_code ec;
-  return filesystem::exists(e->path, ec);
+  return filesystem::exists(filesystem::symlink_status(e->path, ec));
 }
 
 // Why the broker's ipc endpoints cannot be used, or "" if they can. With
