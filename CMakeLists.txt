@@ -430,11 +430,25 @@ endif()
 
 if(MADS_BUILD_APPS)
   include(FetchContent)
-  FetchContent_Populate(plugin 
-    GIT_REPOSITORY https://github.com/pbosetti/mads_plugin.git
-    GIT_TAG        v2.5-P8
-    GIT_SHALLOW    TRUE
-  )
+  # A local mads_plugin checkout (e.g. to build against an unreleased plugin
+  # protocol) replaces the fetched one.
+  set(MADS_PLUGIN_SOURCE_DIR "" CACHE PATH
+    "Local mads_plugin source dir to use instead of fetching it")
+  if(MADS_PLUGIN_SOURCE_DIR)
+    if(NOT EXISTS ${MADS_PLUGIN_SOURCE_DIR}/src/common.hpp)
+      message(FATAL_ERROR
+        "MADS_PLUGIN_SOURCE_DIR=${MADS_PLUGIN_SOURCE_DIR} is not a mads_plugin checkout")
+    endif()
+    set(plugin_SOURCE_DIR ${MADS_PLUGIN_SOURCE_DIR})
+    message(STATUS "Using local mads_plugin: ${plugin_SOURCE_DIR}")
+  else()
+    # TODO: bump to the V9 tag once mads_plugin feat/ipc is pushed
+    FetchContent_Populate(plugin
+      GIT_REPOSITORY https://github.com/pbosetti/mads_plugin.git
+      GIT_TAG        v2.5-P8
+      GIT_SHALLOW    TRUE
+    )
+  endif()
   include_directories(
     ${plugin_SOURCE_DIR}/src
     ${nlohmann_json_SOURCE_DIR}/include
