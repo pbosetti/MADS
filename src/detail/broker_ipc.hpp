@@ -73,11 +73,10 @@ BrokerIpcConfig resolve_broker_ipc(Section const &section,
   try {
     if (auto d = section["ipc_dir"].template value<std::string>();
         d && !d->empty()) {
+      // Same rules as the default runtime dir: the directory's permissions
+      // are the only access control on the socket files in it.
       dir = *d;
-      std::error_code ec;
-      std::filesystem::create_directories(dir, ec);
-      if (ec)
-        dir_error = "cannot create ipc_dir " + *d + ": " + ec.message();
+      ensure_private_dir(dir, "ipc_dir");
     } else {
       dir = runtime_dir();
     }
@@ -146,12 +145,8 @@ enum class IpcSocketState {
 // (libzmq replaces it on bind, as it always did).
 inline IpcSocketState probe_ipc_socket(std::string const &path) {
 #ifdef _WIN32
-  // symlink_status(): AF_UNIX socket files are reparse points that status()
-  // may fail to follow.
-  std::error_code ec;
-  return std::filesystem::exists(std::filesystem::symlink_status(path, ec))
-             ? IpcSocketState::Stale
-             : IpcSocketState::Absent;
+  return socket_file_exists(path) ? IpcSocketState::Stale
+                                  : IpcSocketState::Absent;
 #else
   struct stat st {};
   if (::lstat(path.c_str(), &st) != 0)

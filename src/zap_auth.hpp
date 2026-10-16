@@ -188,4 +188,30 @@ CurveKeypair generate_keypair();
  */
 std::string z85_encode(const std::string &data);
 
+/// What kind of peer a ZAP request's address frame names.
+enum class ZapPeerKind {
+  Ip,    ///< a tcp peer: an IPv4/IPv6 literal (scope id allowed)
+  Ipc,   ///< an ipc:// peer, in one of the forms libzmq reports for AF_UNIX
+  Other, ///< anything else: treated like a network peer
+};
+
+/**
+ * @brief Classifies the address frame of a ZAP request.
+ *
+ * libzmq 4.3.5 fills it in stream_engine_base.cpp get_peer_address():
+ * getnameinfo(NI_NUMERICHOST) of the peer, so a tcp peer is a numeric IP,
+ * possibly with an IPv6 scope id ("fe80::1%en0"). For an AF_UNIX (ipc://)
+ * peer, getnameinfo() fails on macOS, Windows and musl, giving "", and
+ * glibc returns "localhost", to which libzmq appends the SO_PEERCRED
+ * ":<uid>:<gid>:<pid>" suffix (BSD's LOCAL_PEERCRED appends ":<uid>:<gid>:").
+ * Only those forms are Ipc; everything else that is not an IP literal is
+ * Other.
+ *
+ * @param address The ZAP address frame.
+ * @param host If not null and the address is Ip, receives the bare IP
+ *   (brackets and scope id removed).
+ */
+ZapPeerKind classify_zap_address(const std::string &address,
+                                 std::string *host = nullptr);
+
 } // namespace Mads

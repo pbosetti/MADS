@@ -59,13 +59,6 @@ using namespace Mads::detail;
 
 namespace {
 
-// fs::exists() throws on a Windows AF_UNIX socket file (a reparse point that
-// status() cannot follow); symlink_status() works on every platform.
-bool socket_file_exists(fs::path const &p) {
-  std::error_code ec;
-  return fs::exists(fs::symlink_status(p, ec));
-}
-
 // The ipc endpoint for `file` in `dir`, joined with the native separator.
 std::string ipc_in(fs::path const &dir, std::string const &file) {
   return "ipc://" + (dir / file).string();
@@ -352,6 +345,39 @@ TEST_CASE("resolve_broker_ipc derives per-role endpoints from the tcp ports",
 }
 
 #ifndef _WIN32
+TEST_CASE("an explicit ipc_dir gets the runtime dir's ownership rules",
+          "[ipc_transport]") {
+  REQUIRE_IPC();
+  SECTION("an own directory is created owner-only") {
+    IpcDir parent(44690);
+    const fs::path dir = parent.path / "sub";
+    toml::table cfg;
+    toml::table section;
+    section.insert("ipc_dir", dir.string());
+    cfg.insert("broker", section);
+    auto r = resolve_broker_ipc(cfg["broker"], "tcp://*:9090", "tcp://*:9091",
+                                "tcp://*:9092");
+    CHECK(r.warnings.empty());
+    CHECK(r.frontend == ipc_in(dir, "broker-9090-front.ipc"));
+    const auto perms = fs::status(dir).permissions();
+    CHECK((perms & (fs::perms::group_all | fs::perms::others_all)) ==
+          fs::perms::none);
+  }
+  SECTION("a directory owned by someone else is refused") {
+    if (::getuid() == 0)
+      SKIP("running as root: every directory is ours");
+    toml::table cfg = toml::parse("[broker]\nipc_dir = \"/\"\n");
+    auto r = resolve_broker_ipc(cfg["broker"], "tcp://*:9090", "tcp://*:9091",
+                                "tcp://*:9092");
+    CHECK(r.frontend.empty());
+    CHECK(r.backend.empty());
+    CHECK(r.settings.empty());
+    REQUIRE(r.warnings.size() == 3);
+    CHECK(r.warnings[0].find("not owned by the current user") !=
+          std::string::npos);
+  }
+}
+
 TEST_CASE("bind_broker_ipc replaces a stale socket file but never a live one",
           "[ipc_transport]") {
   REQUIRE_IPC();

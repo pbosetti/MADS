@@ -28,6 +28,26 @@ namespace Mads::detail {
 // a margin for the terminating NUL.
 constexpr size_t IPC_PATH_MAX = 100;
 
+// Creates `dir` if missing and makes sure it is private to this user: on
+// POSIX it must be owned by the current user (a directory owned by someone
+// else would let them impersonate the sockets in it) and is chmod'ed 0700.
+// Throws std::runtime_error otherwise. `what` names the directory in errors.
+inline void ensure_private_dir(std::filesystem::path const &dir,
+                               std::string const &what = "Runtime dir") {
+  std::error_code ec;
+  std::filesystem::create_directories(dir, ec);
+  if (ec)
+    throw std::runtime_error("Cannot create " + what + " " + dir.string() +
+                             ": " + ec.message());
+#ifndef _WIN32
+  struct stat st {};
+  if (::stat(dir.c_str(), &st) != 0 || st.st_uid != ::getuid())
+    throw std::runtime_error(what + " " + dir.string() +
+                             " is not owned by the current user");
+  ::chmod(dir.c_str(), 0700);
+#endif
+}
+
 inline std::filesystem::path runtime_dir() {
   namespace fs = std::filesystem;
   fs::path dir;
@@ -44,21 +64,16 @@ inline std::filesystem::path runtime_dir() {
   else
     dir = fs::path("/tmp") / ("mads-" + std::to_string(::getuid()));
 #endif
-  std::error_code ec;
-  fs::create_directories(dir, ec);
-  if (ec)
-    throw std::runtime_error("Cannot create runtime dir " + dir.string() +
-                             ": " + ec.message());
-#ifndef _WIN32
-  // A pre-existing /tmp/mads-<uid> owned by someone else would let them
-  // impersonate the broker's sockets: refuse it.
-  struct stat st {};
-  if (::stat(dir.c_str(), &st) != 0 || st.st_uid != ::getuid())
-    throw std::runtime_error("Runtime dir " + dir.string() +
-                             " is not owned by the current user");
-  ::chmod(dir.c_str(), 0700);
-#endif
+  ensure_private_dir(dir);
   return dir;
+}
+
+// True if something exists at an ipc:// socket path. symlink_status(): a
+// Windows AF_UNIX socket file is a reparse point that status() may fail to
+// follow.
+inline bool socket_file_exists(std::filesystem::path const &path) {
+  std::error_code ec;
+  return std::filesystem::exists(std::filesystem::symlink_status(path, ec));
 }
 
 // Default ipc:// endpoint for a broker role ("front", "back", "settings"),

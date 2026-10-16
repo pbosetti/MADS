@@ -31,16 +31,38 @@ namespace Mads {
 
 namespace {
 
-// libzmq reports a tcp peer as a numeric IPv4/IPv6 address
-// (getnameinfo(NI_NUMERICHOST)). An ipc:// peer has no IP: libzmq 4.3.5
-// reports "" on macOS and Windows, and on Linux whatever glibc's
-// getnameinfo() makes of AF_UNIX ("localhost") followed by the SO_PEERCRED
-// ":uid:gid:pid" suffix. Anything that is not an IP literal is therefore a
-// local ipc peer.
 bool is_ip_literal(const string &address) {
   unsigned char buf[16];
   return inet_pton(AF_INET, address.c_str(), buf) == 1 ||
          inet_pton(AF_INET6, address.c_str(), buf) == 1;
+}
+
+bool all_digits(const string &s, size_t from, size_t to) {
+  if (from >= to)
+    return false;
+  for (size_t i = from; i < to; ++i)
+    if (s[i] < '0' || s[i] > '9')
+      return false;
+  return true;
+}
+
+// ":<n>:<n>:<n>" (Linux SO_PEERCRED: uid, gid, pid) or ":<n>:[<n>]:" (BSD
+// LOCAL_PEERCRED: uid, first group if any, no pid), as appended by libzmq.
+bool is_peercred_suffix(const string &s) {
+  if (s.empty() || s[0] != ':')
+    return false;
+  const size_t a = s.find(':', 1);
+  if (a == string::npos || !all_digits(s, 1, a))
+    return false;
+  const size_t b = s.find(':', a + 1);
+  if (b == string::npos)
+    return false;
+  const bool gid_ok = b == a + 1 || all_digits(s, a + 1, b);
+  if (!gid_ok)
+    return false;
+  if (b + 1 == s.size()) // BSD form
+    return true;
+  return all_digits(s, b + 1, s.size()) && b > a + 1; // Linux form
 }
 
 // RFC 27 request frames, in order.
@@ -130,10 +152,18 @@ bool ZapAuth::_authorise(const string &domain, const string &address,
   // It restricts network peers only: an ipc:// peer is on this host by
   // construction, and the owner-only runtime directory holding the socket
   // files is its access control. CURVE keys are still checked below.
-  if (!_allowed_addresses.empty() && is_ip_literal(address) &&
-      _allowed_addresses.count(address) == 0) {
-    reason = "Address not allowed";
-    return false;
+  // Anything not recognisably ipc is a network peer, listed either verbatim
+  // or (for an IP) without brackets and scope id.
+  if (!_allowed_addresses.empty()) {
+    string host;
+    const ZapPeerKind kind = classify_zap_address(address, &host);
+    const bool listed =
+        _allowed_addresses.count(address) > 0 ||
+        (kind == ZapPeerKind::Ip && _allowed_addresses.count(host) > 0);
+    if (kind != ZapPeerKind::Ipc && !listed) {
+      reason = "Address not allowed";
+      return false;
+    }
   }
 
   if (mechanism == "CURVE") {
@@ -223,6 +253,30 @@ void ZapAuth::_serve() {
         break;
     }
   }
+}
+
+ZapPeerKind classify_zap_address(const string &address, string *host) {
+  if (address.empty())
+    return ZapPeerKind::Ipc; // getnameinfo() failed on an AF_UNIX peer
+  const string localhost = "localhost";
+  if (address == localhost ||
+      (address.rfind(localhost, 0) == 0 &&
+       is_peercred_suffix(address.substr(localhost.size()))) ||
+      is_peercred_suffix(address))
+    return ZapPeerKind::Ipc;
+
+  string bare = address;
+  if (bare.size() > 2 && bare.front() == '[' && bare.back() == ']')
+    bare = bare.substr(1, bare.size() - 2);
+  // An IPv6 scope id ("fe80::1%en0"), which inet_pton() rejects.
+  if (auto pct = bare.find('%');
+      pct != string::npos && bare.find(':') != string::npos)
+    bare.erase(pct);
+  if (!is_ip_literal(bare))
+    return ZapPeerKind::Other;
+  if (host)
+    *host = std::move(bare);
+  return ZapPeerKind::Ip;
 }
 
 CurveKeypair generate_keypair() {
