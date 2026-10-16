@@ -213,7 +213,10 @@ endfunction()
 #                |___/
 #
 
-file(GLOB LIB_SOURCES ${SOURCE_DIR}/*.cpp ${SOURCE_DIR}/*.mm)
+# src/shm/ holds the shared-memory data plane; its platform files guard their
+# bodies with _WIN32, so all of them can be globbed on every platform.
+file(GLOB LIB_SOURCES ${SOURCE_DIR}/*.cpp ${SOURCE_DIR}/*.mm
+  ${SOURCE_DIR}/shm/*.cpp)
 if(NOT MSVC)
   add_compile_options(-Wno-unused-function)
 endif()
@@ -282,6 +285,11 @@ if(MADS_CPPZMQ_INCLUDE_DIR)
 endif()
 link_first_available(${LIB_NAME} CANDIDATES inja::inja inja)
 link_first_available(${LIB_NAME} CANDIDATES Snappy::snappy snappy)
+# shm_open/shm_unlink (src/shm/) live in librt on glibc < 2.34; harmless on
+# newer glibc, where librt is an empty stub. Bionic has no POSIX shm at all.
+if(UNIX AND NOT APPLE AND NOT ANDROID)
+  target_link_libraries(${LIB_NAME} PRIVATE rt)
+endif()
 if(MADS_ENABLE_MONGOCXX)
   # Guards the driver-dependent code paths in logger.cpp. PRIVATE on purpose:
   # no installed header depends on it, so SDK consumers never need it. Use
@@ -483,7 +491,7 @@ install(
 )
 
 # Note: this glob is deliberately non-recursive, so internal headers under
-# src/detail/ are not part of the installed SDK.
+# src/detail/ and src/shm/ are not part of the installed SDK.
 file(GLOB LIB_HEADERS ${SOURCE_DIR}/*.hpp ${SOURCE_DIR}/*.h)
 # MongoFetch is only compiled into the library when the driver is vendored in;
 # shipping its header otherwise would just hand consumers link errors.
