@@ -25,6 +25,7 @@ Author(s): Paolo Bosetti
 #include "../broker_probe.hpp"
 #include "../detail/endpoint.hpp"
 #include "../detail/host_token.hpp"
+#include "../detail/plugin_protocol.hpp"
 #include "../shm/shared_segment.hpp"
 #include "../director_config.hpp"
 #include "../doctor_checks.hpp"
@@ -182,6 +183,30 @@ Mads::Doctor::PluginLoadFacts probe_plugin_load(const fs::path &plugin_file,
     if (facts.error.empty()) {
       facts.error = "cannot load plugin file";
     }
+    return facts;
+  }
+
+  // A driver built for a newer protocol has a different vtable: report it
+  // without instantiating it (create()/kind() would crash).
+  auto too_new = [&](const pugg::Driver *d, const char *kind) {
+    if (!d || d->version() <= PLUGIN_PROTOCOL_VERSION)
+      return false;
+    facts.driver_kind = kind;
+    facts.driver_name = driver_name;
+    facts.protocol_version = d->version();
+    facts.error = Mads::detail::plugin_protocol_mismatch(
+        d->version(), PLUGIN_PROTOCOL_VERSION, PLUGIN_PROTOCOL_VERSION);
+    return true;
+  };
+  auto *src_driver = kernel.get_driver<SourceDriver<json>>(
+      Source<json>::server_name(), driver_name);
+  auto *flt_driver = kernel.get_driver<FilterDriver<json, json>>(
+      Filter<json, json>::server_name(), driver_name);
+  auto *snk_driver = kernel.get_driver<SinkDriver<json>>(
+      Sink<json>::server_name(), driver_name);
+  if (too_new(src_driver, "source") || too_new(flt_driver, "filter") ||
+      too_new(snk_driver, "sink")) {
+    kernel.clear_drivers();
     return facts;
   }
 

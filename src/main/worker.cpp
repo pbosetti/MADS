@@ -11,6 +11,7 @@ Author(s): Paolo Bosetti
 */
 #include "../worker.hpp"
 #include "../agent_app.hpp"
+#include "../detail/plugin_protocol.hpp"
 #include <filesystem>
 #include <pugg/Kernel.h>
 #include <filter.hpp>
@@ -147,6 +148,16 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
 
+  // pugg rejects drivers older than this host's protocol, but not newer
+  // ones, whose vtables do not match ours: check before instantiating.
+  if (auto why = detail::plugin_protocol_mismatch(filter_driver->version(),
+                                                  PLUGIN_PROTOCOL_VERSION,
+                                                  PLUGIN_PROTOCOL_VERSION);
+      !why.empty()) {
+    cerr << fg::red << "Error: cannot load " << plugin_file << ": " << why
+         << fg::reset << endl;
+    exit(1);
+  }
   // Create the class from the plugin (P8: create() returns a unique_ptr):
   auto filter = filter_driver->create();
   filter->set_params(settings);

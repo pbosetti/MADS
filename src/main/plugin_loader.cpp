@@ -11,6 +11,7 @@ Actual work is done by the plugins, this executable is just a wrapper.
 Author(s): Paolo Bosetti
 */
 #include "../agent_app.hpp"
+#include "../detail/plugin_protocol.hpp"
 #include "../detail/transport.hpp"
 #include "../exec_path.hpp"
 #include "../mads.hpp"
@@ -276,6 +277,16 @@ int main(int argc, char *argv[]) {
       cerr << "- " << d->name() << endl;
     }
     exit(1);
+  }
+  // pugg rejects drivers older than this host's protocol, but not newer
+  // ones, whose vtables do not match ours: check before instantiating.
+  if (auto why = detail::plugin_protocol_mismatch(plugin_driver->version(),
+                                                  PLUGIN_PROTOCOL_VERSION,
+                                                  PLUGIN_PROTOCOL_VERSION);
+      !why.empty()) {
+    cerr << style::bold << fg::red << "Fatal error: cannot load "
+         << plugin_file << ": " << why << fg::reset << style::reset << endl;
+    return EXIT_FAILURE;
   }
   // Create the class from the plugin:
   auto plugin = std::unique_ptr<Plugin>(plugin_driver->create());

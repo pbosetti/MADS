@@ -258,6 +258,12 @@ void collect_drivers(pugg::Kernel &kernel, const char *server_name,
   auto drivers = kernel.get_all_drivers<TDriver>(server_name);
   for (auto *driver : drivers) {
     std::string kind;
+    // A plugin built for a newer protocol has a different vtable: calling
+    // into it would crash, so leave its kind unknown.
+    if (driver->version() > PLUGIN_PROTOCOL_VERSION) {
+      out.push_back({type, driver->version(), kind});
+      continue;
+    }
     try {
       if (auto plugin = driver->create()) {
         kind = plugin->kind();
@@ -329,7 +335,7 @@ int main(int argc, char *argv[]) {
   const bool loadable = library_loaded && !all_drivers.empty();
   bool protocol_current = loadable;
   for (const auto &driver : all_drivers) {
-    if (driver.version < PLUGIN_PROTOCOL_VERSION) {
+    if (driver.version != PLUGIN_PROTOCOL_VERSION) {
       protocol_current = false;
       break;
     }
@@ -415,8 +421,8 @@ int main(int argc, char *argv[]) {
 
     if (!protocol_current) {
       std::cout << fg::yellow;
-      std::cout << "reason: plugin driver version is older than the current "
-                  "protocol"
+      std::cout << "reason: plugin driver version differs from the current "
+                  "protocol (older: rebuild the plugin; newer: upgrade MADS)"
                 << std::endl;
       std::cout << fg::reset;
     }
