@@ -1,10 +1,12 @@
-# Unreleased
+# Release v2.5.1
+
+> **NOTE**: although technically this should be marked as a minor release (eg v2.6.0), the ABI of MadsCore has not changed nor have the wire protocol and the plugin loading protocol. Consequently, this release is fully compatible with previous 2.5.x releases, downstream C++ agents do not need to be recompiled, and it has consequently been marked as a patch release v2.5.1.
 
 ## Improvements
 
 - **mads-director and mads-chat are merged into the source tree** (`src/gui`),
   sharing one GLFW/DearImGui (v1.92.6) build. There is no more FetchContent of
-  `mads_director`.
+  `mads_director`, nor the users have to manually install `mads-chat`.
 - **mads-director now uses MadsCore's `director.toml` parser** (the same one
   `mads up` uses): the process list is shown in dependency order, non-table
   top-level entries are warnings, and invalid `ready` values are errors.
