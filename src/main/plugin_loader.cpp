@@ -11,6 +11,7 @@ Actual work is done by the plugins, this executable is just a wrapper.
 Author(s): Paolo Bosetti
 */
 #include "../agent_app.hpp"
+#include "../detail/transport.hpp"
 #include "../exec_path.hpp"
 #include "../mads.hpp"
 #include <cxxopts.hpp>
@@ -44,6 +45,15 @@ Author(s): Paolo Bosetti
 
 #define MADS_PLUGIN_MIN_PROTOCOL 7
 
+// Plugin protocol V9 adds the shared-memory blob hooks (read-only input views
+// and host-provided output buffers, see the agent's shared-memory data
+// plane); older mads_plugin headers lack them.
+#if PLUGIN_PROTOCOL_VERSION >= 9
+#define MADS_PLUGIN_SHM 1
+#else
+#define MADS_PLUGIN_SHM 0
+#endif
+
 using namespace std;
 using namespace cxxopts;
 using namespace Mads;
@@ -68,6 +78,21 @@ using PluginDriver = SinkDriver<json>;
 
 using namespace std;
 using json = nlohmann::json;
+
+#if MADS_PLUGIN_SHM
+// Owns a ring slot acquired for a plugin's shared output during one loop
+// iteration, and gives it back if the iteration ends without publishing it
+// (publish_slot() consumes the slot, so this is then a no-op).
+struct SlotGuard {
+  Agent &agent;
+  WritableSlot slot{};
+  void release() {
+    if (slot)
+      agent.abandon_slot(slot);
+  }
+  ~SlotGuard() { release(); }
+};
+#endif
 
 json str_to_num(const string &s) {
   string str = s;
@@ -232,8 +257,10 @@ int main(int argc, char *argv[]) {
   pugg::Kernel kernel;
   kernel.add_server<PLUGIN_CLASS<>>();
   if (!kernel.load_plugin(plugin_file)) {
-    cerr << fg::red << "Error: cannot load plugin file " << plugin_file
-         << fg::reset << endl;
+    // last_error() names e.g. a protocol mismatch (a plugin built against
+    // older mads_plugin headers than this host's).
+    cerr << fg::red << "Error: cannot load plugin file " << plugin_file << ": "
+         << kernel.last_error() << fg::reset << endl;
     exit(1);
   }
   PluginDriver *plugin_driver =
@@ -338,6 +365,22 @@ int main(int argc, char *argv[]) {
   if (!settings["high_watermark"].is_null()) {
     agent.set_high_watermark(settings.value("high_watermark", 1000));
   }
+  // init() already honoured `shm = true` in the settings; this makes
+  // -o shm=true work too.
+  if (settings.contains("shm") && settings["shm"].is_boolean() &&
+      settings["shm"].get<bool>() && !agent.shared_output_enabled()) {
+    try {
+      agent.enable_shared_output(
+          static_cast<uint32_t>(settings.value(
+              "shm_slots", static_cast<int64_t>(detail::SHM_SLOTS_DEFAULT))),
+          static_cast<size_t>(
+              settings.value("shm_slot_size", detail::SHM_SLOT_SIZE_DEFAULT)));
+    } catch (const AgentError &e) {
+      cerr << fg::red << "Error enabling shared memory: " << e.what()
+           << fg::reset << endl;
+      exit(EXIT_FAILURE);
+    }
+  }
 
 #if defined(PLUGIN_LOADER_SOURCE) or defined(PLUGIN_LOADER_FILTER)
   chrono::milliseconds time{0};
@@ -393,6 +436,25 @@ int main(int argc, char *argv[]) {
   cerr << "  Blob format:      " << style::bold << out_format << style::reset
        << endl;
 #endif
+#if MADS_PLUGIN_SHM
+#if defined(PLUGIN_LOADER_SOURCE) || defined(PLUGIN_LOADER_FILTER)
+  // Queried once, after set_params(): the plugin writes its blob straight
+  // into a ring slot only if it supports it and the agent publishes through
+  // shared memory.
+  const bool shared_out =
+      plugin->supports_shared_output() && agent.shared_output_enabled();
+  cerr << "  Shared output:    " << style::bold
+       << (shared_out ? "zero-copy (plugin writes into the ring)"
+           : agent.shared_output_enabled() ? "copied into the ring"
+                                           : "off")
+       << style::reset << endl;
+#endif
+#if defined(PLUGIN_LOADER_FILTER) || defined(PLUGIN_LOADER_SINK)
+  // Shared-memory input reaches the plugin as a read-only view
+  // (load_data_view(), which by default copies and calls load_data()).
+  agent.accept_shared_views(true);
+#endif
+#endif
 
   // Initial delay
   if (delay > 0) {
@@ -410,7 +472,28 @@ int main(int argc, char *argv[]) {
   agent.loop([&]() -> chrono::milliseconds {
     out.clear();
     blob.clear();
+#if MADS_PLUGIN_SHM
+    SlotGuard guard{agent};
+    size_t slot_bytes = 0; // > 0: the blob is in guard.slot
+    if (shared_out) {
+      guard.slot = agent.acquire_slot();
+      BlobBuffer buf{guard.slot.data, guard.slot.capacity, 0};
+      rt = plugin->get_output_shared(out, buf);
+      if (buf.size > buf.capacity) {
+        // Overflow, whatever the return code: the plugin kept its data, so
+        // fetch the same payload through the copying path.
+        guard.release();
+        out.clear();
+        rt = plugin->get_output(out, &blob);
+      } else {
+        slot_bytes = buf.size; // 0: no blob, the guard gives the slot back
+      }
+    } else {
+      rt = plugin->get_output(out, &blob);
+    }
+#else
     rt = plugin->get_output(out, &blob);
+#endif
     switch (rt) {
     case return_type::warning:
       try {
@@ -424,6 +507,15 @@ int main(int argc, char *argv[]) {
       if (out.empty()) {
         out["warning"]["get_output"] = "Plugin did not return any output";
       }
+#if MADS_PLUGIN_SHM
+      if (slot_bytes > 0) {
+        if (!out.contains("format"))
+          out["format"] = out_format;
+        auto topic = out.value("topic", "");
+        agent.publish_slot(guard.slot, slot_bytes, std::move(out), topic);
+        break;
+      }
+#endif
       if (blob.size() > 0) {
         if (!out.contains("format"))
           out["format"] = out_format;
@@ -463,12 +555,23 @@ int main(int argc, char *argv[]) {
   message_type type;
   tuple<string, string, vector<unsigned char>> msg_blob;
   vector<unsigned char> blob{};
+#if MADS_PLUGIN_SHM
+  // The last shared-memory input: kept (with its mapping) until the next
+  // message, so the view handed to load_data_view() stays readable through
+  // the following process()/process_shared().
+  SharedView view;
+#endif
   agent.loop([&]() -> chrono::milliseconds {
     type = message_type::none;
     in.clear();
     out.clear();
     err.clear();
     blob.clear();
+#if MADS_PLUGIN_SHM
+    SlotGuard guard{agent};
+    size_t slot_bytes = 0;    // > 0: the output blob is in guard.slot
+    bool view_loaded = false; // this iteration loaded `view`
+#endif
     try {
       type = agent.receive(dont_block);
     } catch (const AgentError &e) {
@@ -495,11 +598,25 @@ int main(int argc, char *argv[]) {
              << endl << get<1>(agent.last_message()) << endl;
         return 0ms;
       }
+#if MADS_PLUGIN_SHM
+      view = SharedView{};
+#endif
       rt = plugin->load_data(in, agent.last_topic());
     } else if (type == message_type::blob) {
+#if MADS_PLUGIN_SHM
+      view = SharedView{};
+#endif
       msg_blob = agent.last_blob();
       in = json::parse(get<1>(msg_blob));
       rt = plugin->load_data(in, agent.last_topic(), &get<2>(msg_blob));
+#if MADS_PLUGIN_SHM
+    } else if (type == message_type::shared) {
+      view = agent.last_shared();
+      view_loaded = true;
+      in = view.meta();
+      rt = plugin->load_data_view(in, agent.last_shared_topic(),
+                                  BlobView{view.data(), view.size()});
+#endif
     } else {
       if (dont_block) {
         goto process_output;
@@ -532,7 +649,32 @@ int main(int argc, char *argv[]) {
     }
     // processing data in the plugin
   process_output:
+#if MADS_PLUGIN_SHM
+    if (shared_out) {
+      guard.slot = agent.acquire_slot();
+      BlobBuffer buf{guard.slot.data, guard.slot.capacity, 0};
+      rt = plugin->process_shared(out, buf);
+      if (buf.size > buf.capacity) {
+        // Overflow, whatever the return code: the plugin kept its loaded
+        // input, so process it again through the copying path.
+        guard.release();
+        out.clear();
+        rt = plugin->process(out, &blob);
+      } else {
+        slot_bytes = buf.size; // 0: no blob, the guard gives the slot back
+      }
+    } else {
+      rt = plugin->process(out, &blob);
+    }
+    // The producer may have overwritten the input slot meanwhile: then the
+    // output may be built from torn data, so it is not published.
+    if (view_loaded && !view.valid()) {
+      agent.record_torn_view();
+      goto status_line;
+    }
+#else
     rt = plugin->process(out, &blob);
+#endif
     if (!err.empty()) out.merge_patch(err);
     switch (rt) {
     case return_type::warning:
@@ -560,6 +702,15 @@ int main(int argc, char *argv[]) {
       return 0ms;
     }
     // publishing data
+#if MADS_PLUGIN_SHM
+    if (slot_bytes > 0) {
+      if (!out.contains("format"))
+        out["format"] = "raw";
+      auto topic = out.value("topic", "");
+      agent.publish_slot(guard.slot, slot_bytes, std::move(out), topic);
+      goto status_line;
+    }
+#endif
     if (!blob.empty()) {
       if (!out.contains("format"))
         out["format"] = "raw";
@@ -599,6 +750,20 @@ int main(int argc, char *argv[]) {
       msg_blob = agent.last_blob();
       in = json::parse(get<1>(msg_blob));
       rt = plugin->load_data(in, agent.last_topic(), &get<2>(msg_blob));
+#if MADS_PLUGIN_SHM
+    } else if (type == message_type::shared) {
+      // The view (and its mapping) lives until the end of this iteration.
+      SharedView view = agent.last_shared();
+      in = view.meta();
+      rt = plugin->load_data_view(in, agent.last_shared_topic(),
+                                  BlobView{view.data(), view.size()});
+      if (!view.valid()) {
+        // Overwritten by the producer while the plugin read it: the plugin
+        // may have consumed torn data. Count it and skip the result.
+        agent.record_torn_view();
+        return 0ms;
+      }
+#endif
     } else {
       // agent.remote_control();
       if (agent.last_topic() == "control") {
