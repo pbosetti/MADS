@@ -20,6 +20,8 @@ Author(s): Paolo Bosetti
 #include <winsock2.h>
 #include <windows.h>
 #endif
+#include "../detail/broker_ipc.hpp"
+#include "../detail/endpoint.hpp"
 #include "../detail/fd_limit.hpp"
 #include "../detail/socket_options.hpp"
 #include "../detail/wire_format.hpp"
@@ -166,13 +168,23 @@ map<string, string> list_ip() {
   return result;
 }
 
-map<string, string> settings_urls(string const &base_url) {
+// Every URI an agent can fetch settings from: one tcp URI per local IPv4
+// address (when the settings address is tcp with a concrete port), plus the
+// ipc endpoint when one is bound.
+map<string, string> settings_urls(string const &base_url,
+                                  string const &ipc_url = "") {
   map<string, string> urls;
-  string port = base_url.substr(base_url.find_last_of(":") + 1);
-  auto ips = list_ip();
-  for (const auto &[name, address] : ips) {
-    urls[name] = "tcp://" + address + ":" + port;
+  auto ep = Mads::detail::parse_endpoint(base_url);
+  if (ep && ep->port_number()) {
+    auto ips = list_ip();
+    for (const auto &[name, address] : ips) {
+      urls[name] = "tcp://" + address + ":" + ep->port;
+    }
   }
+  if (!ipc_url.empty())
+    urls["ipc"] = ipc_url;
+  if (urls.empty())
+    urls["settings"] = base_url;
   return urls;
 }
 
@@ -645,13 +657,21 @@ int main(int argc, char **argv) {
   backend_address = config[name]["backend_address"].value_or(BROKER_BACKEND);
   settings_address = config[name]["settings_address"].value_or(BROKER_SETTINGS);
 
-  service_info.ports = {
-      {"frontend",
-       stoi(frontend_address.substr(frontend_address.find_last_of(":") + 1))},
-      {"backend",
-       stoi(backend_address.substr(backend_address.find_last_of(":") + 1))},
-      {"settings",
-       stoi(settings_address.substr(settings_address.find_last_of(":") + 1))}};
+  // Service discovery advertises tcp ports only: an ipc:// endpoint means
+  // nothing to the remote hosts discovery exists for (local agents learn it
+  // from the `transport` settings command instead).
+  for (auto const &[role, address] :
+       {pair<string, string>{"frontend", frontend_address},
+        {"backend", backend_address},
+        {"settings", settings_address}}) {
+    auto ep = Mads::detail::parse_endpoint(address);
+    if (ep && ep->port_number())
+      service_info.ports[role] = *ep->port_number();
+    else
+      cerr << fg::yellow << "Not advertising the " << role << " address "
+           << address << " (not a tcp address with a numeric port)"
+           << fg::reset << endl;
+  }
   service_info.prefer_loopback_for_local_services =
       config[name]["prefer_loopback_for_local_services"].value_or(true);
 
@@ -755,21 +775,61 @@ int main(int argc, char **argv) {
     }
   }
 
+  // Local transport (detail/transport.hpp, detail/broker_ipc.hpp): each
+  // socket is bound a second time on an ipc:// endpoint, so agents on this
+  // host can skip the loopback tcp stack. An ipc problem only costs the ipc
+  // endpoint (which is then not offered to agents); tcp service is unaffected.
+  // The CURVE server setup and socket options above are per socket, so they
+  // apply to the ipc endpoints too.
+  Mads::detail::BrokerIpcConfig ipc = Mads::detail::resolve_broker_ipc(
+      config[name], frontend_address, backend_address, settings_address);
+  Mads::detail::IpcSocketFile frontend_ipc_file, backend_ipc_file,
+      settings_ipc_file;
+  // Called on every orderly exit path: libzmq does not remove the socket
+  // files on close (see detail/broker_ipc.hpp). A crash leaves stale files,
+  // which the next broker's bind() replaces.
+  auto remove_ipc_files = [&]() {
+    frontend_ipc_file.remove();
+    backend_ipc_file.remove();
+    settings_ipc_file.remove();
+  };
+  auto report_ipc_warnings = [&]() {
+    for (auto const &w : ipc.warnings)
+      cerr << fg::yellow << "ipc: " << w << fg::reset << endl;
+    ipc.warnings.clear();
+  };
+  report_ipc_warnings();
+  // A socket has a single monitor, which sees the accept failures of every
+  // endpoint bound on it, so each AcceptWatch label names both endpoints.
+  auto watch_label = [](string const &tcp, string const &ipc_endpoint) {
+    return ipc_endpoint.empty() ? tcp : tcp + " / " + ipc_endpoint;
+  };
+
   // Attached before the binds below, per SocketMonitor's ordering contract.
   AcceptWatch accept_watch;
 
   try {
     std::cout << "Binding broker frontend (XSUB) at " << style::bold
               << frontend_address << style::reset << endl;
-    accept_watch.watch(frontend, frontend_address);
+    accept_watch.watch(frontend, watch_label(frontend_address, ipc.frontend));
     frontend.bind(frontend_address);
+    if (Mads::detail::bind_broker_ipc(frontend, ipc.frontend,
+                                      frontend_ipc_file, ipc.warnings))
+      std::cout << "Binding broker frontend (XSUB) at " << style::bold
+                << ipc.frontend << style::reset << endl;
     std::cout << "Binding broker backend (XPUB) at " << style::bold
               << backend_address << style::reset << endl;
-    accept_watch.watch(backend, backend_address);
+    accept_watch.watch(backend, watch_label(backend_address, ipc.backend));
     backend.bind(backend_address);
+    if (Mads::detail::bind_broker_ipc(backend, ipc.backend, backend_ipc_file,
+                                      ipc.warnings))
+      std::cout << "Binding broker backend (XPUB) at " << style::bold
+                << ipc.backend << style::reset << endl;
+    report_ipc_warnings();
   } catch (const zmq::error_t &e) {
     cerr << fg::red << "ZMQ error, could not bind broker sockets: "
          << explain_zmq_error(e, fd_soft_limit) << fg::reset << endl;
+    remove_ipc_files();
     std::exit(EXIT_FAILURE);
   }
 
@@ -823,12 +883,23 @@ int main(int argc, char **argv) {
   if (crypto)
     curve_auth_ptr->setup_curve_server(settings_router, key_name);
   socket_options.apply(settings_router);
-  accept_watch.watch(settings_router, settings_address);
+  accept_watch.watch(settings_router,
+                     watch_label(settings_address, ipc.settings));
   settings_router.bind(settings_address);
+  const bool settings_ipc_bound = Mads::detail::bind_broker_ipc(
+      settings_router, ipc.settings, settings_ipc_file, ipc.warnings);
   accept_watch.start_reporting(fd_soft_limit, daemon);
   cout << "Binding broker shared settings (ROUTER, " << settings_workers
        << " worker" << (settings_workers == 1 ? "" : "s") << ") at "
        << style::bold << settings_address << style::reset << endl;
+  if (settings_ipc_bound)
+    cout << "Binding broker shared settings (ROUTER) at " << style::bold
+         << ipc.settings << style::reset << endl;
+  report_ipc_warnings();
+
+  // Reply to the `transport` command, fixed once the binds above are done:
+  // an endpoint that failed to bind has been cleared, so it is not offered.
+  const string transport_reply = Mads::detail::transport_reply(ipc, crypto);
 
   // Default-constructed and assigned inside the try below rather than
   // constructed in place: creating a socket allocates its mailbox, which is
@@ -949,6 +1020,11 @@ int main(int argc, char **argv) {
           content.addstr(to_string(t2));
           content.addstr(to_string(t3));
           content.send(settings);
+        } else if (cmd == Mads::detail::TRANSPORT_CMD) {
+          // One frame of JSON (detail/transport.hpp). A broker predating
+          // this command falls into the branch below instead and replies a
+          // bare [LIB_VERSION], which agents read as "no ipc offered".
+          settings.send(zmq::buffer(transport_reply), zmq::send_flags::none);
         } else {
           cerr << goback(1, !daemon) << fg::yellow << timestamp()
                << "Got unexpected command " << cmd << fg::reset << endl;
@@ -1043,10 +1119,20 @@ int main(int argc, char **argv) {
   }
 
   // print settings URI for clients
-  string port = settings_address.substr(settings_address.find_last_of(":") + 1);
-  cout << "Settings are provided on " << style::bold
-       << "tcp://127.0.0.1:" << port << style::reset << style::italic
-       << " (loopback)" << style::reset << endl;
+  if (auto ep = Mads::detail::parse_endpoint(settings_address);
+      ep && ep->port_number()) {
+    cout << "Settings are provided on " << style::bold
+         << "tcp://127.0.0.1:" << ep->port << style::reset << style::italic
+         << " (loopback)" << style::reset << endl;
+  } else {
+    cout << "Settings are provided on " << style::bold << settings_address
+         << style::reset << endl;
+  }
+  if (!ipc.settings.empty()) {
+    cout << "Settings are provided on " << style::bold << ipc.settings
+         << style::reset << style::italic << " (ipc, this host only)"
+         << style::reset << endl;
+  }
 
   Mads::Watcher settings_watcher(settings_path, 1s);
   thread settings_watcher_thread([&]() {
@@ -1128,6 +1214,7 @@ int main(int argc, char **argv) {
     settings_router.close();
     settings_dealer.close();
     context.close();
+    remove_ipc_files();
     exit(EXIT_SUCCESS);
   }
 
@@ -1138,7 +1225,7 @@ int main(int argc, char **argv) {
     zmq::socket_t controller(context, zmq::socket_type::req);
     controller.connect("inproc://broker-ctrl");
 
-    auto settings_url_list = settings_urls(settings_address);
+    auto settings_url_list = settings_urls(settings_address, ipc.settings);
     auto current_url = settings_url_list.begin();
 
     thread(proxy, ref(frontend), ref(backend), ref(controlled), capture_ref)
@@ -1266,6 +1353,7 @@ int main(int argc, char **argv) {
     settings_router.close();
     settings_dealer.close();
     context.close();
+    remove_ipc_files();
     if (reload) {
       cout << fg::yellow << "Restarting..." << fg::reset << endl;
 #ifdef _WIN32

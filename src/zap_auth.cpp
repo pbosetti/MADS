@@ -18,11 +18,30 @@ Copyright (C) 2026 Paolo Bosetti
 #include <zmq.h>
 #include <zmq_addon.hpp>
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#endif
+
 using namespace std;
 
 namespace Mads {
 
 namespace {
+
+// libzmq reports a tcp peer as a numeric IPv4/IPv6 address
+// (getnameinfo(NI_NUMERICHOST)). An ipc:// peer has no IP: libzmq 4.3.5
+// reports "" on macOS and Windows, and on Linux whatever glibc's
+// getnameinfo() makes of AF_UNIX ("localhost") followed by the SO_PEERCRED
+// ":uid:gid:pid" suffix. Anything that is not an IP literal is therefore a
+// local ipc peer.
+bool is_ip_literal(const string &address) {
+  unsigned char buf[16];
+  return inet_pton(AF_INET, address.c_str(), buf) == 1 ||
+         inet_pton(AF_INET6, address.c_str(), buf) == 1;
+}
 
 // RFC 27 request frames, in order.
 constexpr size_t ZAP_VERSION = 0;
@@ -108,7 +127,11 @@ bool ZapAuth::_authorise(const string &domain, const string &address,
   }
   // An empty whitelist means "no address restriction"; a non-empty one is
   // exclusive, which is what MADS relies on (see CurveAuth::setup_auth()).
-  if (!_allowed_addresses.empty() && _allowed_addresses.count(address) == 0) {
+  // It restricts network peers only: an ipc:// peer is on this host by
+  // construction, and the owner-only runtime directory holding the socket
+  // files is its access control. CURVE keys are still checked below.
+  if (!_allowed_addresses.empty() && is_ip_literal(address) &&
+      _allowed_addresses.count(address) == 0) {
     reason = "Address not allowed";
     return false;
   }
