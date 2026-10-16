@@ -34,10 +34,6 @@ void check_name(std::string const &name) {
                                 "'");
 }
 
-std::filesystem::path registry_dir() {
-  return detail::runtime_dir() / "shm";
-}
-
 // Best effort: a missing registry entry only means the segment cannot be
 // swept if this process dies without unlinking it.
 void write_registry(std::string const &name) {
@@ -77,6 +73,14 @@ using ::shm_unlink;
 
 uint64_t current_pid() { return static_cast<uint64_t>(::getpid()); }
 
+std::filesystem::path registry_dir() { return detail::runtime_dir() / "shm"; }
+
+bool pid_alive(int64_t pid) {
+  if (pid <= 0)
+    return true;
+  return ::kill(static_cast<pid_t>(pid), 0) == 0 || errno != ESRCH;
+}
+
 std::string make_segment_name() {
   static std::atomic<uint32_t> counter{0};
   char buf[32];
@@ -94,24 +98,16 @@ std::filesystem::path registry_file(std::string const &name) {
 size_t sweep_orphans() {
   size_t count = 0;
   try {
-    std::error_code ec;
-    for (auto const &entry :
-         std::filesystem::directory_iterator(registry_dir(), ec)) {
-      std::string seg = entry.path().filename().string();
-      if (seg.rfind("mads_", 0) != 0)
+    const auto dir = registry_dir();
+    // Unreadable entries (being written, or garbage) are left alone.
+    for (auto const &e : scan_registry(dir)) {
+      if (!e.orphan())
         continue;
-      long long pid = 0;
-      {
-        std::ifstream f(entry.path());
-        if (!(f >> pid) || pid <= 0)
-          continue; // being written, or garbage: leave it alone
-      }
-      if (::kill(static_cast<pid_t>(pid), 0) == 0 || errno != ESRCH)
-        continue; // alive (or not ours to judge)
-      std::string name = "/" + seg;
+      std::string name = "/" + e.name;
       if (shm_unlink(name.c_str()) == 0)
         ++count;
-      std::filesystem::remove(entry.path(), ec);
+      std::error_code ec;
+      std::filesystem::remove(dir / e.name, ec);
     }
   } catch (...) {
   }

@@ -35,9 +35,11 @@ unlink(), which is idempotent but not synchronized: call it from one thread.
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace Mads::shm {
 
@@ -48,9 +50,35 @@ uint64_t current_pid();
 /// within macOS's PSHMNAMLEN (31). Unique within this process.
 std::string make_segment_name();
 
+/// Directory of the segment registry, runtime_dir()/shm (POSIX only; on
+/// Windows the returned path is never created).
+std::filesystem::path registry_dir();
+
 /// Registry file recording the owner of segment `name` (POSIX only; on
 /// Windows the returned path is never created).
 std::filesystem::path registry_file(std::string const &name);
+
+/// True if process `pid` may still be running: POSIX kill(pid, 0), where
+/// EPERM counts as alive (not ours to judge), as does pid <= 0. Always true
+/// on Windows.
+bool pid_alive(int64_t pid);
+
+/// One registry file: a segment and the pid that created it.
+struct RegistryEntry {
+  std::string name;  ///< segment name without the leading '/'
+  int64_t pid = -1;  ///< -1 if unreadable (being written, or garbage)
+  bool alive = false; ///< is_alive(pid), false when pid is -1
+
+  /// A segment whose owner is known to be dead.
+  bool orphan() const { return pid > 0 && !alive; }
+};
+
+/// Lists the `mads_*` files in `dir` (a registry directory), sorted by name.
+/// A missing directory yields an empty list. `is_alive` decides whether a
+/// pid still runs (injectable for tests). Never throws.
+std::vector<RegistryEntry>
+scan_registry(std::filesystem::path const &dir,
+              std::function<bool(int64_t)> const &is_alive = pid_alive);
 
 /// Unlinks registered segments whose owner process is dead and removes their
 /// registry files. Returns how many segments it unlinked. Never throws.

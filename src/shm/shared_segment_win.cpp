@@ -55,11 +55,17 @@ std::string make_segment_name() {
   return buf;
 }
 
-std::filesystem::path registry_file(std::string const &name) {
+std::filesystem::path registry_dir() {
   // Not used on Windows; returned for API symmetry only.
-  return std::filesystem::temp_directory_path() / "mads" / "shm" /
+  return std::filesystem::temp_directory_path() / "mads" / "shm";
+}
+
+std::filesystem::path registry_file(std::string const &name) {
+  return registry_dir() /
          (name.empty() || name[0] != '/' ? name : name.substr(1));
 }
+
+bool pid_alive(int64_t) { return true; }
 
 size_t sweep_orphans() { return 0; }
 

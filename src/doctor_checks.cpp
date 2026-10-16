@@ -5,6 +5,7 @@
 #include "detail/fd_limit.hpp"
 #include "detail/runtime_dir.hpp"
 #include "detail/transport.hpp"
+#include "shm/shared_segment.hpp"
 
 #include <algorithm>
 #include <fstream>
@@ -12,11 +13,6 @@
 #include <sstream>
 #include <toml++/toml.hpp>
 #include <zmq.h>
-
-#ifndef _WIN32
-#include <cerrno>
-#include <signal.h>
-#endif
 
 namespace Mads {
 namespace Doctor {
@@ -650,38 +646,19 @@ CheckResult evaluate_agent_transport(const BrokerTransportFacts &facts,
 
 /* ---- 10. Shared-memory segment registry ----------------------------------- */
 
-bool pid_alive(int64_t pid) {
-#ifdef _WIN32
-  (void)pid;
-  return true;
-#else
-  if (pid <= 0)
-    return true;
-  return ::kill(static_cast<pid_t>(pid), 0) == 0 || errno != ESRCH;
-#endif
-}
+bool pid_alive(int64_t pid) { return shm::pid_alive(pid); }
 
 std::vector<ShmRegistryEntry>
 scan_shm_registry(const fs::path &dir,
                   const std::function<bool(int64_t)> &is_alive) {
   std::vector<ShmRegistryEntry> out;
-  std::error_code ec;
-  for (const auto &entry : fs::directory_iterator(dir, ec)) {
-    std::string name = entry.path().filename().string();
-    if (name.rfind("mads_", 0) != 0)
-      continue;
-    ShmRegistryEntry e;
-    e.name = std::move(name);
-    std::ifstream f(entry.path());
-    long long pid = 0;
-    if (f >> pid && pid > 0) {
-      e.owner_pid = pid;
-      e.owner_alive = is_alive(pid);
-    }
-    out.push_back(std::move(e));
+  for (auto &e : shm::scan_registry(dir, is_alive)) {
+    ShmRegistryEntry d;
+    d.name = std::move(e.name);
+    d.owner_pid = e.pid;
+    d.owner_alive = e.alive;
+    out.push_back(std::move(d));
   }
-  std::sort(out.begin(), out.end(),
-            [](const auto &a, const auto &b) { return a.name < b.name; });
   return out;
 }
 
