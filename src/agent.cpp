@@ -21,8 +21,11 @@
 #include <mutex>
 #include "curve.hpp"
 #include "detail/clock_domain.hpp"
+#include "detail/endpoint.hpp"
+#include "detail/host_token.hpp"
 #include "detail/plugin_cache.hpp"
 #include "detail/socket_options.hpp"
+#include "detail/transport.hpp"
 #include "detail/wire_format.hpp"
 #include "exec_path.hpp"
 #include "mads.hpp"
@@ -120,6 +123,47 @@ toml::table default_agent_section(const string &name) {
   return toml::table{{"pub_topic", name}, {"sub_topic", toml::array{""}}};
 }
 
+// ---- Local transport (detail/transport.hpp) --------------------------------
+
+// Receive timeout for the `transport` round-trip when the agent has no
+// settings timeout of its own: every MADS broker answers it (an old one with
+// an empty frame), so this only bounds a non-conforming settings server,
+// which must cost a short wait and a tcp fallback, not a hang.
+constexpr int TRANSPORT_QUERY_TIMEOUT_MS = 2000;
+
+bool ipc_file_exists(const string &endpoint) {
+  auto e = parse_endpoint(endpoint);
+  if (!e || !e->is_ipc())
+    return false;
+  std::error_code ec;
+  return filesystem::exists(e->path, ec);
+}
+
+// Why the broker's ipc endpoints cannot be used, or "" if they can. With
+// settings fetched over ipc the broker is reachable through this host's
+// filesystem already, so the host-token check is skipped (containers that
+// share a socket directory need not share a hostname).
+string ipc_unusable_reason(const string &transport_reply,
+                           bool settings_over_ipc, TransportInfo &info) {
+  if (!zmq_has("ipc"))
+    return "this libzmq build has no ipc transport";
+  auto parsed = parse_transport_reply(transport_reply);
+  if (!parsed)
+    return "the broker does not offer ipc (it predates the transport "
+           "command)";
+  info = *parsed;
+  if (!info.offers_ipc())
+    return "the broker does not offer ipc endpoints (ipc disabled or "
+           "unavailable on the broker)";
+  if (!settings_over_ipc && info.host_token != host_token())
+    return "the broker runs on another host";
+  for (auto const *ep : {&info.frontend_ipc, &info.backend_ipc}) {
+    if (!ipc_file_exists(*ep))
+      return "the ipc socket " + *ep + " is not reachable from here";
+  }
+  return {};
+}
+
 } // namespace
 
 unique_ptr<Agent> start_agent(string name, string settings_uri,
@@ -158,9 +202,9 @@ void Agent::setup_curve_on(zmq::socket_t &socket) {
   }
 }
 
-tuple<string, string, double>
-Agent::query_broker(string uri, string name, int timeout) {
-  // Single REQ socket reused for both the settings and timecode round-trips.
+Agent::BrokerReply Agent::query_broker(string uri, string name, int timeout) {
+  // Single REQ socket reused for the settings, timecode and transport
+  // round-trips.
   zmq::socket_t socket(_context, zmq::socket_type::req);
   setup_curve_on(socket);
   // Drop any undelivered request on close: with the default infinite linger,
@@ -221,9 +265,33 @@ Agent::query_broker(string uri, string name, int timeout) {
   double broker_tc = std::stod(tc_in.at(0).to_string());
   double timecode_offset = broker_tc - timecode(now, timecode_fps);
 
+  // ---- transport request (same socket) ----
+  // Asked whatever the transport mode: it is one more round trip on an open
+  // connection, and keeps what the broker offers on record whichever
+  // transport ends up in use. A broker predating the command answers with a
+  // bare [LIB_VERSION] (not JSON), and a reply that is missing, late or of
+  // the wrong shape just means "no ipc": never an error.
+  string transport;
+  {
+    const int to = timeout > 0 ? timeout : TRANSPORT_QUERY_TIMEOUT_MS;
+    socket.set(zmq::sockopt::rcvtimeo, to);
+    socket.set(zmq::sockopt::sndtimeo, to);
+    zmq::multipart_t tr_out, tr_in;
+    tr_out.addstr(LIB_VERSION);
+    tr_out.addstr(TRANSPORT_CMD);
+    tr_out.addstr(name);
+    try {
+      if (tr_out.send(socket) && tr_in.recv(socket) && tr_in.size() == 1)
+        transport = tr_in.at(0).to_string();
+    } catch (const zmq::error_t &) {
+      transport.clear();
+    }
+  }
+
   socket.disconnect(uri);
   socket.close();
-  return make_tuple(raw_settings, attachment, timecode_offset);
+  return {std::move(raw_settings), std::move(attachment), timecode_offset,
+          std::move(transport)};
 }
 
 // Public methods implementations
@@ -294,9 +362,10 @@ void Agent::fetch_settings(bool crypto) {
     _config = (toml::table)toml::parse_file(_settings_uri);
   } else {
     auto received = query_broker(_settings_uri, _name, _settings_timeout);
-    _raw_settings = get<0>(received);
-    attachment = get<1>(received);
-    _timecode_offset = get<2>(received);
+    _raw_settings = std::move(received.settings);
+    attachment = std::move(received.attachment);
+    _timecode_offset = received.timecode_offset;
+    _transport_reply = std::move(received.transport);
     _config = (toml::table)toml::parse(_raw_settings);
   }
 
@@ -345,16 +414,7 @@ void Agent::init(bool crypto, bool install_watchdog) {
                      "' section");
 
   auto cfg = _config[_name];
-  _pub_endpoint = all_cfg["frontend_address"].value_or(FRONTEND_URI);
-  _sub_endpoint = all_cfg["backend_address"].value_or(BACKEND_URI);
-  if (!settings_are_local()) {
-    // change the localhost to actual IP address
-    auto s_uri = split_URL(_settings_uri);
-    auto f_uri = split_URL(_pub_endpoint);
-    auto b_uri = split_URL(_sub_endpoint);
-    _pub_endpoint = get<0>(f_uri) + get<1>(s_uri) + ":" + get<2>(f_uri);
-    _sub_endpoint = get<0>(b_uri) + get<1>(s_uri) + ":" + get<2>(b_uri);
-  }
+  _select_transport();
   _pub_topic = cfg["pub_topic"].value_or(_name);
   if (cfg["sub_topic"].type() == toml::node_type::string) {
     _sub_topic.push_back(cfg["sub_topic"].value_or(""));
@@ -424,6 +484,88 @@ void Agent::init(bool crypto, bool install_watchdog) {
   if (_clock_source == ClockSource::Broker && !settings_are_local()) {
     measure_clock_offset();
   }
+}
+
+void Agent::set_transport_mode(string const &mode) {
+  if (_init_done)
+    throw AgentError("Cannot change the transport after init()");
+  if (!mode.empty() && !parse_transport_mode(mode))
+    throw AgentError("Invalid transport '" + mode +
+                     "' (expected auto, tcp or ipc)");
+  _transport_mode_override = mode;
+}
+
+string Agent::transport_mode() const {
+  if (!_init_done && !_transport_mode_override.empty())
+    return _transport_mode_override;
+  return _transport_mode;
+}
+
+void Agent::_select_transport() {
+  auto all_cfg = _config["agents"];
+  auto cfg = _config[_name];
+
+  // CLI/API override > [<agent>] transport > [agents] transport > "auto"
+  string mode_str = _transport_mode_override;
+  if (mode_str.empty())
+    mode_str = cfg["transport"].value_or(
+        all_cfg["transport"].value_or(string("auto")));
+  auto mode = parse_transport_mode(mode_str);
+  if (!mode)
+    throw AgentError("Invalid transport '" + mode_str +
+                     "' (expected auto, tcp or ipc)");
+  _transport_mode = Mads::detail::to_string(*mode);
+  _transport = "tcp";
+
+  _pub_endpoint = all_cfg["frontend_address"].value_or(FRONTEND_URI);
+  _sub_endpoint = all_cfg["backend_address"].value_or(BACKEND_URI);
+
+  bool settings_over_ipc = false;
+  if (settings_are_local()) {
+    if (*mode == TransportMode::Ipc)
+      throw AgentError("transport = ipc needs settings from a broker, not " +
+                       _settings_uri);
+  } else {
+    auto s_ep = parse_endpoint(_settings_uri);
+    if (!s_ep)
+      throw AgentError("Invalid settings URI: " + _settings_uri);
+    settings_over_ipc = !s_ep->is_tcp();
+    if (s_ep->is_tcp()) {
+      // The [agents] addresses name the broker as seen from its own host
+      // (typically localhost): point them at the host the settings came from.
+      auto f_ep = parse_endpoint(_pub_endpoint);
+      auto b_ep = parse_endpoint(_sub_endpoint);
+      if (!f_ep)
+        throw AgentError("Invalid frontend_address: " + _pub_endpoint);
+      if (!b_ep)
+        throw AgentError("Invalid backend_address: " + _sub_endpoint);
+      _pub_endpoint = f_ep->with_host(s_ep->host).to_string();
+      _sub_endpoint = b_ep->with_host(s_ep->host).to_string();
+    }
+    // Settings fetched over ipc: the broker is on this host, so the [agents]
+    // addresses are usable verbatim if tcp is forced below.
+  }
+  _tcp_pub_endpoint = _pub_endpoint;
+  _tcp_sub_endpoint = _sub_endpoint;
+
+  if (settings_are_local() || *mode == TransportMode::Tcp)
+    return;
+
+  TransportInfo info;
+  const string why_not =
+      ipc_unusable_reason(_transport_reply, settings_over_ipc, info);
+  if (why_not.empty()) {
+    _pub_endpoint = info.frontend_ipc;
+    _sub_endpoint = info.backend_ipc;
+    _transport = "ipc";
+    return;
+  }
+  if (*mode == TransportMode::Ipc)
+    throw AgentError("transport = ipc requested, but " + why_not);
+  if (settings_over_ipc)
+    throw AgentError("Settings were fetched over " + _settings_uri +
+                     ", but " + why_not +
+                     ": use a tcp:// settings URI, or set transport = tcp");
 }
 
 void Agent::load_settings() {}
@@ -603,6 +745,8 @@ void Agent::info(ostream &out) {
       << endl;
   out << "  Sub endpoint:     " << style::bold
       << (_cross ? _pub_endpoint : _sub_endpoint) << style::reset << endl;
+  out << "  Transport:        " << style::bold << _transport << style::reset
+      << " (mode " << _transport_mode << ")" << endl;
   out << "  Sub topics:       " << style::bold;
   for (auto &t : _sub_topic) {
     if (t.empty())
@@ -721,7 +865,15 @@ void Agent::disconnect() {
   _connected = false;
 }
 
-void Agent::set_cross(bool cross) { _cross = cross; }
+void Agent::set_cross(bool cross) {
+  _cross = cross;
+  // Cross mode binds the tcp ports itself (no broker), so it is tcp-only.
+  if (cross && _transport == "ipc") {
+    _pub_endpoint = _tcp_pub_endpoint;
+    _sub_endpoint = _tcp_sub_endpoint;
+    _transport = "tcp";
+  }
+}
 
 void Agent::set_pub_topic(string topic) { _pub_topic = topic; }
 
@@ -1276,7 +1428,7 @@ void Agent::remote_control(string payload_str) {
 }
 
 bool Agent::settings_are_local() const {
-  return _settings_uri.find("tcp://") == string::npos;
+  return !is_zmq_uri(_settings_uri);
 }
 
 void Agent::save_settings(const string path) {
@@ -1308,7 +1460,7 @@ string Agent::_clock_agent_identity() const {
 #else
   const auto pid = static_cast<long long>(getpid());
 #endif
-  return _name + "@" + to_string(pid);
+  return _name + "@" + std::to_string(pid);
 }
 
 ClockOffsetResult Agent::_stamp_clock_result(ClockOffsetResult r,
@@ -1931,14 +2083,10 @@ bool Agent::_topic_matches_subscription(const string &topic) const {
 }
 
 tuple<string, string, string> Agent::split_URL(const string &url) {
-  static regex re("(\\w+://)([\\w\\.-]+):(\\d+)");
-  smatch match;
-
-  if (regex_search(url, match, re) && match.size() > 3) {
-    return make_tuple(match.str(1), match.str(2), match.str(3));
-  } else {
+  auto e = parse_endpoint(url);
+  if (!e || !e->is_tcp())
     throw std::invalid_argument("Invalid URL: " + url);
-  }
+  return make_tuple(e->scheme + "://", e->host, e->port);
 }
 
 void Agent::set_agent_id(string id) { _agent_id = id; }

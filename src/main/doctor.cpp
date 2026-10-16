@@ -23,6 +23,7 @@ deployment before it is launched for real.
 Author(s): Paolo Bosetti
 */
 #include "../broker_probe.hpp"
+#include "../detail/endpoint.hpp"
 #include "../director_config.hpp"
 #include "../doctor_checks.hpp"
 #include "../exec_path.hpp"
@@ -97,25 +98,22 @@ void print_result(const CheckResult &r) {
 // intent (director_config.hpp) for the common `bind = "*"` case. Leaves any
 // other host untouched.
 string to_probe_uri(const string &bind_uri) {
-  const string wildcard = "tcp://*:";
-  if (bind_uri.rfind(wildcard, 0) == 0) {
-    return "tcp://localhost:" + bind_uri.substr(wildcard.size());
+  auto ep = Mads::detail::parse_endpoint(bind_uri);
+  if (ep && ep->is_tcp() && ep->host == "*") {
+    return ep->with_host("localhost").to_string();
   }
   return bind_uri;
 }
 
-// Extracts the numeric port from a "scheme://host:port" address, exactly
-// like src/main/broker.cpp itself does when binding.
+// Extracts the numeric port from a tcp://host:port address, exactly like
+// src/main/broker.cpp itself does when binding. Other schemes (ipc://) have
+// no port to check.
 optional<int> port_of(const string &address) {
-  auto pos = address.find_last_of(':');
-  if (pos == string::npos) {
-    return nullopt;
+  auto ep = Mads::detail::parse_endpoint(address);
+  if (auto port = ep ? ep->port_number() : nullopt) {
+    return static_cast<int>(*port);
   }
-  try {
-    return stoi(address.substr(pos + 1));
-  } catch (const exception &) {
-    return nullopt;
-  }
+  return nullopt;
 }
 
 // Resolves an `attachment` key from the settings file, exactly like
@@ -509,7 +507,8 @@ int main(int argc, char *argv[]) {
 
   const auto timeout = chrono::milliseconds(parsed["timeout"].as<int>());
   const fs::path settings_path = parsed["settings"].as<string>();
-  const bool settings_is_remote = parsed["settings"].as<string>().rfind("tcp://", 0) == 0;
+  const bool settings_is_remote =
+      Mads::detail::is_zmq_uri(parsed["settings"].as<string>());
 
   cout << style::bold << "mads doctor" << style::reset << " -- checking '"
       << settings_path.string() << "'" << endl

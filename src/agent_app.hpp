@@ -143,6 +143,10 @@ public:
 
     /** @brief Timeout in milliseconds for reading settings from broker. */
     int settings_timeout = 0;
+
+    /** @brief Transport override ("auto", "tcp" or "ipc"), see
+     * Agent::set_transport_mode(). */
+    std::optional<std::string> transport;
   };
 
   /**
@@ -188,6 +192,8 @@ public:
        cxxopts::value<std::string>())
       ("settings-timeout", "Timeout in milliseconds for reading settings from broker ('0' = no timeout)",
        cxxopts::value<int>()->default_value("0"))
+      ("transport", "Transport to the broker: auto (ipc when the broker is on this host), tcp or ipc",
+       cxxopts::value<std::string>())
       ("r,room", "Service discovery room name", cxxopts::value<std::string>()->implicit_value(MADS_SERVICE_ROOM))
       ("crypto", "Enable CURVE encryption for broker communication")
        // clang-format on
@@ -555,6 +561,9 @@ private:
     if (auto agent_id = option_value<std::string>(parsed, "agent-id")) {
       options.agent_id = *agent_id;
     }
+    if (auto transport = option_value<std::string>(parsed, "transport")) {
+      options.transport = *transport;
+    }
 
     if (parsed.count("crypto") != 0) {
       options.crypto.enabled = true;
@@ -634,6 +643,10 @@ private:
 
     if (options.agent_id) {
       this->set_agent_id(*options.agent_id);
+    }
+
+    if (options.transport) {
+      this->set_transport_mode(*options.transport);
     }
 
     if (options.crypto.enabled) {

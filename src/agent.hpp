@@ -210,10 +210,26 @@ private:
   void setup_curve_on(zmq::socket_t &socket);
 
   /**
-   * @brief Read settings and timecode from the broker over a single REQ socket.
+   * @brief What query_broker() brings back from the broker.
+   */
+  struct BrokerReply {
+    /// Raw TOML settings text.
+    std::string settings;
+    /// Attachment bytes (empty if the broker served none).
+    std::string attachment;
+    /// Broker timecode minus local timecode, in seconds.
+    double timecode_offset = 0.0;
+    /// The one-frame reply to the `transport` command (JSON text), or empty
+    /// when the broker predates the command or did not answer it.
+    std::string transport;
+  };
+
+  /**
+   * @brief Read settings, timecode and transport info from the broker over a
+   * single REQ socket.
    *
-   * Performs both the `settings` and `timecode` round-trips on one connection,
-   * avoiding two separate socket open/connect/close cycles.
+   * Performs the `settings`, `timecode` and `transport` round-trips on one
+   * connection, avoiding separate socket open/connect/close cycles.
    *
    * The attachment is returned as raw bytes rather than a path: where it gets
    * cached depends on the `attachment_ext` setting, which is only known once
@@ -223,13 +239,23 @@ private:
    * @param uri The URI of the broker.
    * @param name The name of the agent.
    * @param timeout The timeout in milliseconds.
-   * @return a tuple {raw settings, attachment bytes (empty if the broker
-   *         served none), broker timecode}.
+   * @return the settings, attachment, timecode offset and transport reply.
    * @throws AgentError if timed out or the broker refuses to provide settings.
+   *         A missing or unanswered `transport` reply is not an error.
    */
-  std::tuple<std::string, std::string, double>
-  query_broker(std::string uri, std::string name,
-               int timeout = DEFAULT_SETTINGS_TIMEOUT_MS);
+  BrokerReply query_broker(std::string uri, std::string name,
+                           int timeout = DEFAULT_SETTINGS_TIMEOUT_MS);
+
+  /**
+   * @brief Resolves the transport mode and sets _pub_endpoint/_sub_endpoint
+   * accordingly: the broker's ipc:// endpoints when they can be used, the
+   * [agents] tcp addresses (pointed at the settings host) otherwise. Called
+   * by init().
+   *
+   * @throws AgentError if `transport = "ipc"` is requested (or settings were
+   *         fetched over ipc) but ipc cannot be used.
+   */
+  void _select_transport();
 
 public:
 /*
@@ -751,6 +777,36 @@ public:
   std::string pub_endpoint() const { return _pub_endpoint; }
 
   /**
+   * @brief Force the transport to the broker, overriding the `transport`
+   * setting of the agent's section and of [agents].
+   *
+   * - "auto" (the default): ipc:// when the broker runs on this host and
+   *   offers it, tcp:// otherwise;
+   * - "tcp": always tcp://;
+   * - "ipc": ipc:// or init() fails.
+   *
+   * Must be called before init(). An empty string clears the override.
+   *
+   * @param mode "auto", "tcp", "ipc" or "".
+   * @throws AgentError on any other value, or if already initialized.
+   */
+  void set_transport_mode(std::string const &mode);
+
+  /**
+   * @brief The resolved transport mode: "auto", "tcp" or "ipc".
+   *
+   * Before init() this is the override set with set_transport_mode(), or
+   * "auto".
+   */
+  std::string transport_mode() const;
+
+  /**
+   * @brief The transport actually used for the pub/sub endpoints after
+   * init(): "ipc" or "tcp".
+   */
+  std::string transport() const { return _transport; }
+
+  /**
    * @brief Sets the publish topic.
    *
    * @param topic The topic to be used for publishing messages.
@@ -1225,6 +1281,14 @@ protected:
    */
   bool _topic_matches_subscription(const std::string &topic) const;
 
+  /**
+   * @brief Splits a tcp://host:port URL into {"tcp://", host, port}.
+   *
+   * Kept for subclasses only; MADS itself uses the scheme-aware endpoint
+   * parser, since ipc:// endpoints have no host or port.
+   *
+   * @throws std::invalid_argument if `url` is not a tcp://host:port URL.
+   */
   static std::tuple<std::string, std::string, std::string> split_URL(const std::string &url);
 
   /**
@@ -1305,6 +1369,16 @@ protected:
   std::string _raw_settings;
   toml::table _config;
   std::string _pub_endpoint, _sub_endpoint;
+  // The tcp endpoints init() would have used, kept so set_cross() (tcp-only)
+  // can fall back to them when ipc was selected.
+  std::string _tcp_pub_endpoint, _tcp_sub_endpoint;
+  // Transport (see set_transport_mode()): the CLI/API override, the mode
+  // resolved by init(), the transport in use, and the broker's raw
+  // `transport` reply (empty if none).
+  std::string _transport_mode_override;
+  std::string _transport_mode = "auto";
+  std::string _transport = "tcp";
+  std::string _transport_reply;
   std::string _pub_topic;
   std::string _agent_id;
   std::vector<std::string> _sub_topic;

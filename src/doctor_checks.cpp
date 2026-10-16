@@ -1,6 +1,7 @@
 #include "doctor_checks.hpp"
 
 #include "broker_probe.hpp"
+#include "detail/endpoint.hpp"
 #include "detail/fd_limit.hpp"
 
 #include <fstream>
@@ -31,7 +32,7 @@ CheckResult check_settings_file(const fs::path &path) {
   r.name = "settings_file";
   const std::string target = path.string();
 
-  if (target.rfind("tcp://", 0) == 0) {
+  if (detail::is_zmq_uri(target)) {
     r.status = Status::Pass;
     r.message = "Settings source '" + target +
                "' is a remote broker URI; local file check skipped "
