@@ -694,8 +694,9 @@ public:
    * @brief Takes the next ring slot for writing (zero-copy publishing).
    *
    * Write at most `slot.capacity` bytes at `slot.data`, then hand the slot to
-   * publish_slot(), or give it back with abandon_slot(). Slots are taken in
-   * round-robin order: a slot is overwritten after `slots` further
+   * publish_slot(), or give it back with abandon_slot() (nothing written)
+   * or discard_slot(). Slots are taken in round-robin order: a slot is
+   * overwritten after `slots` further
    * acquisitions, so publish it before acquiring that many more. Blob
    * publishing with shared output enabled is meant for one thread.
    *
@@ -712,7 +713,7 @@ public:
    * hostname). The slot is consumed.
    *
    * @throws AgentError if not initialized, if shared output is not enabled,
-   *   if `size` exceeds the slot capacity (the slot is then abandoned), or if
+   *   if `size` exceeds the slot capacity (the slot is then discarded), or if
    *   `slot` is not being written (already published or abandoned, or
    *   overwritten by a wrap).
    */
@@ -721,12 +722,21 @@ public:
                     std::string topic = "");
 
   /**
-   * @brief Gives back a slot taken with acquire_slot() without publishing
-   * it; the next acquire_slot() reuses it. Views of the slot's previous
-   * contents stay invalid (see mads_shm.hpp). No-op if shared output is
-   * disabled or the slot was already consumed.
+   * @brief Gives back a slot taken with acquire_slot() into which nothing
+   * was written; the next acquire_slot() reuses it. The payload previously
+   * published in the slot becomes valid again (see SharedRing::abandon()).
+   * If anything may have been written, use discard_slot() instead. No-op if
+   * shared output is disabled or the slot was already consumed.
    */
   void abandon_slot(WritableSlot &slot);
+
+  /**
+   * @brief Gives back a slot taken with acquire_slot() that may have been
+   * written but is not to be published: views of its previous contents stay
+   * invalid. No-op if shared output is disabled or the slot was already
+   * consumed.
+   */
+  void discard_slot(WritableSlot &slot);
 
   /**
    * @brief Opts this consumer into zero-copy shared-memory views (default
@@ -1668,7 +1678,7 @@ protected:
   // Producer ring (null = blobs inline) and consumer segment cache, held by
   // shared_ptr so this header needs only forward declarations.
   std::shared_ptr<Mads::shm::SharedRing> _shm_ring;
-  std::mutex _shm_ring_mutex; // serializes acquire/commit/abandon
+  std::mutex _shm_ring_mutex; // serializes acquire/commit/abandon/discard
   std::shared_ptr<Mads::shm::SegmentCache> _shm_cache;
   bool _accept_shared_views = false;
   // Guarded by _message_state_mutex, like _last_blob.

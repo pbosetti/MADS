@@ -83,12 +83,21 @@ using json = nlohmann::json;
 #if MADS_PLUGIN_SHM
 // Owns a ring slot acquired for a plugin's shared output during one loop
 // iteration, and gives it back if the iteration ends without publishing it
-// (publish_slot() consumes the slot, so this is then a no-op).
+// (publish_slot() consumes the slot, so this is then a no-op). The BlobBuffer
+// contract says the plugin writes nothing when it reports no blob
+// (size == 0) or an overflow (size > capacity): the slot is then abandoned,
+// which keeps the payload previously published in it valid. A blob that was
+// written but not published (error return, torn input) is discarded.
 struct SlotGuard {
   Agent &agent;
   WritableSlot slot{};
+  bool written = false;
   void release() {
-    if (slot)
+    if (!slot)
+      return;
+    if (written)
+      agent.discard_slot(slot);
+    else
       agent.abandon_slot(slot);
   }
   ~SlotGuard() { release(); }
@@ -513,6 +522,7 @@ int main(int argc, char *argv[]) {
         rt = plugin->get_output(out, &blob);
       } else {
         slot_bytes = buf.size; // 0: no blob, the guard gives the slot back
+        guard.written = slot_bytes > 0;
       }
     } else {
       rt = plugin->get_output(out, &blob);
@@ -680,7 +690,10 @@ int main(int argc, char *argv[]) {
     // processing data in the plugin
   process_output:
 #if MADS_PLUGIN_SHM
-    if (shared_out) {
+    // A ring slot only for new input: an idle pass (non-blocking, nothing
+    // received) uses the copying path, so it never takes a slot, and hence
+    // never invalidates the payload a slot still holds.
+    if (shared_out && type != message_type::none) {
       guard.slot = agent.acquire_slot();
       BlobBuffer buf{guard.slot.data, guard.slot.capacity, 0};
       rt = plugin->process_shared(out, buf);
@@ -692,6 +705,7 @@ int main(int argc, char *argv[]) {
         rt = plugin->process(out, &blob);
       } else {
         slot_bytes = buf.size; // 0: no blob, the guard gives the slot back
+        guard.written = slot_bytes > 0;
       }
     } else {
       rt = plugin->process(out, &blob);

@@ -107,15 +107,26 @@ public:
   /// committed, or re-acquired after a full wrap).
   ShmDescriptor commit(WritableSlot &slot, size_t size);
 
-  /// Gives back an acquired slot without publishing it (nothing to send, or
-  /// the payload did not fit). The slot's seq moves to a fresh even value
-  /// that no descriptor carries: it is stable again, but views of its
-  /// previous contents stay invalid, since the writer may have touched the
-  /// bytes. If `slot` is the most recently acquired one, the next acquire()
-  /// hands it out again, so abandoning does not invalidate a further slot.
-  /// `slot` is consumed (data = nullptr). No-op for a slot that is not
-  /// currently being written.
+  /// Gives back an acquired slot into which NOTHING was written (no blob,
+  /// or a payload that did not fit and was therefore not written): the slot
+  /// gets back the seq it had before acquire(), so the payload previously
+  /// published in it is valid again. Readers that checked the slot while it
+  /// was acquired saw it odd and failed; readers checking after abandon()
+  /// succeed. The caller guarantees the bytes are untouched: if they may
+  /// have been written, use discard(). If the slot was not stable before
+  /// acquire(), this is a discard(). If `slot` is the most recently acquired
+  /// one, the next acquire() hands it out again (with the same write_seq, so
+  /// a copy of an abandoned WritableSlot must never be committed). `slot` is
+  /// consumed (data = nullptr). No-op for a slot that is not currently being
+  /// written.
   void abandon(WritableSlot &slot);
+
+  /// Gives back an acquired slot that may have been written but is not to be
+  /// published (e.g. an error, or an oversize commit). The slot's seq moves
+  /// to a fresh even value that no descriptor carries: it is stable again,
+  /// but views of its previous contents stay invalid. Otherwise like
+  /// abandon().
+  void discard(WritableSlot &slot);
 
   uint32_t slot_count() const { return _slot_count; }
   size_t slot_size() const { return _slot_size; }
@@ -126,6 +137,8 @@ private:
   SharedRing(std::unique_ptr<SharedSegment> segment, uint32_t slot_count,
              size_t slot_size, RingLayout layout, std::string nonce_hex);
   SlotHeader &slot_header(uint32_t index) const;
+  // abandon()/discard(): `restore` puts back slot.prev_seq if possible.
+  void give_back(WritableSlot &slot, bool restore);
   unsigned char *slot_data(uint32_t index) const;
 
   std::unique_ptr<SharedSegment> _segment;

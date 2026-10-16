@@ -333,15 +333,38 @@ TEST_CASE("SharedRing abandon() returns a slot without publishing it",
   ring->abandon(t);
   CHECK_THROWS_AS(ring->commit(t_copy, 1), std::logic_error);
 
-  // A slot abandoned after an older view of it: the view stays invalid
-  // (the bytes may have been touched), and the slot is stable (even seq).
+  // A slot abandoned (nothing written) after an older view of it: while
+  // acquired, the view is invalid and a new view() fails; once abandoned,
+  // the previous payload is valid again, for the old view and new ones.
   WritableSlot u = ring->acquire(); // slot 2 again
   REQUIRE(u.index == 2);
   ring->commit(u, 0);
   WritableSlot w = ring->acquire(); // slot 0: invalidates v0
   CHECK_FALSE(v0->valid());
+  std::string err;
+  CHECK_FALSE(cache.view(d0, {}, &err));
+  CHECK(err.find("overwritten") != std::string::npos);
   ring->abandon(w);
+  CHECK(v0->valid());
+  auto again0 = cache.view(d0, {});
+  REQUIRE(again0);
+  CHECK(again0->valid());
+  CHECK(as_string(*again0) == "zero");
+
+  // discard() (the bytes may have been written) keeps the old payload
+  // invalid, and the slot is stable (even seq) and reusable.
+  WritableSlot x = ring->acquire(); // slot 0 again
+  REQUIRE(x.index == 0);
+  std::memcpy(x.data, "junk", 4);
+  ring->discard(x);
+  CHECK_FALSE(x);
   CHECK_FALSE(v0->valid());
+  CHECK_FALSE(cache.view(d0, {}));
+  WritableSlot y = ring->acquire();
+  CHECK(y.index == 0);
+  CHECK(y.write_seq % 2 == 1);
+  ring->abandon(y); // restores the post-discard seq: no descriptor has it
+  CHECK_FALSE(cache.view(d0, {}));
 }
 
 TEST_CASE("SharedRing unlinks its segment on destruction", "[shm][ring]") {

@@ -244,7 +244,8 @@ TEST_CASE("shm producer -> opted-in consumer gets a zero-copy shared view",
   std::memset(slot.data, 0xAB, 16);
   CHECK(view.data()[0] == 0xAB);
   CHECK(view.data()[15] == 0xAB);
-  pub->abandon_slot(slot);
+  pub->discard_slot(slot); // written: must not revalidate the view
+  CHECK_FALSE(view.valid());
   CHECK(sub->shm_failed() == 0);
   CHECK(sub->shm_torn() == 0);
 }
@@ -269,6 +270,43 @@ TEST_CASE("shm producer -> non-opted consumer gets an ordinary blob",
   auto [vt, vf, vb] = sub->last_blob_view();
   CHECK(vb.size() == payload.size());
   CHECK_FALSE(sub->last_shared());
+}
+
+TEST_CASE("an abandoned (unwritten) slot keeps its published payload valid",
+          "[agent_shm]") {
+  mads_test::RunningGuard guard;
+  const uint16_t port = 44711;
+  const uint32_t slots = 2;
+  auto pub = make_pub("shmpub12", port, slots, 4096);
+  auto sub = make_sub("shmsub12", port, true);
+  const auto payload = pattern(500, 6);
+  REQUIRE(retry_until(
+      [&] { pub->publish(payload, {{"format", "t"}}, "a"); },
+      [&] { return sub->receive(true) == message_type::shared; }));
+  while (sub->receive(true) != message_type::none) {
+  }
+  Mads::SharedView view = sub->last_shared();
+  REQUIRE(view.valid());
+  // Advance the ring until the next slot handed out is the viewed one.
+  Mads::WritableSlot slot;
+  for (uint32_t i = 0; i <= slots; ++i) {
+    slot = pub->acquire_slot();
+    if (!view.valid())
+      break;
+    pub->publish_slot(slot, 0);
+  }
+  REQUIRE(slot);
+  CHECK_FALSE(view.valid()); // acquired: odd seq
+  // An idle pass (a source with no blob): nothing written, slot abandoned.
+  pub->abandon_slot(slot);
+  CHECK(view.valid());
+  // Further idle passes reuse the same slot and keep the payload valid.
+  for (int i = 0; i < 3; ++i) {
+    auto idle = pub->acquire_slot();
+    pub->abandon_slot(idle);
+  }
+  CHECK(view.valid());
+  CHECK(std::memcmp(view.data(), payload.data(), payload.size()) == 0);
 }
 
 TEST_CASE("last_topic() follows every received message type", "[agent_shm]") {

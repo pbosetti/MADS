@@ -68,6 +68,7 @@ struct WritableSlot {
   size_t capacity = 0;
   uint32_t index = 0;     ///< slot index in the ring
   uint64_t write_seq = 0; ///< odd seqlock value set by acquire()
+  uint64_t prev_seq = 0;  ///< seqlock value before acquire()
 
   explicit operator bool() const { return data != nullptr; }
 };

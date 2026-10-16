@@ -156,6 +156,7 @@ WritableSlot SharedRing::acquire() {
   slot.capacity = _slot_size;
   slot.index = idx;
   slot.write_seq = w;
+  slot.prev_seq = s;
   return slot;
 }
 
@@ -186,15 +187,25 @@ ShmDescriptor SharedRing::commit(WritableSlot &slot, size_t size) {
   return d;
 }
 
-void SharedRing::abandon(WritableSlot &slot) {
+void SharedRing::abandon(WritableSlot &slot) { give_back(slot, true); }
+
+void SharedRing::discard(WritableSlot &slot) { give_back(slot, false); }
+
+void SharedRing::give_back(WritableSlot &slot, bool restore) {
   if (!slot || slot.index >= _slot_count ||
       slot.data != slot_data(slot.index) || (slot.write_seq & 1) == 0)
     return;
   auto &h = slot_header(slot.index);
   if (h.seq.load(std::memory_order_relaxed) != slot.write_seq)
     return; // re-acquired after a wrap: not ours any more
-  h.size = 0;
-  h.seq.store(slot.write_seq + 1, std::memory_order_release);
+  if (restore && (slot.prev_seq & 1) == 0 &&
+      slot.prev_seq + 1 == slot.write_seq) {
+    // Untouched bytes and size: the previous descriptor is valid again.
+    h.seq.store(slot.prev_seq, std::memory_order_release);
+  } else {
+    h.size = 0;
+    h.seq.store(slot.write_seq + 1, std::memory_order_release);
+  }
   if ((slot.index + 1) % _slot_count == _next)
     _next = slot.index;
   slot.data = nullptr;

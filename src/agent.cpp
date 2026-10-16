@@ -1182,6 +1182,13 @@ void Agent::abandon_slot(WritableSlot &slot) {
   _shm_ring->abandon(slot);
 }
 
+void Agent::discard_slot(WritableSlot &slot) {
+  if (!_shm_ring)
+    return;
+  std::lock_guard<std::mutex> lock(_shm_ring_mutex);
+  _shm_ring->discard(slot);
+}
+
 void Agent::publish_slot(WritableSlot &slot, size_t size, nlohmann::json meta,
                          string topic) {
   if (!_init_done)
@@ -1194,7 +1201,7 @@ void Agent::publish_slot(WritableSlot &slot, size_t size, nlohmann::json meta,
     try {
       d = _shm_ring->commit(slot, size);
     } catch (std::length_error const &e) {
-      _shm_ring->abandon(slot);
+      _shm_ring->discard(slot); // the caller may have filled it
       throw AgentError(e.what());
     } catch (std::logic_error const &e) {
       throw AgentError(e.what());
