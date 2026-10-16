@@ -164,8 +164,10 @@ gets a read-only view of the bytes with no copy at all; any other plugin
 gets them through `load_data()` after one copy. The view is valid only
 during the call (and the following `process()`). The ring is lossy, so a
 message whose slot the producer overwrote while it was being read is
-dropped and counted, never delivered torn. A shared-memory message from a
-producer on another host cannot be read and is reported as an error.
+dropped and counted, never delivered torn. The filter must run on the
+producer's host, as the producer's OS user and in the same container
+(segments are owner-only): otherwise it cannot map the ring and drops every
+shared-memory message, with only rate-limited warnings.
 
 As a **producer**, set in the agent's settings section:
 
@@ -177,6 +179,9 @@ As a **producer**, set in the agent's settings section:
 
 **shm_slot_size** (integer, bytes, default `16777216`)
 :  Size of each slot; larger blobs are sent inline.
+
+Enable `shm` only when every consumer of the output topic runs on this host,
+as the same OS user and in the same container; otherwise leave it off.
 
 A P9 plugin that returns `true` from `supports_shared_output()` writes its
 output straight into a slot through `process_shared()`. See

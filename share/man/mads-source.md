@@ -172,9 +172,15 @@ in the agent's settings section:
 
 Shared memory is used only when the broker runs on this host. Consumers that
 have not opted in to zero-copy, including **mads-record** and the C API,
-receive an ordinary copy of the blob, so they need no change. A consumer on
-another host cannot read the ring and reports an error: enable `shm` only
-when every consumer of the topic runs on this host.
+receive an ordinary copy of the blob, so they need no change.
+
+**All consumers of the topic must run on this host, under the same OS user,
+and in the same container (IPC namespace, `/dev/shm`).** Segments are created
+owner-only (mode 0600), so a consumer running as another user cannot map
+them, and neither can one on another host or in a container with its own
+`/dev/shm`. Such a consumer drops *every* blob of the topic, reporting it only
+with rate-limited warnings (the first one names the cause, e.g. "permission
+denied ... same OS user"). If that cannot be guaranteed, leave `shm` off.
 
 Plugins built against protocol P9 can write their output straight into a
 ring slot by overriding `supports_shared_output()` and

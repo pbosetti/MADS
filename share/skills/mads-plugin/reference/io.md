@@ -75,7 +75,9 @@ return_type get_output(json &out, vector<unsigned char> *blob) override {
 
 When the producing agent runs with `shm = true`, large blobs stay in a
 shared-memory ring owned by that agent and only a small descriptor travels over
-ZeroMQ. Same-host consumers read the bytes in place. Nothing changes for a
+ZeroMQ. Same-host consumers read the bytes in place; every consumer of the
+topic must run on the producer's host, as the same OS user and in the same
+container (segments are owner-only), or it drops every blob. Nothing changes for a
 plugin that does not opt in: input blobs still arrive through `load_data()`
 (the default `load_data_view()` makes one copy), output still goes through
 `get_output()`/`process()`.

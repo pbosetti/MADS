@@ -158,8 +158,10 @@ overrides `load_data_view()` gets a read-only view of the bytes with no copy
 at all; any other plugin gets them through `load_data()` after one copy. The
 view is valid only during the call: copy what you need to keep. The ring is
 lossy, so a message whose slot the producer overwrote while it was being read
-is dropped and counted, never delivered torn. A shared-memory message from a
-producer on another host cannot be read and is reported as an error. See
+is dropped and counted, never delivered torn. The sink must run on the
+producer's host, as the producer's OS user and in the same container
+(segments are owner-only): otherwise it cannot map the ring and drops every
+shared-memory message, with only rate-limited warnings. See
 **mads-plugin**(1).
 
 # DEFAULT PLUGIN

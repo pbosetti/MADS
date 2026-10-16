@@ -228,6 +228,19 @@ SegmentCache::open_entry(std::string const &name, std::string *error) {
   Entry e;
   try {
     e.segment = SharedSegment::open(name);
+  } catch (std::system_error const &ex) {
+    // Segments are created 0600: another OS user cannot map them.
+    if (ex.code() == std::errc::permission_denied ||
+        ex.code() == std::errc::operation_not_permitted)
+      return fail(error,
+                  "Cannot open shared-memory segment " + name +
+                      ": permission denied. Segments are private to the "
+                      "producer's OS user: every consumer of an shm topic "
+                      "must run on the same host, as the same OS user (and "
+                      "in the same container), or shm must stay off (" +
+                      ex.what() + ")");
+    return fail(error, "Cannot open shared-memory segment " + name +
+                           " (producer gone?): " + ex.what());
   } catch (std::exception const &ex) {
     return fail(error, "Cannot open shared-memory segment " + name +
                            " (producer gone?): " + ex.what());
