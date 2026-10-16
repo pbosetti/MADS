@@ -429,13 +429,14 @@ endif()
 #  | || | | \__ \ || (_| | | |
 # |___|_| |_|___/\__\__,_|_|_|
 #
+# COMPONENT binds to the artifact kind it follows, so it is repeated for each:
+# otherwise the Windows DLL (a RUNTIME artifact) lands in "Unspecified".
 install(
   TARGETS ${LIB_NAME}
   EXPORT MadsTargets
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  COMPONENT MadsCore
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT MadsCore
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT MadsCore
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT MadsCore
 )
 
 install(
@@ -496,9 +497,10 @@ if(NOT WIN32)
   )
 endif()
 
+# Used by both the command line utilities and the GUI apps.
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/images
   DESTINATION share
-  COMPONENT MadsApps
+  COMPONENT MadsCore
 )
 
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/templates
@@ -580,30 +582,33 @@ elseif(WIN32)
   set(CPACK_INNOSETUP_SETUP_ChangesEnvironment ON)
   set(CPACK_INNOSETUP_EXTRA_SCRIPTS "${CMAKE_CURRENT_LIST_DIR}/iss/environment.iss")
   set(CPACK_INNOSETUP_CODE_FILES "${CMAKE_CURRENT_LIST_DIR}/iss/events.iss")
-  set(CPACK_INSTALLED_DIRECTORIES 
-    ${CMAKE_INSTALL_PREFIX}/lib ./lib
-    ${CMAKE_INSTALL_PREFIX}/include ./include
-  )
-  cpack_add_component(SDK
-    DISPLAY_NAME "Main SDK"
-    HIDDEN
-  )
-  cpack_add_component(dev
-    DISPLAY_NAME "dev"
-    HIDDEN
-  )
-  cpack_add_component(Devel
-    DISPLAY_NAME "Devel"
-    HIDDEN
-  )
+  # Only these components go into the installer: anything else (e.g. a
+  # dependency's own "Unspecified" rules) is deliberately left out.
+  set(CPACK_COMPONENTS_ALL MadsCore MadsApps)
+  # Inno Setup preselects the components of the first install type: "Full"
+  # makes the optional components selected by default.
+  cpack_add_install_type(Full DISPLAY_NAME "Full installation")
   cpack_add_component(MadsCore
-    DISPLAY_NAME "MADS core library"
+    DISPLAY_NAME "Core library"
+    DESCRIPTION "libMadsCore, its runtime dependencies and the C++ headers"
     REQUIRED
+    INSTALL_TYPES Full
   )
   cpack_add_component(MadsApps
-    DISPLAY_NAME "MADS apps and executables"
+    DISPLAY_NAME "Command line utilities"
+    DESCRIPTION "mads and all the mads-* command line tools, plugins and templates"
+    DEPENDS MadsCore
+    INSTALL_TYPES Full
   )
-  
+  if(MADS_ENABLE_GUI)
+    list(APPEND CPACK_COMPONENTS_ALL MadsGui)
+    cpack_add_component(MadsGui
+      DISPLAY_NAME "GUI components"
+      DESCRIPTION "The mads-director and mads-chat apps"
+      DEPENDS MadsCore
+      INSTALL_TYPES Full
+    )
+  endif()
 
 else()
   # Runtime dependencies are computed by dpkg-shlibdeps from the binaries

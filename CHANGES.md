@@ -23,7 +23,14 @@
   gv2fsm and tree-sitter headers, the static archives of vendored libraries
   (all linked into MadsCore) and their CMake/pkg-config files. License files of
   the statically linked libraries are still installed under `share/`. On
-  Windows, libzmq (a DLL there) is installed as before.
+  Windows, libzmq (a DLL there) ships its DLL, import library, `zmq.h` and
+  license, but no longer `zmq_utils.h` nor its pkg-config and `share/zmq` extras.
+- **The Windows installer has three components:** *Core library* (`MadsCore`,
+  required: libMadsCore, libzmq and the headers), *Command line utilities*
+  (`MadsApps`) and *GUI components* (`MadsGui`: mads-director and mads-chat),
+  the latter two optional and selected by default. Previously `MadsCore.dll`,
+  the bundled plugins and libzmq ended up in stray `Unspecified`/`SDK`/`Runtime`
+  components.
 
 # Release 2.5.0
 

@@ -5,7 +5,7 @@ macro(create_man target)
       COMMAND lowdown -s -m section=1 -m title=${target} -m date="2024/07/17" -Tman -o ${target}.1 ${target}.md
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
   )
-  install(FILES ${target}.1 DESTINATION "share/man/man1")
+  install(FILES ${target}.1 DESTINATION "share/man/man1" COMPONENT MadsApps)
 endmacro()
 
 if(LOWDOWN_EXECUTABLE)

@@ -297,13 +297,7 @@ set(SODIUM_LIBRARIES
     "${_mads_sodium_library}"
     CACHE FILEPATH "" FORCE)
 unset(_mads_sodium_library)
-if(WIN32)
-  # libzmq is a DLL on Windows (see BUILD_SHARED above): keep its own install
-  # rules there, so libzmq.dll, its import library and CMake files ship.
-  add_vendor(libzmq KEEP_INSTALL_RULES YES)
-else()
-  add_vendor(libzmq)
-endif()
+add_vendor(libzmq)
 if(ANDROID)
   foreach(_mads_zmq_target libzmq libzmq-static)
     if(TARGET "${_mads_zmq_target}")
@@ -374,12 +368,18 @@ install(FILES
     "${cxxopts_SOURCE_DIR}/include/cxxopts.hpp"
     "${rang_SOURCE_DIR}/include/rang.hpp"
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT MadsCore)
-if(NOT WIN32)
-  # On Windows libzmq's own install rules ship zmq.h (and its license).
-  install(FILES "${libzmq_SOURCE_DIR}/include/zmq.h"
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT MadsCore)
-  install(FILES "${libzmq_SOURCE_DIR}/LICENSE"
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/zmq" RENAME LICENSE.txt COMPONENT MadsCore)
+install(FILES "${libzmq_SOURCE_DIR}/include/zmq.h"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT MadsCore)
+install(FILES "${libzmq_SOURCE_DIR}/LICENSE"
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/zmq" RENAME LICENSE.txt COMPONENT MadsCore)
+if(WIN32)
+  # libzmq is a DLL on Windows (see BUILD_SHARED above): ship it and its import
+  # library with MadsCore. Its own install rules are not used, as they spread
+  # files over "SDK", "Runtime" and "Unspecified" installer components.
+  install(FILES "$<TARGET_FILE:libzmq>"
+    DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT MadsCore)
+  install(FILES "$<TARGET_LINKER_FILE:libzmq>"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT MadsCore)
 endif()
 
 # License/notice files of libraries statically linked into the shipped binaries.

@@ -136,7 +136,7 @@ function(mads_gui_executable name)
   endif()
   install(TARGETS "${_output_name}"
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    COMPONENT MadsApps
+    COMPONENT MadsGui
   )
   set(MADS_GUI_TARGET ${_output_name} PARENT_SCOPE)
 endfunction()
