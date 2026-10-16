@@ -22,6 +22,7 @@ slow detects the overwrite instead of silently reading torn data.
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <string>
 
@@ -80,14 +81,21 @@ struct WritableSlot {
  * Check valid() *after* using the data; a false result means the bytes may
  * have been overwritten while you read them. Copy the data if you need to
  * keep it.
+ *
+ * A view (and every copy of it) pins the mapping it points into, so data()
+ * never dangles, even after the consumer's segment cache dropped the
+ * segment or the producer exited: at worst valid() turns false.
  */
 class SharedView {
 public:
   SharedView() = default;
+  /// `pin` keeps the memory under `data` and `seq` mapped for as long as the
+  /// view (or a copy of it) exists.
   SharedView(const unsigned char *data, size_t size, nlohmann::json meta,
-             const std::atomic<uint64_t> *seq, uint64_t expected)
+             const std::atomic<uint64_t> *seq, uint64_t expected,
+             std::shared_ptr<const void> pin = nullptr)
       : _data(data), _size(size), _meta(std::move(meta)), _seq(seq),
-        _expected(expected) {}
+        _expected(expected), _pin(std::move(pin)) {}
 
   const unsigned char *data() const { return _data; }
   size_t size() const { return _size; }
@@ -108,6 +116,7 @@ private:
   nlohmann::json _meta;
   const std::atomic<uint64_t> *_seq = nullptr;
   uint64_t _expected = 0;
+  std::shared_ptr<const void> _pin;
 };
 
 } // namespace Mads

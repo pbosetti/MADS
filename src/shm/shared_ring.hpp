@@ -107,6 +107,16 @@ public:
   /// committed, or re-acquired after a full wrap).
   ShmDescriptor commit(WritableSlot &slot, size_t size);
 
+  /// Gives back an acquired slot without publishing it (nothing to send, or
+  /// the payload did not fit). The slot's seq moves to a fresh even value
+  /// that no descriptor carries: it is stable again, but views of its
+  /// previous contents stay invalid, since the writer may have touched the
+  /// bytes. If `slot` is the most recently acquired one, the next acquire()
+  /// hands it out again, so abandoning does not invalidate a further slot.
+  /// `slot` is consumed (data = nullptr). No-op for a slot that is not
+  /// currently being written.
+  void abandon(WritableSlot &slot);
+
   uint32_t slot_count() const { return _slot_count; }
   size_t slot_size() const { return _slot_size; }
   std::string const &segment_name() const { return _segment->name(); }
@@ -128,10 +138,11 @@ private:
 
 /// Consumer side: an LRU of mapped segments, turning descriptors into views.
 ///
-/// A SharedView borrows the cache's mapping: it dangles once its segment is
-/// evicted, which happens when view() maps more than `capacity` distinct
-/// segments, when a segment name turns out to have been reused (nonce
-/// mismatch), or on clear() / destruction. Do not keep views across those.
+/// Mappings are reference counted: each SharedView pins the mapping it points
+/// into, so evicting a segment (more than `capacity` distinct segments, a
+/// reused name detected by a nonce mismatch, clear(), destruction) only drops
+/// the cache's own reference, and the mapping is unmapped when the last view
+/// of it goes away. Views therefore never dangle.
 class SegmentCache {
 public:
   explicit SegmentCache(size_t capacity = 16);
@@ -146,7 +157,7 @@ public:
 
 private:
   struct Entry {
-    std::unique_ptr<SharedSegment> segment;
+    std::shared_ptr<SharedSegment> segment;
     std::string nonce_hex;
     uint32_t slot_count = 0;
     uint64_t slot_size = 0;

@@ -4,6 +4,7 @@
 
 #include <cctype>
 #include <cstring>
+#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -262,6 +263,85 @@ TEST_CASE("SegmentCache evicts least recently used segments", "[shm][ring]") {
   CHECK(as_string(*v) == "2b");
   cache.clear();
   CHECK(cache.size() == 0);
+}
+
+TEST_CASE("SharedView pins its mapping across cache eviction and clear()",
+          "[shm][ring]") {
+  auto r1 = SharedRing::create(4, 16);
+  auto r2 = SharedRing::create(4, 16);
+  SegmentCache cache(1);
+  auto v1 = cache.view(publish(*r1, "kept"), {});
+  REQUIRE(v1);
+  // r2 evicts r1 from a one-entry cache; v1 must still be readable.
+  REQUIRE(cache.view(publish(*r2, "other"), {}));
+  CHECK(cache.size() == 1);
+  CHECK(as_string(*v1) == "kept");
+  CHECK(v1->valid());
+  cache.clear();
+  CHECK(as_string(*v1) == "kept");
+  CHECK(v1->valid());
+  // A copy outlives the original and still pins the mapping.
+  SharedView copy = *v1;
+  v1.reset();
+  CHECK(as_string(copy) == "kept");
+  // Wrapping r1 invalidates it, through the still-mapped counter.
+  for (int i = 0; i < 4; ++i)
+    publish(*r1, "w");
+  CHECK_FALSE(copy.valid());
+}
+
+TEST_CASE("SharedView outlives its producer ring", "[shm][ring]") {
+  SegmentCache cache;
+  std::optional<SharedView> v;
+  {
+    auto ring = SharedRing::create(2, 16);
+    v = cache.view(publish(*ring, "gone"), {});
+    REQUIRE(v);
+  }
+  cache.clear();
+  // The name is unlinked and the cache dropped it, but the view still pins
+  // the mapping: the bytes and the counter stay readable.
+  CHECK(as_string(*v) == "gone");
+  CHECK(v->valid());
+}
+
+TEST_CASE("SharedRing abandon() returns a slot without publishing it",
+          "[shm][ring]") {
+  auto ring = SharedRing::create(3, 16);
+  SegmentCache cache;
+  auto d0 = publish(*ring, "zero"); // slot 0
+  auto v0 = cache.view(d0, {});
+  REQUIRE(v0);
+
+  WritableSlot s = ring->acquire(); // slot 1
+  REQUIRE(s.index == 1);
+  ring->abandon(s);
+  CHECK_FALSE(s);
+  // The abandoned slot is handed out again, so slot 2 is not touched.
+  WritableSlot again = ring->acquire();
+  CHECK(again.index == 1);
+  CHECK(again.write_seq % 2 == 1);
+  auto d1 = ring->commit(again, 0);
+  CHECK(d1.slot == 1);
+  CHECK(v0->valid());
+
+  // Abandoning twice, or a consumed slot, is a no-op; committing an
+  // abandoned slot is misuse.
+  WritableSlot t = ring->acquire(); // slot 2
+  WritableSlot t_copy = t;
+  ring->abandon(t);
+  ring->abandon(t);
+  CHECK_THROWS_AS(ring->commit(t_copy, 1), std::logic_error);
+
+  // A slot abandoned after an older view of it: the view stays invalid
+  // (the bytes may have been touched), and the slot is stable (even seq).
+  WritableSlot u = ring->acquire(); // slot 2 again
+  REQUIRE(u.index == 2);
+  ring->commit(u, 0);
+  WritableSlot w = ring->acquire(); // slot 0: invalidates v0
+  CHECK_FALSE(v0->valid());
+  ring->abandon(w);
+  CHECK_FALSE(v0->valid());
 }
 
 TEST_CASE("SharedRing unlinks its segment on destruction", "[shm][ring]") {

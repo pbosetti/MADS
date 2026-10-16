@@ -186,6 +186,20 @@ ShmDescriptor SharedRing::commit(WritableSlot &slot, size_t size) {
   return d;
 }
 
+void SharedRing::abandon(WritableSlot &slot) {
+  if (!slot || slot.index >= _slot_count ||
+      slot.data != slot_data(slot.index) || (slot.write_seq & 1) == 0)
+    return;
+  auto &h = slot_header(slot.index);
+  if (h.seq.load(std::memory_order_relaxed) != slot.write_seq)
+    return; // re-acquired after a wrap: not ours any more
+  h.size = 0;
+  h.seq.store(slot.write_seq + 1, std::memory_order_release);
+  if ((slot.index + 1) % _slot_count == _next)
+    _next = slot.index;
+  slot.data = nullptr;
+}
+
 /*
  * SegmentCache
  */
@@ -308,7 +322,7 @@ std::optional<Mads::SharedView> SegmentCache::view(ShmDescriptor const &d,
   auto const *data =
       base + it->layout.data_offset + uint64_t(d.slot) * it->layout.slot_stride;
   return Mads::SharedView(data, static_cast<size_t>(d.size), std::move(meta),
-                          &slot->seq, d.seq);
+                          &slot->seq, d.seq, it->segment);
 }
 
 } // namespace Mads::shm
