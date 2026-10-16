@@ -442,10 +442,9 @@ if(MADS_BUILD_APPS)
     set(plugin_SOURCE_DIR ${MADS_PLUGIN_SOURCE_DIR})
     message(STATUS "Using local mads_plugin: ${plugin_SOURCE_DIR}")
   else()
-    # TODO: bump to the V9 tag once mads_plugin feat/ipc is pushed
     FetchContent_Populate(plugin
       GIT_REPOSITORY https://github.com/pbosetti/mads_plugin.git
-      GIT_TAG        v2.5-P8
+      GIT_TAG        v2.6-P9
       GIT_SHALLOW    TRUE
     )
   endif()

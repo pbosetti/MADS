@@ -129,6 +129,15 @@ int main(int argc, char *argv[]) {
   }
   cout << fg::green << "Recording stopped (" << count
        << " messages written to " << output_path << ")" << fg::reset << endl;
+  // Shared-memory payloads that could not be recovered (slot overwritten
+  // before or while copying it, producer gone, foreign host...) never reach
+  // the loop above, so they would otherwise leave silent gaps in the bag.
+  if (const size_t lost = recorder.shm_failed() + recorder.shm_torn())
+    cerr << fg::yellow << "Warning: " << lost
+         << " shared-memory payload" << (lost == 1 ? " was" : "s were")
+         << " lost (overwritten or unreadable) and missing from the bag; if "
+            "the producer outpaces the recorder, raise its shm_slots"
+         << fg::reset << endl;
 
   recorder.disconnect();
   recorder.restart_if_requested(argv);
