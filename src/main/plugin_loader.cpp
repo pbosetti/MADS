@@ -589,14 +589,18 @@ int main(int argc, char *argv[]) {
       cerr << fg::red << "Error receiving message: " << e.what()
             << fg::reset << endl;
     }
-    if (agent.last_topic() == agent.pub_topic()) {
+    // Topic of the message just received, whatever its type (json, blob or
+    // shared): last_topic() tracks them all.
+    const string topic =
+        type == message_type::none ? string() : agent.last_topic();
+    if (type != message_type::none && topic == agent.pub_topic()) {
       cerr << fg::yellow << "Warning: received message on the same topic (even partial) as the plugin published to, skipping to avoid loops" << fg::reset << endl;
       return 0ms; // dont use my own messages
     }
     // loading data into plugin
     if (type == message_type::json) {
       // agent.remote_control();
-      if (agent.last_topic() == "control") {
+      if (topic == "control") {
         return 0ms; // Control message, already handled
       }
       // Object fast path: avoids the agent re-dumping (MsgPack) and a second
@@ -612,20 +616,20 @@ int main(int argc, char *argv[]) {
 #if MADS_PLUGIN_SHM
       view = SharedView{};
 #endif
-      rt = plugin->load_data(in, agent.last_topic());
+      rt = plugin->load_data(in, topic);
     } else if (type == message_type::blob) {
 #if MADS_PLUGIN_SHM
       view = SharedView{};
 #endif
       msg_blob = agent.last_blob();
       in = json::parse(get<1>(msg_blob));
-      rt = plugin->load_data(in, agent.last_topic(), &get<2>(msg_blob));
+      rt = plugin->load_data(in, topic, &get<2>(msg_blob));
 #if MADS_PLUGIN_SHM
     } else if (type == message_type::shared) {
       view = agent.last_shared();
       view_loaded = true;
       in = view.meta();
-      rt = plugin->load_data_view(in, agent.last_shared_topic(),
+      rt = plugin->load_data_view(in, topic,
                                   BlobView{view.data(), view.size()});
 #endif
     } else {
@@ -766,7 +770,7 @@ int main(int argc, char *argv[]) {
       // The view (and its mapping) lives until the end of this iteration.
       SharedView view = agent.last_shared();
       in = view.meta();
-      rt = plugin->load_data_view(in, agent.last_shared_topic(),
+      rt = plugin->load_data_view(in, agent.last_topic(),
                                   BlobView{view.data(), view.size()});
       if (!view.valid()) {
         // Overwritten by the producer while the plugin read it: the plugin

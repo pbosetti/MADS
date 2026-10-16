@@ -1024,7 +1024,9 @@ public:
 
 
   /**
-   * @brief Returns the topic of the last received message by the agent.
+   * @brief Returns the topic of the last message receive() returned, whatever
+   * its type: JSON (including "control" messages handled by remote control),
+   * blob or shared-memory view.
    *
    * @return The topic of the last received message.
    */
@@ -1575,6 +1577,7 @@ protected:
   std::map<std::string, std::shared_ptr<LazyPayload>> _status;
   std::tuple<std::string, std::shared_ptr<LazyPayload>> _last_message;
   std::tuple<std::string, std::string, std::vector<unsigned char>> _last_blob;
+  std::string _last_topic; // of any message receive() returned
   mutable std::mutex _message_state_mutex;
   bool _cross = false;
   bool _connected = false;

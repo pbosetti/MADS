@@ -271,6 +271,34 @@ TEST_CASE("shm producer -> non-opted consumer gets an ordinary blob",
   CHECK_FALSE(sub->last_shared());
 }
 
+TEST_CASE("last_topic() follows every received message type", "[agent_shm]") {
+  mads_test::RunningGuard guard;
+  const uint16_t port = 44710;
+  auto pub = make_pub("shmpub11", port);
+  auto views = make_sub("shmsub11v", port, true);
+  auto copies = make_sub("shmsub11c", port, false);
+  const auto payload = pattern(2000, 2);
+
+  REQUIRE(retry_until([&] { pub->publish(nlohmann::json{{"x", 1}}, "j"); },
+                      [&] {
+                        return views->receive(true) == message_type::json;
+                      }));
+  CHECK(views->last_topic() == "j");
+  REQUIRE(retry_until(
+      [&] { pub->publish(payload, {{"format", "t"}}, "v"); },
+      [&] { return views->receive(true) == message_type::shared; }));
+  CHECK(views->last_topic() == "v");
+  CHECK(views->last_shared_topic() == "v");
+
+  REQUIRE(retry_until(
+      [&] { pub->publish(payload, {{"format", "t"}}, "c"); },
+      [&] {
+        auto t = copies->receive(true);
+        return t == message_type::blob && copies->last_topic() == "c";
+      }));
+  CHECK(std::get<0>(copies->last_blob()) == "c");
+}
+
 TEST_CASE("a reference frame reads as an empty blob to pre-shm receivers",
           "[agent_shm]") {
   using namespace Mads::detail;

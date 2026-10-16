@@ -1375,6 +1375,7 @@ message_type Agent::receive(bool dont_block) {
       if (_accept_shared_views) {
         std::lock_guard<std::mutex> lock(_message_state_mutex);
         _last_shared = std::move(*view);
+        _last_topic = topic;
         _last_shared_topic = std::move(topic);
         return message_type::shared;
       }
@@ -1382,6 +1383,7 @@ message_type Agent::receive(bool dont_block) {
       if (!_shm_copy_valid(*view))
         return message_type::none;
       std::lock_guard<std::mutex> lock(_message_state_mutex);
+      _last_topic = topic;
       _last_blob =
           make_tuple(std::move(topic), view->meta().dump(), std::move(bytes));
       return message_type::blob;
@@ -1401,6 +1403,7 @@ message_type Agent::receive(bool dont_block) {
           static_cast<const unsigned char *>(message.at(3).data());
       const size_t n = message.at(3).size();
       std::lock_guard<std::mutex> lock(_message_state_mutex);
+      _last_topic = topic;
       _last_blob = make_tuple(std::move(topic), std::move(meta_text),
                               vector<unsigned char>(p, p + n));
       return message_type::blob;
@@ -1417,6 +1420,8 @@ message_type Agent::receive(bool dont_block) {
     }
     if (_remote_controlled && topic == "control") {
       remote_control(pl->text());
+      std::lock_guard<std::mutex> lock(_message_state_mutex);
+      _last_topic = std::move(topic);
       return message_type::json;
     }
     // CLOCKSYNC_TOPIC is reserved and unconditionally swallowed here (not
@@ -1435,6 +1440,7 @@ message_type Agent::receive(bool dont_block) {
     auto lp = std::make_shared<LazyPayload>(std::move(*pl));
     std::lock_guard<std::mutex> lock(_message_state_mutex);
     _status[topic] = lp;
+    _last_topic = topic;
     _last_message = make_tuple(std::move(topic), std::move(lp));
     return message_type::json;
   }
@@ -1456,6 +1462,8 @@ message_type Agent::receive(bool dont_block) {
     }
     if (_remote_controlled && topic == "control") {
       remote_control(pl->text());
+      std::lock_guard<std::mutex> lock(_message_state_mutex);
+      _last_topic = std::move(topic);
       return message_type::json;
     }
     // CLOCKSYNC_TOPIC is reserved and unconditionally swallowed here (not
@@ -1474,6 +1482,7 @@ message_type Agent::receive(bool dont_block) {
     auto lp = std::make_shared<LazyPayload>(std::move(*pl));
     std::lock_guard<std::mutex> lock(_message_state_mutex);
     _status[topic] = lp;
+    _last_topic = topic;
     _last_message = make_tuple(std::move(topic), std::move(lp));
     return message_type::json;
   }
@@ -1482,6 +1491,7 @@ message_type Agent::receive(bool dont_block) {
     const auto *p = static_cast<const unsigned char *>(message.at(2).data());
     const size_t n = message.at(2).size();
     std::lock_guard<std::mutex> lock(_message_state_mutex);
+    _last_topic = topic;
     _last_blob = make_tuple(std::move(topic), std::move(format),
                             vector<unsigned char>(p, p + n));
     return message_type::blob;
@@ -2384,7 +2394,7 @@ tuple<string, nlohmann::json> Agent::last_json() {
 
 string Agent::last_topic() {
   std::lock_guard<std::mutex> lock(_message_state_mutex);
-  return get<0>(_last_message);
+  return _last_topic;
 }
 
 tuple<string, string, vector<unsigned char>> Agent::last_blob() {
