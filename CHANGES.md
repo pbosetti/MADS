@@ -15,6 +15,15 @@
 - **New option `MADS_ENABLE_GUI` replaces `MADS_DIRECTOR`.** An old cache value
   is migrated automatically, with a deprecation warning.
 - **Packages no longer ship GLFW headers, static library or CMake config.**
+- **The SDK install is pruned to what MADS headers need.** `include/` keeps the
+  MADS headers plus `zmq.h`, `zmq.hpp`, `zmq_addon.hpp`, `nlohmann/`, `toml++/`,
+  `cxxopts.hpp` and `rang.hpp`; `lib/` keeps `libMadsCore` and `lib/cmake/Mads`.
+  No longer installed: libzmq's private implementation headers (`config.hpp`,
+  `clock.hpp`, `err.hpp`, ...), the MongoDB C/C++ driver headers, snappy,
+  gv2fsm and tree-sitter headers, the static archives of vendored libraries
+  (all linked into MadsCore) and their CMake/pkg-config files. License files of
+  the statically linked libraries are still installed under `share/`. On
+  Windows, libzmq (a DLL there) is installed as before.
 
 # Release 2.5.0
 

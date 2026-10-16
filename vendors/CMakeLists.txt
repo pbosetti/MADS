@@ -230,144 +230,48 @@ if(MADS_ENABLE_MONGOCXX)
   )
 endif()
 
+# Configures a FetchContent dependency. Its own install rules are skipped:
+# MADS links every vendored library into MadsCore (or uses it at build time
+# only), so the package must not ship their static archives, CMake/pkg-config
+# files or private headers. The few headers that installed MADS headers include
+# are installed explicitly below (see "Public third-party headers").
+# The subdirectory is added EXCLUDE_FROM_ALL: its targets are still built when
+# something depends on them (MadsCore, mads-fsm), and CMake leaves such
+# directories out of the parent's install script, which would otherwise
+# include() a cmake_install.cmake that CMAKE_SKIP_INSTALL_RULES never wrote.
+#   KEEP_INSTALL_RULES YES keep the dependency's own install rules (and ALL)
 macro(add_vendor vendor_name)
   set(options)
-  set(one_value_args EXCLUDE)
+  set(one_value_args KEEP_INSTALL_RULES)
   set(multi_value_args)
   cmake_parse_arguments(ADD_VENDOR "${options}" "${one_value_args}" "${multi_value_args}" ${ARGN})
-
-  if(NOT DEFINED ADD_VENDOR_EXCLUDE)
-    set(ADD_VENDOR_EXCLUDE NO)
-  endif()
-
-  # Accept common CMake booleans for EXCLUDE.
-  if(ADD_VENDOR_EXCLUDE)
-    set(_add_vendor_exclude_from_all TRUE)
-  else()
-    set(_add_vendor_exclude_from_all FALSE)
-  endif()
 
   FetchContent_GetProperties(${vendor_name})
   if(NOT ${vendor_name}_POPULATED)
     FetchContent_Populate(${vendor_name})
-    if(_add_vendor_exclude_from_all)
-      set(_add_vendor_old_skip_install_rules "${CMAKE_SKIP_INSTALL_RULES}")
-      set(CMAKE_SKIP_INSTALL_RULES ON)
-      add_subdirectory(
-        ${${vendor_name}_SOURCE_DIR}
-        ${${vendor_name}_BINARY_DIR}
-        EXCLUDE_FROM_ALL
-      )
-      if(DEFINED _add_vendor_old_skip_install_rules)
-        set(CMAKE_SKIP_INSTALL_RULES "${_add_vendor_old_skip_install_rules}")
-      else()
-        unset(CMAKE_SKIP_INSTALL_RULES)
-      endif()
+    set(_add_vendor_old_skip_install_rules "${CMAKE_SKIP_INSTALL_RULES}")
+    if(ADD_VENDOR_KEEP_INSTALL_RULES)
+      set(_add_vendor_exclude_from_all)
     else()
-      add_subdirectory(
-        ${${vendor_name}_SOURCE_DIR}
-        ${${vendor_name}_BINARY_DIR}
-      )
+      set(_add_vendor_exclude_from_all EXCLUDE_FROM_ALL)
+      set(CMAKE_SKIP_INSTALL_RULES ON)
     endif()
-  endif()
-
-  set(_vendor_source_dir "${${vendor_name}_SOURCE_DIR}")
-  set(_vendor_binary_dir "${${vendor_name}_BINARY_DIR}")
-  set(_add_vendor_install_public_headers TRUE)
-
-  if(vendor_name STREQUAL "mongo_c_driver" OR vendor_name STREQUAL "mongo_cxx_driver")
-    set(_add_vendor_install_public_headers FALSE)
-  endif()
-
-  # Install vendor headers into the main include prefix so installed public
-  # Mads headers can resolve third-party includes.
-  if(NOT _add_vendor_exclude_from_all AND _add_vendor_install_public_headers)
-    if(EXISTS "${_vendor_source_dir}/include")
-      install(
-        DIRECTORY "${_vendor_source_dir}/include/"
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-        COMPONENT MadsCore
-        FILES_MATCHING
-          PATTERN "*.h"
-          PATTERN "*.hh"
-          PATTERN "*.hpp"
-          PATTERN "*.hxx"
-          PATTERN "*.inl"
-          PATTERN "*.inc"
-      )
-    endif()
-
-    if(EXISTS "${_vendor_source_dir}/src")
-      install(
-        DIRECTORY "${_vendor_source_dir}/src/"
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-        COMPONENT MadsCore
-        FILES_MATCHING
-          PATTERN "*.h"
-          PATTERN "*.hh"
-          PATTERN "*.hpp"
-          PATTERN "*.hxx"
-          PATTERN "*.inl"
-          PATTERN "*.inc"
-      )
-    endif()
-
-    file(
-      GLOB _vendor_root_headers
-      "${_vendor_source_dir}/*.h"
-      "${_vendor_source_dir}/*.hh"
-      "${_vendor_source_dir}/*.hpp"
-      "${_vendor_source_dir}/*.hxx"
-      "${_vendor_source_dir}/*.inl"
-      "${_vendor_source_dir}/*.inc"
+    add_subdirectory(
+      ${${vendor_name}_SOURCE_DIR}
+      ${${vendor_name}_BINARY_DIR}
+      ${_add_vendor_exclude_from_all}
     )
-    if(_vendor_root_headers)
-      install(
-        FILES ${_vendor_root_headers}
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-        COMPONENT MadsCore
-      )
-    endif()
-
-    file(
-      GLOB _vendor_generated_headers
-      "${_vendor_binary_dir}/*.h"
-      "${_vendor_binary_dir}/*.hh"
-      "${_vendor_binary_dir}/*.hpp"
-      "${_vendor_binary_dir}/*.hxx"
-      "${_vendor_binary_dir}/*.inl"
-      "${_vendor_binary_dir}/*.inc"
-    )
-    if(_vendor_generated_headers)
-      install(
-        FILES ${_vendor_generated_headers}
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-        COMPONENT MadsCore
-      )
-    endif()
+    set(CMAKE_SKIP_INSTALL_RULES "${_add_vendor_old_skip_install_rules}")
+    unset(_add_vendor_old_skip_install_rules)
+    unset(_add_vendor_exclude_from_all)
   endif()
 endmacro()
 
+# Kept for readability at the call sites: every vendor is now EXCLUDE_FROM_ALL.
 macro(add_vendor_exclude_from_all vendor_name)
-  add_vendor(${vendor_name} EXCLUDE YES)
+  add_vendor(${vendor_name})
 endmacro()
 
-function(prune_mongo_cxx_driver_installed_headers)
-  install(CODE "
-    set(_mads_install_root \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}\")
-    file(REMOVE_RECURSE
-      \"\${_mads_install_root}/${CMAKE_INSTALL_INCLUDEDIR}/mongocxx/test\"
-      \"\${_mads_install_root}/${CMAKE_INSTALL_INCLUDEDIR}/mongocxx/cmake\"
-      \"\${_mads_install_root}/${CMAKE_INSTALL_INCLUDEDIR}/mongocxx/include\"
-      \"\${_mads_install_root}/${CMAKE_INSTALL_INCLUDEDIR}/mongocxx/lib\"
-      \"\${_mads_install_root}/${CMAKE_INSTALL_INCLUDEDIR}/bsoncxx/test\"
-      \"\${_mads_install_root}/${CMAKE_INSTALL_INCLUDEDIR}/bsoncxx/cmake\"
-      \"\${_mads_install_root}/${CMAKE_INSTALL_INCLUDEDIR}/bsoncxx/include\"
-      \"\${_mads_install_root}/${CMAKE_INSTALL_INCLUDEDIR}/bsoncxx/third_party\"
-      \"\${_mads_install_root}/${CMAKE_INSTALL_INCLUDEDIR}/bsoncxx/lib\"
-    )
-  " COMPONENT MadsCore)
-endfunction()
 
 add_vendor(nlohmann_json)
 add_vendor(cxxopts)
@@ -376,18 +280,8 @@ add_vendor(tomlplusplus)
 # gv2fsm also FetchContent's inja; configure it here first so gv2fsm reuses the
 # existing target instead of reconfiguring inja with a conflicting json setup.
 add_vendor_exclude_from_all(inja)
+# Build-time only (mads-fsm): nothing of gv2fsm or its tree-sitter is installed.
 add_vendor(gv2fsm)
-# gv2fsm installs its own `gv2fsm` executable, which is identical to our
-# `mads-fsm`. We only want `mads-fsm` installed, so drop the redundant binary
-# after gv2fsm's own install rules have run. (The static library and headers are
-# still installed for SDK consumers.)
-install(CODE "
-  set(_mads_install_root \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}\")
-  file(REMOVE
-    \"\${_mads_install_root}/${CMAKE_INSTALL_BINDIR}/gv2fsm\"
-    \"\${_mads_install_root}/${CMAKE_INSTALL_BINDIR}/gv2fsm.exe\"
-  )
-")
 add_vendor_exclude_from_all(pugg)
 add_vendor_exclude_from_all(reproc)
 add_vendor_exclude_from_all(libsodium)
@@ -403,7 +297,13 @@ set(SODIUM_LIBRARIES
     "${_mads_sodium_library}"
     CACHE FILEPATH "" FORCE)
 unset(_mads_sodium_library)
-add_vendor(libzmq)
+if(WIN32)
+  # libzmq is a DLL on Windows (see BUILD_SHARED above): keep its own install
+  # rules there, so libzmq.dll, its import library and CMake files ship.
+  add_vendor(libzmq KEEP_INSTALL_RULES YES)
+else()
+  add_vendor(libzmq)
+endif()
 if(ANDROID)
   foreach(_mads_zmq_target libzmq libzmq-static)
     if(TARGET "${_mads_zmq_target}")
@@ -443,16 +343,7 @@ install(
   COMPONENT MadsCore
 )
 
-add_vendor(snappy)
-if(TARGET snappy)
-  install(
-    TARGETS snappy
-    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
-    COMPONENT MadsCore
-  )
-endif()
+add_vendor(snappy)  # statically linked into MadsCore, nothing installed
 
 if(MADS_ENABLE_MONGOCXX)
   # Force mongo-cxx-driver to bind to in-tree libmongoc/libbson targets instead
@@ -466,5 +357,39 @@ if(MADS_ENABLE_MONGOCXX)
   set(SNAPPY_LIBRARIES "$<TARGET_FILE:snappy>" CACHE STRING "" FORCE)
 
   add_vendor(mongo_cxx_driver)
-  prune_mongo_cxx_driver_installed_headers()
+endif()
+
+#
+# Public third-party headers
+#
+# Only what the installed MADS headers include (verified by preprocessing each
+# of them against the installed include dir): libzmq's zmq.h, cppzmq (above),
+# nlohmann/json, toml++, cxxopts and rang. Everything else is linked into
+# MadsCore or used at build time only.
+install(DIRECTORY "${nlohmann_json_SOURCE_DIR}/include/nlohmann"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT MadsCore)
+install(DIRECTORY "${tomlplusplus_SOURCE_DIR}/include/toml++"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT MadsCore)
+install(FILES
+    "${cxxopts_SOURCE_DIR}/include/cxxopts.hpp"
+    "${rang_SOURCE_DIR}/include/rang.hpp"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT MadsCore)
+if(NOT WIN32)
+  # On Windows libzmq's own install rules ship zmq.h (and its license).
+  install(FILES "${libzmq_SOURCE_DIR}/include/zmq.h"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT MadsCore)
+  install(FILES "${libzmq_SOURCE_DIR}/LICENSE"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/zmq" RENAME LICENSE.txt COMPONENT MadsCore)
+endif()
+
+# License/notice files of libraries statically linked into the shipped binaries.
+if(MADS_ENABLE_MONGOCXX)
+  install(FILES
+      "${mongo_c_driver_SOURCE_DIR}/COPYING"
+      "${mongo_c_driver_SOURCE_DIR}/THIRD_PARTY_NOTICES"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/mongo-c-driver" COMPONENT MadsCore)
+  install(FILES
+      "${mongo_cxx_driver_SOURCE_DIR}/LICENSE"
+      "${mongo_cxx_driver_SOURCE_DIR}/THIRD-PARTY-NOTICES"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/mongo-cxx-driver" COMPONENT MadsCore)
 endif()
