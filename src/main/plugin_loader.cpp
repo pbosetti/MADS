@@ -380,12 +380,27 @@ int main(int argc, char *argv[]) {
   // -o shm=true work too.
   if (settings.contains("shm") && settings["shm"].is_boolean() &&
       settings["shm"].get<bool>() && !agent.shared_output_enabled()) {
+    // Same rules as init(); -o values arrive as JSON, so check their type.
+    auto integer = [&](const char *key, int64_t def) -> int64_t {
+      if (!settings.contains(key))
+        return def;
+      const json &v = settings[key];
+      if (!v.is_number_integer() ||
+          (v.is_number_unsigned() &&
+           v.get<uint64_t>() >
+               static_cast<uint64_t>((numeric_limits<int64_t>::max)())))
+        throw AgentError(string(key) + " must be an integer, got " +
+                         v.dump());
+      return v.get<int64_t>();
+    };
     try {
-      agent.enable_shared_output(
-          static_cast<uint32_t>(settings.value(
-              "shm_slots", static_cast<int64_t>(detail::SHM_SLOTS_DEFAULT))),
-          static_cast<size_t>(
-              settings.value("shm_slot_size", detail::SHM_SLOT_SIZE_DEFAULT)));
+      string error;
+      auto geometry = detail::shm_geometry(
+          integer("shm_slots", detail::SHM_SLOTS_DEFAULT),
+          integer("shm_slot_size", detail::SHM_SLOT_SIZE_DEFAULT), &error);
+      if (!geometry)
+        throw AgentError("Invalid shared-memory geometry: " + error);
+      agent.enable_shared_output(geometry->slots, geometry->slot_size);
     } catch (const AgentError &e) {
       cerr << fg::red << "Error enabling shared memory: " << e.what()
            << fg::reset << endl;

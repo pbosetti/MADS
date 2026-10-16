@@ -34,6 +34,8 @@ Configuration keys
 #include "endpoint.hpp"
 
 #include <cctype>
+#include <cstdint>
+#include <limits>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -46,6 +48,31 @@ constexpr const char *TRANSPORT_CMD = "transport";
 constexpr bool BROKER_IPC_DEFAULT = true;
 constexpr int SHM_SLOTS_DEFAULT = 8;
 constexpr int64_t SHM_SLOT_SIZE_DEFAULT = 16 * 1024 * 1024;
+
+// Ring geometry from the `shm_slots`/`shm_slot_size` settings, or nullopt
+// (with a reason in *error) if out of range: at least 2 slots that fit a
+// uint32_t, and a positive slot size that fits a size_t.
+struct ShmGeometry {
+  uint32_t slots = 0;
+  size_t slot_size = 0;
+};
+
+inline std::optional<ShmGeometry> shm_geometry(int64_t slots,
+                                               int64_t slot_size,
+                                               std::string *error = nullptr) {
+  const bool slots_ok = slots >= 2 && static_cast<uint64_t>(slots) <=
+                                          (std::numeric_limits<uint32_t>::max)();
+  const bool size_ok = slot_size > 0 && static_cast<uint64_t>(slot_size) <=
+                                            (std::numeric_limits<size_t>::max)();
+  if (slots_ok && size_ok)
+    return ShmGeometry{static_cast<uint32_t>(slots),
+                       static_cast<size_t>(slot_size)};
+  if (error)
+    *error = "shm_slots = " + std::to_string(slots) +
+             " (expected 2..4294967295), shm_slot_size = " +
+             std::to_string(slot_size) + " (expected > 0)";
+  return std::nullopt;
+}
 
 enum class TransportMode { Auto, Tcp, Ipc };
 

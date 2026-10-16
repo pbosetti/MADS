@@ -487,12 +487,12 @@ void Agent::init(bool crypto, bool install_watchdog) {
     const auto slot_size =
         resolve_setting<int64_t>(all_cfg, cfg, "shm_slot_size")
             .value_or(SHM_SLOT_SIZE_DEFAULT);
-    if (slots < 2 || slots > UINT32_MAX || slot_size <= 0)
-      throw AgentError("Invalid shared-memory geometry for " + _name +
-                       ": shm_slots = " + std::to_string(slots) +
-                       ", shm_slot_size = " + std::to_string(slot_size));
-    enable_shared_output(static_cast<uint32_t>(slots),
-                         static_cast<size_t>(slot_size));
+    string error;
+    auto geometry = shm_geometry(slots, slot_size, &error);
+    if (!geometry)
+      throw AgentError("Invalid shared-memory geometry for " + _name + ": " +
+                       error);
+    enable_shared_output(geometry->slots, geometry->slot_size);
   }
 
   // Initial clock-offset measurement (source A only -- source "peer" needs

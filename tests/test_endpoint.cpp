@@ -126,3 +126,16 @@ TEST_CASE("wire header carries the shm flag", "[wire]") {
   CHECK(out.has_blob);
   CHECK_FALSE(out.has_shm);
 }
+
+TEST_CASE("shm_geometry validates the ring settings", "[shm]") {
+  auto g = shm_geometry(8, 1024);
+  REQUIRE(g);
+  CHECK(g->slots == 8);
+  CHECK(g->slot_size == 1024);
+  std::string error;
+  CHECK_FALSE(shm_geometry(1, 1024, &error));
+  CHECK(error.find("shm_slots = 1") != std::string::npos);
+  CHECK_FALSE(shm_geometry(int64_t(1) << 33, 1024));
+  CHECK_FALSE(shm_geometry(8, 0));
+  CHECK_FALSE(shm_geometry(8, -5));
+}
