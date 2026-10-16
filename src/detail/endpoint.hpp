@@ -64,6 +64,14 @@ struct Endpoint {
   }
 };
 
+// ASCII lower case (host names, hex strings).
+inline std::string to_lower(std::string s) {
+  for (auto &c : s)
+    if (c >= 'A' && c <= 'Z')
+      c = static_cast<char>(c - 'A' + 'a');
+  return s;
+}
+
 // True if `s` names a ZeroMQ endpoint MADS understands (as opposed to a
 // settings file path or "none").
 inline bool is_zmq_uri(std::string_view s) {

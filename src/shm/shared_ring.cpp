@@ -1,5 +1,6 @@
 // Mads::shm::SharedRing and SegmentCache (see shared_ring.hpp).
 #include "shm/shared_ring.hpp"
+#include "detail/endpoint.hpp"
 #include "detail/host_token.hpp"
 
 #include <cstring>
@@ -23,13 +24,6 @@ std::string to_hex(unsigned char const *bytes, size_t n) {
     s.push_back(digits[bytes[i] >> 4]);
     s.push_back(digits[bytes[i] & 0x0F]);
   }
-  return s;
-}
-
-std::string to_lower(std::string s) {
-  for (auto &c : s)
-    if (c >= 'A' && c <= 'Z')
-      c = static_cast<char>(c - 'A' + 'a');
   return s;
 }
 
@@ -296,7 +290,7 @@ std::optional<Mads::SharedView> SegmentCache::view(ShmDescriptor const &d,
   if (d.seq == 0 || (d.seq & 1))
     return fail(error, "Shared-memory descriptor has an invalid sequence " +
                            std::to_string(d.seq));
-  std::string nonce = to_lower(d.nonce);
+  std::string nonce = detail::to_lower(d.nonce);
 
   std::lock_guard lock(_mutex);
   auto it = lookup(d.segment, error);

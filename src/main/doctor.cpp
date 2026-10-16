@@ -26,6 +26,7 @@ Author(s): Paolo Bosetti
 #include "../detail/endpoint.hpp"
 #include "../detail/host_token.hpp"
 #include "../detail/plugin_protocol.hpp"
+#include "../detail/transport.hpp"
 #include "../shm/shared_segment.hpp"
 #include "../director_config.hpp"
 #include "../doctor_checks.hpp"
@@ -690,11 +691,29 @@ int main(int argc, char *argv[]) {
       auto facts = Doctor::collect_broker_transport(
           broker_uri, reply, Mads::detail::host_token(), has_ipc);
       print_result(Doctor::evaluate_broker_ipc_endpoints(facts));
-      string mode = "auto";
+      // Same precedence as the agent (detail::resolve_transport_mode()):
+      // one line for the [agents] default, and one for every agent section
+      // that overrides it.
+      optional<string> agents_mode;
+      if (config.has_value())
+        agents_mode = (*config)["agents"]["transport"].value<string>();
+      print_result(Doctor::evaluate_agent_transport(
+          facts, Mads::detail::resolve_transport_mode("", nullopt, agents_mode)));
       if (config.has_value()) {
-        mode = (*config)["agents"]["transport"].value_or(mode);
+        for (const auto &[name, node] : *config) {
+          const string section(name.str());
+          if (section == "agents" || section == "broker" || !node.is_table())
+            continue;
+          auto own = node.as_table()->get("transport");
+          if (!own)
+            continue;
+          print_result(Doctor::evaluate_agent_transport(
+              facts,
+              Mads::detail::resolve_transport_mode(
+                  "", own->value<string>(), agents_mode),
+              section));
+        }
       }
-      print_result(Doctor::evaluate_agent_transport(facts, mode));
     } else {
       cout << fg::gray << style::italic
            << "  (broker unreachable; skipping advertised-transport checks)"

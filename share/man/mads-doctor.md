@@ -69,8 +69,9 @@ By default it checks, in order:
    permissions are the only access control on ipc endpoints. When the broker is reachable, doctor
    also sends it the `transport` command, lists the ipc endpoints it advertises and whether their
    socket files exist on this host, and predicts the transport an agent started here would select,
-   applying the agent's own rules and the settings file's `[agents] transport` value. A broker that
-   predates the command is reported as offering tcp only.
+   applying the agent's own rules and the settings file's `[agents] transport` value, plus one line
+   for every agent section that sets its own `transport`. A broker that predates the command is
+   reported as offering tcp only.
 9. **Shared-memory registry** (POSIX only). Lists `<runtime dir>/shm`, where every producer
    running with `shm = true` registers its segments with its pid, and counts the orphans: segments
    whose owner is no longer running, typically after a crash, which hold memory until reboot.

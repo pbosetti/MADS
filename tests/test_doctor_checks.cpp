@@ -750,6 +750,20 @@ TEST_CASE("evaluate_agent_transport mirrors the agent's selection rules",
   REQUIRE(n.status == Status::Pass);
   REQUIRE(n.message.find("no ipc transport") != std::string::npos);
 
+  // A per-agent mode is reported under the agent's section.
+  auto own = evaluate_agent_transport(remote, "ipc", "camera");
+  REQUIRE(own.status == Status::Fail);
+  REQUIRE(own.message.find("Agent camera") != std::string::npos);
+  REQUIRE(own.fix_hint.find("[camera]") != std::string::npos);
+  REQUIRE(evaluate_agent_transport(remote, "bogus", "camera")
+              .message.find("[camera] transport") != std::string::npos);
+
+  // No answer at all is reported as such, not as an old broker.
+  auto silent = collect_broker_transport(tcp, std::nullopt, "h", true);
+  auto s = evaluate_agent_transport(silent, "auto");
+  REQUIRE(s.status == Status::Pass);
+  REQUIRE(s.message.find("did not answer") != std::string::npos);
+
   fs::remove(back);
   auto gone =
       collect_broker_transport(tcp, transport_json("h", fe, be), "h", true);

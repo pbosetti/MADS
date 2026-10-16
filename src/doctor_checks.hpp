@@ -249,11 +249,15 @@ CheckResult evaluate_broker_ipc_endpoints(const BrokerTransportFacts &facts);
  * when the mode is not "tcp", this libzmq has ipc, the broker offers
  * frontend and backend ipc endpoints, the broker's host token matches ours
  * (skipped when settings are themselves fetched over ipc) and the socket
- * files are visible. `mode` is the [agents] transport value ("auto" when
- * unset); an unknown value fails, like it does in the agent.
+ * files are visible. The decision itself is the agent's own
+ * (detail::choose_transport()). `mode` is the transport value resolved like
+ * the agent does ([<agent>] transport, else [agents] transport, else
+ * "auto"); an unknown value fails, like it does in the agent. `agent` names
+ * the agent section the mode came from, or is empty for [agents].
  */
 CheckResult evaluate_agent_transport(const BrokerTransportFacts &facts,
-                                     const std::string &mode);
+                                     const std::string &mode,
+                                     const std::string &agent = "");
 
 /* ---- 10. Shared-memory segment registry -----------------------------------
    POSIX producers register every shared-memory segment they create as

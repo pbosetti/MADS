@@ -507,26 +507,12 @@ BrokerTransportFacts collect_broker_transport(
     BrokerTransportFacts::IpcEndpoint ep;
     ep.role = role;
     ep.endpoint = endpoint;
-    if (auto e = detail::parse_endpoint(endpoint); e && e->is_ipc()) {
-      // symlink_status(): a Windows AF_UNIX socket file is a reparse point
-      // that status() may fail to follow (same as the agent's own test).
-      std::error_code ec;
-      ep.file_exists = fs::exists(fs::symlink_status(e->path, ec));
-    }
+    if (auto e = detail::parse_endpoint(endpoint); e && e->is_ipc())
+      ep.file_exists = detail::socket_file_exists(e->path);
     f.endpoints.push_back(std::move(ep));
   }
   return f;
 }
-
-namespace {
-bool offers_data_ipc(const BrokerTransportFacts &f) {
-  int n = 0;
-  for (const auto &ep : f.endpoints)
-    if ((ep.role == "frontend" || ep.role == "backend") && !ep.endpoint.empty())
-      ++n;
-  return n == 2;
-}
-} // namespace
 
 CheckResult evaluate_broker_ipc_endpoints(const BrokerTransportFacts &facts) {
   CheckResult r;
@@ -581,63 +567,84 @@ CheckResult evaluate_broker_ipc_endpoints(const BrokerTransportFacts &facts) {
 }
 
 CheckResult evaluate_agent_transport(const BrokerTransportFacts &facts,
-                                     const std::string &mode) {
+                                     const std::string &mode,
+                                     const std::string &agent) {
   CheckResult r;
   r.name = "agent_transport";
-  if (mode != "auto" && mode != "tcp" && mode != "ipc") {
+  const std::string who =
+      agent.empty() ? "Agents on this host" : "Agent " + agent + " on this host";
+  const std::string key =
+      agent.empty() ? "[agents] transport" : "[" + agent + "] transport";
+  const auto parsed_mode = detail::parse_transport_mode(mode);
+  if (!parsed_mode) {
     r.status = Status::Fail;
-    r.message = "Invalid [agents] transport = \"" + mode +
-                "\": agents will refuse to start.";
+    r.message = "Invalid " + key + " = \"" + mode +
+                "\": " + (agent.empty() ? "agents" : "the agent") +
+                " will refuse to start.";
     r.fix_hint = "Use \"auto\", \"tcp\" or \"ipc\".";
     return r;
   }
-  if (mode == "tcp") {
+  if (*parsed_mode == detail::TransportMode::Tcp) {
     r.status = Status::Pass;
-    r.message = "Agents on this host use tcp (transport = \"tcp\").";
+    r.message = who + " use" + (agent.empty() ? "" : "s") +
+                " tcp (transport = \"tcp\").";
     return r;
   }
 
-  const bool settings_over_ipc =
-      facts.uri.rfind("ipc://", 0) == 0;
-  std::string why_not;
-  if (!facts.local_has_ipc) {
-    why_not = "this libzmq has no ipc transport";
-  } else if (!facts.replied) {
-    why_not = "the broker did not answer";
-  } else if (!facts.supported) {
-    why_not = "the broker predates the transport command";
-  } else if (!offers_data_ipc(facts)) {
-    why_not = "the broker offers no ipc endpoints";
-  } else if (!settings_over_ipc &&
-             facts.broker_host_token != facts.local_host_token) {
-    why_not = "the broker runs on another host";
-  } else {
+  // The agent's own decision (detail::choose_transport()), fed with what the
+  // broker advertised and which socket files this host can see.
+  std::optional<detail::TransportInfo> info;
+  if (facts.supported) {
+    detail::TransportInfo t;
+    t.host_token = facts.broker_host_token;
+    t.curve = facts.curve;
     for (const auto &ep : facts.endpoints) {
-      if ((ep.role == "frontend" || ep.role == "backend") && !ep.file_exists) {
-        why_not = "the ipc socket " + ep.endpoint + " is not reachable here";
-        break;
-      }
+      if (ep.role == "frontend")
+        t.frontend_ipc = ep.endpoint;
+      else if (ep.role == "backend")
+        t.backend_ipc = ep.endpoint;
+      else if (ep.role == "settings")
+        t.settings_ipc = ep.endpoint;
     }
+    info = std::move(t);
+  }
+  auto seen_here = [&facts](const std::string &path) {
+    for (const auto &ep : facts.endpoints) {
+      auto e = detail::parse_endpoint(ep.endpoint);
+      if (e && e->is_ipc() && e->path == path)
+        return ep.file_exists;
+    }
+    return false;
+  };
+  auto choice =
+      detail::choose_transport(*parsed_mode, facts.uri, info,
+                               facts.local_host_token, facts.local_has_ipc,
+                               seen_here);
+  // No reply at all is not a broker that predates the command.
+  const std::string no_answer = "the broker did not answer";
+  if (!facts.replied && facts.local_has_ipc && !choice.ipc) {
+    choice.why_not = no_answer;
+    if (!choice.error.empty())
+      choice.error = *parsed_mode == detail::TransportMode::Ipc
+                         ? "transport = ipc requested, but " + no_answer
+                         : "Settings were fetched over " + facts.uri +
+                               ", but " + no_answer;
   }
 
-  if (why_not.empty()) {
+  if (choice.ipc) {
     r.status = Status::Pass;
-    r.message = "Agents on this host would use ipc (transport = \"" + mode +
-                "\").";
+    r.message = who + " would use ipc (transport = \"" + mode + "\").";
     return r;
   }
-  if (mode == "ipc" || settings_over_ipc) {
+  if (!choice.error.empty()) {
     r.status = Status::Fail;
-    r.message = "Agents on this host would refuse to start: " +
-                std::string(mode == "ipc" ? "transport = \"ipc\"" :
-                                            "settings fetched over ipc") +
-                ", but " + why_not + ".";
-    r.fix_hint = "Set transport = \"auto\" (or \"tcp\") in [agents], or use a "
-                 "tcp:// settings URI.";
+    r.message = who + " would refuse to start: " + choice.error + ".";
+    r.fix_hint = "Set transport = \"auto\" (or \"tcp\") in " +
+                 key.substr(0, key.find(' ')) + ", or use a tcp:// settings URI.";
     return r;
   }
   r.status = Status::Pass;
-  r.message = "Agents on this host would use tcp: " + why_not + ".";
+  r.message = who + " would use tcp: " + choice.why_not + ".";
   return r;
 }
 

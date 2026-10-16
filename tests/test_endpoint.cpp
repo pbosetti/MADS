@@ -4,7 +4,9 @@
 // (src/detail/runtime_dir.hpp) and the wire header's shm flag.
 #include <catch2/catch_test_macros.hpp>
 
+#include <optional>
 #include <string>
+#include <vector>
 
 #include "detail/endpoint.hpp"
 #include "detail/host_token.hpp"
@@ -125,6 +127,78 @@ TEST_CASE("wire header carries the shm flag", "[wire]") {
   REQUIRE(parse_wire_header(b, out));
   CHECK(out.has_blob);
   CHECK_FALSE(out.has_shm);
+}
+
+TEST_CASE("resolve_transport_mode applies CLI > agent > agents > auto",
+          "[transport]") {
+  CHECK(resolve_transport_mode("", std::nullopt, std::nullopt) == "auto");
+  CHECK(resolve_transport_mode("", std::nullopt, "tcp") == "tcp");
+  CHECK(resolve_transport_mode("", "ipc", "tcp") == "ipc");
+  CHECK(resolve_transport_mode("tcp", "ipc", "auto") == "tcp");
+}
+
+TEST_CASE("choose_transport is the agent's transport decision",
+          "[transport]") {
+  TransportInfo info;
+  info.host_token = "me/1";
+  info.frontend_ipc = "ipc:///run/f.ipc";
+  info.backend_ipc = "ipc:///run/b.ipc";
+  auto all_there = [](std::string const &) { return true; };
+  auto none_there = [](std::string const &) { return false; };
+  const std::string tcp = "tcp://localhost:9092";
+
+  auto c = choose_transport(TransportMode::Auto, tcp, info, "me/1", true,
+                            all_there);
+  CHECK(c.ipc);
+  CHECK(c.error.empty());
+
+  // The predicate gets the socket path, not the endpoint.
+  std::vector<std::string> asked;
+  choose_transport(TransportMode::Auto, tcp, info, "me/1", true,
+                   [&](std::string const &p) {
+                     asked.push_back(p);
+                     return true;
+                   });
+  CHECK(asked == std::vector<std::string>{"/run/f.ipc", "/run/b.ipc"});
+
+  c = choose_transport(TransportMode::Tcp, tcp, info, "me/1", true, all_there);
+  CHECK_FALSE(c.ipc);
+  CHECK(c.error.empty());
+
+  c = choose_transport(TransportMode::Auto, tcp, info, "other/2", true,
+                       all_there);
+  CHECK_FALSE(c.ipc);
+  CHECK(c.why_not.find("another host") != std::string::npos);
+  CHECK(c.error.empty());
+  c = choose_transport(TransportMode::Ipc, tcp, info, "other/2", true,
+                       all_there);
+  CHECK(c.error.find("transport = ipc requested") != std::string::npos);
+
+  // Settings over ipc: no host-token check, but a failure is fatal.
+  c = choose_transport(TransportMode::Auto, "ipc:///run/s.ipc", info,
+                       "other/2", true, all_there);
+  CHECK(c.ipc);
+  c = choose_transport(TransportMode::Auto, "ipc:///run/s.ipc", info, "me/1",
+                       true, none_there);
+  CHECK_FALSE(c.ipc);
+  CHECK(c.why_not.find("not reachable") != std::string::npos);
+  CHECK(c.error.find("Settings were fetched over") != std::string::npos);
+
+  c = choose_transport(TransportMode::Auto, tcp, std::nullopt, "me/1", true,
+                       all_there);
+  CHECK(c.why_not.find("predates") != std::string::npos);
+  c = choose_transport(TransportMode::Auto, tcp, info, "me/1", false,
+                       all_there);
+  CHECK(c.why_not.find("no ipc transport") != std::string::npos);
+
+  // Settings from a file: tcp, and transport = ipc is an error.
+  c = choose_transport(TransportMode::Auto, "mads.ini", info, "me/1", true,
+                       all_there);
+  CHECK_FALSE(c.ipc);
+  CHECK(c.error.empty());
+  c = choose_transport(TransportMode::Ipc, "mads.ini", info, "me/1", true,
+                       all_there);
+  CHECK(c.error.find("needs settings from a broker") != std::string::npos);
 }
 
 TEST_CASE("shm_geometry validates the ring settings", "[shm]") {

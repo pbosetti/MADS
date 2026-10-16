@@ -33,8 +33,8 @@ Configuration keys
 
 #include "endpoint.hpp"
 
-#include <cctype>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -141,6 +141,96 @@ inline std::optional<TransportInfo> parse_transport_reply(std::string_view s) {
   return j.get<TransportInfo>();
 }
 
+// The transport mode string by precedence: CLI/API override > [<agent>]
+// transport > [agents] transport > "auto". Empty/absent values defer.
+inline std::string
+resolve_transport_mode(std::string const &override_mode,
+                       std::optional<std::string> const &agent_value,
+                       std::optional<std::string> const &agents_value) {
+  if (!override_mode.empty())
+    return override_mode;
+  if (agent_value)
+    return *agent_value;
+  if (agents_value)
+    return *agents_value;
+  return "auto";
+}
+
+// Tells whether an ipc socket file is visible from here (injectable for
+// tests; normally Mads::detail::socket_file_exists()).
+using SocketExistsFn = std::function<bool(std::string const &path)>;
+
+// Why an agent on this host cannot use the broker's ipc endpoints, or "" if
+// it can. `info` is the parsed `transport` reply (nullopt: none, or a broker
+// that predates the command). With settings fetched over ipc the broker is
+// reachable through this host's filesystem already, so the host-token check
+// is skipped (containers that share a socket directory need not share a
+// hostname).
+inline std::string ipc_unusable_reason(std::optional<TransportInfo> const &info,
+                                       bool settings_over_ipc,
+                                       std::string const &own_token,
+                                       bool has_ipc,
+                                       SocketExistsFn const &socket_exists) {
+  if (!has_ipc)
+    return "this libzmq build has no ipc transport";
+  if (!info)
+    return "the broker does not offer ipc (it predates the transport "
+           "command)";
+  if (!info->offers_ipc())
+    return "the broker does not offer ipc endpoints (ipc disabled or "
+           "unavailable on the broker)";
+  if (!settings_over_ipc && info->host_token != own_token)
+    return "the broker runs on another host";
+  for (auto const *ep : {&info->frontend_ipc, &info->backend_ipc}) {
+    auto e = parse_endpoint(*ep);
+    if (!e || !e->is_ipc() || !socket_exists(e->path))
+      return "the ipc socket " + *ep + " is not reachable from here";
+  }
+  return {};
+}
+
+// The transport an agent selects (Agent::_select_transport(), and what
+// `mads doctor` predicts).
+struct TransportChoice {
+  bool ipc = false;    // use info's frontend/backend ipc endpoints
+  std::string why_not; // why not ipc, when !ipc
+  std::string error;   // non-empty: the agent refuses to start
+};
+
+inline TransportChoice
+choose_transport(TransportMode mode, std::string const &settings_uri,
+                 std::optional<TransportInfo> const &info,
+                 std::string const &own_token, bool has_ipc,
+                 SocketExistsFn const &socket_exists) {
+  TransportChoice c;
+  if (!is_zmq_uri(settings_uri)) {
+    if (mode == TransportMode::Ipc)
+      c.error = "transport = ipc needs settings from a broker, not " +
+                settings_uri;
+    else
+      c.why_not = "settings come from a file, not from a broker";
+    return c;
+  }
+  if (mode == TransportMode::Tcp) {
+    c.why_not = "transport = tcp";
+    return c;
+  }
+  auto s_ep = parse_endpoint(settings_uri);
+  const bool settings_over_ipc = s_ep && !s_ep->is_tcp();
+  c.why_not = ipc_unusable_reason(info, settings_over_ipc, own_token, has_ipc,
+                                  socket_exists);
+  if (c.why_not.empty()) {
+    c.ipc = true;
+    return c;
+  }
+  if (mode == TransportMode::Ipc)
+    c.error = "transport = ipc requested, but " + c.why_not;
+  else if (settings_over_ipc)
+    c.error = "Settings were fetched over " + settings_uri + ", but " +
+              c.why_not + ": use a tcp:// settings URI, or set transport = tcp";
+  return c;
+}
+
 // Whether a shared-memory producer may publish ring references: its broker
 // (and hence, normally, its consumers) must run on this host. Returns "" if
 // so, or the reason why not. Pure, for testability; Agent passes its own
@@ -169,19 +259,14 @@ inline std::string shm_unusable_reason(std::string_view transport,
   if (!ep)
     return "cannot tell where the broker runs (endpoint '" +
            std::string(pub_endpoint) + "')";
-  auto lower = [](std::string s) {
-    for (auto &c : s)
-      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    return s;
-  };
-  std::string host = lower(ep->host);
+  std::string host = to_lower(ep->host);
   if (host.size() > 2 && host.front() == '[' && host.back() == ']')
     host = host.substr(1, host.size() - 2);
   if (host == "localhost" || host == "::1" || host == "*" ||
       host == "0.0.0.0" || host.rfind("127.", 0) == 0)
     return {};
   // This host's name, short or fully qualified on either side.
-  std::string own_host = lower(own_token.substr(0, own_token.find('/')));
+  std::string own_host = to_lower(own_token.substr(0, own_token.find('/')));
   if (!own_host.empty() &&
       (host == own_host || own_host.rfind(host + ".", 0) == 0 ||
        host.rfind(own_host + ".", 0) == 0))

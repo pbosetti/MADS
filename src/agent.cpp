@@ -24,6 +24,7 @@
 #include "detail/endpoint.hpp"
 #include "detail/host_token.hpp"
 #include "detail/plugin_cache.hpp"
+#include "detail/runtime_dir.hpp"
 #include "detail/socket_options.hpp"
 #include "detail/transport.hpp"
 #include "detail/wire_format.hpp"
@@ -131,41 +132,6 @@ toml::table default_agent_section(const string &name) {
 // an empty frame), so this only bounds a non-conforming settings server,
 // which must cost a short wait and a tcp fallback, not a hang.
 constexpr int TRANSPORT_QUERY_TIMEOUT_MS = 2000;
-
-bool ipc_file_exists(const string &endpoint) {
-  auto e = parse_endpoint(endpoint);
-  if (!e || !e->is_ipc())
-    return false;
-  // symlink_status(): a Windows AF_UNIX socket file is a reparse point that
-  // status() may fail to follow.
-  std::error_code ec;
-  return filesystem::exists(filesystem::symlink_status(e->path, ec));
-}
-
-// Why the broker's ipc endpoints cannot be used, or "" if they can. With
-// settings fetched over ipc the broker is reachable through this host's
-// filesystem already, so the host-token check is skipped (containers that
-// share a socket directory need not share a hostname).
-string ipc_unusable_reason(const string &transport_reply,
-                           bool settings_over_ipc, TransportInfo &info) {
-  if (!zmq_has("ipc"))
-    return "this libzmq build has no ipc transport";
-  auto parsed = parse_transport_reply(transport_reply);
-  if (!parsed)
-    return "the broker does not offer ipc (it predates the transport "
-           "command)";
-  info = *parsed;
-  if (!info.offers_ipc())
-    return "the broker does not offer ipc endpoints (ipc disabled or "
-           "unavailable on the broker)";
-  if (!settings_over_ipc && info.host_token != host_token())
-    return "the broker runs on another host";
-  for (auto const *ep : {&info.frontend_ipc, &info.backend_ipc}) {
-    if (!ipc_file_exists(*ep))
-      return "the ipc socket " + *ep + " is not reachable from here";
-  }
-  return {};
-}
 
 } // namespace
 
@@ -523,11 +489,9 @@ void Agent::_select_transport() {
   auto all_cfg = _config["agents"];
   auto cfg = _config[_name];
 
-  // CLI/API override > [<agent>] transport > [agents] transport > "auto"
-  string mode_str = _transport_mode_override;
-  if (mode_str.empty())
-    mode_str = cfg["transport"].value_or(
-        all_cfg["transport"].value_or(string("auto")));
+  const string mode_str = resolve_transport_mode(
+      _transport_mode_override, cfg["transport"].value<string>(),
+      all_cfg["transport"].value<string>());
   auto mode = parse_transport_mode(mode_str);
   if (!mode)
     throw AgentError("Invalid transport '" + mode_str +
@@ -538,16 +502,10 @@ void Agent::_select_transport() {
   _pub_endpoint = all_cfg["frontend_address"].value_or(FRONTEND_URI);
   _sub_endpoint = all_cfg["backend_address"].value_or(BACKEND_URI);
 
-  bool settings_over_ipc = false;
-  if (settings_are_local()) {
-    if (*mode == TransportMode::Ipc)
-      throw AgentError("transport = ipc needs settings from a broker, not " +
-                       _settings_uri);
-  } else {
+  if (!settings_are_local()) {
     auto s_ep = parse_endpoint(_settings_uri);
     if (!s_ep)
       throw AgentError("Invalid settings URI: " + _settings_uri);
-    settings_over_ipc = !s_ep->is_tcp();
     if (s_ep->is_tcp()) {
       // The [agents] addresses name the broker as seen from its own host
       // (typically localhost): point them at the host the settings came from.
@@ -566,24 +524,17 @@ void Agent::_select_transport() {
   _tcp_pub_endpoint = _pub_endpoint;
   _tcp_sub_endpoint = _sub_endpoint;
 
-  if (settings_are_local() || *mode == TransportMode::Tcp)
-    return;
-
-  TransportInfo info;
-  const string why_not =
-      ipc_unusable_reason(_transport_reply, settings_over_ipc, info);
-  if (why_not.empty()) {
-    _pub_endpoint = info.frontend_ipc;
-    _sub_endpoint = info.backend_ipc;
+  const auto info = parse_transport_reply(_transport_reply);
+  const auto choice = choose_transport(
+      *mode, _settings_uri, info, host_token(), zmq_has("ipc") != 0,
+      [](string const &path) { return socket_file_exists(path); });
+  if (!choice.error.empty())
+    throw AgentError(choice.error);
+  if (choice.ipc) {
+    _pub_endpoint = info->frontend_ipc;
+    _sub_endpoint = info->backend_ipc;
     _transport = "ipc";
-    return;
   }
-  if (*mode == TransportMode::Ipc)
-    throw AgentError("transport = ipc requested, but " + why_not);
-  if (settings_over_ipc)
-    throw AgentError("Settings were fetched over " + _settings_uri +
-                     ", but " + why_not +
-                     ": use a tcp:// settings URI, or set transport = tcp");
 }
 
 void Agent::load_settings() {}
