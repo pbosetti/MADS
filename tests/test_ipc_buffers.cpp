@@ -15,6 +15,7 @@
 #include "detail/socket_options.hpp"
 
 #ifndef _WIN32
+#include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
@@ -64,6 +65,28 @@ TEST_CASE("with_ipc_buffers restores the socket options afterwards",
 }
 
 #ifndef _WIN32
+namespace {
+int sndbuf_of(int fd) {
+  int v = 0;
+  socklen_t len = sizeof v;
+  REQUIRE(getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &v, &len) == 0);
+  return v;
+}
+
+// What the kernel reports for a fresh socket of `domain` once its send
+// buffer is explicitly set to `size`. Kernels adjust the request (Linux
+// doubles it and caps it to net.core.wmem_max), so this, not `size`, is
+// the value a connection that got `size` shows.
+int explicit_sndbuf(int domain, int size) {
+  const int s = ::socket(domain, SOCK_STREAM, 0);
+  REQUIRE(s >= 0);
+  REQUIRE(setsockopt(s, SOL_SOCKET, SO_SNDBUF, &size, sizeof size) == 0);
+  const int v = sndbuf_of(s);
+  ::close(s);
+  return v;
+}
+} // namespace
+
 // The accepted connection's file descriptor comes with ZMQ_EVENT_ACCEPTED.
 TEST_CASE("an ipc endpoint gets the ipc buffers, a tcp one on the same "
           "socket does not",
@@ -101,15 +124,12 @@ TEST_CASE("an ipc endpoint gets the ipc buffers, a tcp one on the same "
     std::memcpy(&value, static_cast<const char *>(ev.data()) + 2, 4);
     fds[addr.to_string()] = static_cast<int>(value);
   }
-  auto sndbuf_of = [](int fd) {
-    int v = 0;
-    socklen_t len = sizeof v;
-    REQUIRE(getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &v, &len) == 0);
-    return v;
-  };
-  // Linux reports twice the requested size; macOS reports it as is.
-  CHECK(sndbuf_of(fds.at(ipc_ep)) >= ipc_size);
-  CHECK(sndbuf_of(fds.at(tcp_ep)) < ipc_size);
+  // The ipc connection got exactly the ipc size (as the kernel adjusts it)...
+  CHECK(sndbuf_of(fds.at(ipc_ep)) == explicit_sndbuf(AF_UNIX, ipc_size));
+  // ...the tcp one did not: it keeps the OS default and its autotuning,
+  // which on Linux loopback can well exceed 1 MiB -- so compare with an
+  // explicitly sized tcp socket rather than with the size itself.
+  CHECK(sndbuf_of(fds.at(tcp_ep)) != explicit_sndbuf(AF_INET, ipc_size));
   CHECK(server.get(zmq::sockopt::sndbuf) == -1);
 
   c1.close();

@@ -75,6 +75,16 @@ unedited settings file behaves exactly as before they existed.
    `[agents]`. Needs the libzmq patch MADS builds with (stock libzmq 4.3.5
    applies socket buffer sizes to tcp only).
 
+   On Linux the kernel silently caps every buffer request at
+   `net.core.wmem_max` (send) and `net.core.rmem_max` (receive): about 208
+   KiB on a stock install, which is also the AF_UNIX default, so there the
+   1 MiB default has no effect until the limits are raised, e.g.
+
+       sudo sysctl -w net.core.wmem_max=4194304 net.core.rmem_max=4194304
+
+   (make it permanent with a file in `/etc/sysctl.d/`). macOS caps at
+   `kern.ipc.maxsockbuf`, 8 MiB by default, so 1 MiB applies as is.
+
 **heartbeat_ivl**, **heartbeat_ttl**, **heartbeat_timeout** (`[agents]`, integer, milliseconds)
 :  Makes libzmq exchange ZMTP `PING`/`PONG` commands, the only
    transport-level liveness MADS has -- without it, a half-open connection
