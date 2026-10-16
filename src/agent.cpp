@@ -1201,35 +1201,34 @@ void Agent::_shm_warn(ShmIssue cause, string const &msg) {
 
 optional<SharedView> Agent::_resolve_shm(string const &meta_part,
                                          uint8_t format, uint8_t compression) {
-  string meta_text;
+  // Hot path: MsgPack straight into the DOM, no JSON text in between.
   nlohmann::json meta;
   ShmDescriptor d;
   try {
-    if (!decode_to_json_text(meta_part, format, compression, meta_text))
+    if (!decode_to_json(meta_part, format, compression, meta))
       throw std::runtime_error("undecodable meta");
-    meta = nlohmann::json::parse(meta_text);
     d = meta.at("shm").get<ShmDescriptor>();
     meta.erase("shm");
   } catch (...) {
     _dropped_messages++;
     return std::nullopt;
   }
-  if (d.host != host_token()) {
-    _shm_failed++;
-    _shm_warn(ShmIssue::ForeignHost,
-              "shm reference from a foreign host (" + d.host +
-                  "); disable shm on the producer or use a bridge");
-    return std::nullopt;
-  }
   if (!_shm_cache)
     _shm_cache = make_shared<shm::SegmentCache>();
+  // view() checks everything, the producer's host first.
   string error;
   auto view = _shm_cache->view(d, std::move(meta), &error);
   if (!view) {
     _shm_failed++;
-    const bool overwritten = error.find("overwritten") != string::npos;
-    _shm_warn(overwritten ? ShmIssue::Overwritten : ShmIssue::Unavailable,
-              "dropping shm reference: " + error);
+    if (d.host != host_token())
+      _shm_warn(ShmIssue::ForeignHost,
+                "shm reference from a foreign host (" + d.host +
+                    "); disable shm on the producer or use a bridge");
+    else
+      _shm_warn(error.find("overwritten") != string::npos
+                    ? ShmIssue::Overwritten
+                    : ShmIssue::Unavailable,
+                "dropping shm reference: " + error);
   }
   return view;
 }

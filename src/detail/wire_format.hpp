@@ -129,6 +129,27 @@ inline std::string encode_payload(const nlohmann::json &j, WireFormat fmt) {
   return j.dump();
 }
 
+// Decode an encoded payload straight into a JSON DOM, with no text round
+// trip for MsgPack. Returns false on any decompression/decoding failure.
+inline bool decode_to_json(const std::string &raw, uint8_t format,
+                           uint8_t comp, nlohmann::json &out) {
+  const std::string *bytes = &raw;
+  std::string uncompressed;
+  if (comp == static_cast<uint8_t>(Comp::Snappy)) {
+    if (!snappy::Uncompress(raw.data(), raw.size(), &uncompressed))
+      return false;
+    bytes = &uncompressed;
+  }
+  try {
+    out = format == static_cast<uint8_t>(WireFormat::MsgPack)
+              ? nlohmann::json::from_msgpack(*bytes)
+              : nlohmann::json::parse(*bytes);
+  } catch (...) {
+    return false;
+  }
+  return true;
+}
+
 // Materialise an encoded payload into JSON *text* (the representation the
 // rest of MADS expects). Returns false on any decompression/decoding
 // failure.
