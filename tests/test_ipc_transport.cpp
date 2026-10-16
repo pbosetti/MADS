@@ -59,6 +59,18 @@ using namespace Mads::detail;
 
 namespace {
 
+// fs::exists() throws on a Windows AF_UNIX socket file (a reparse point that
+// status() cannot follow); symlink_status() works on every platform.
+bool socket_file_exists(fs::path const &p) {
+  std::error_code ec;
+  return fs::exists(fs::symlink_status(p, ec));
+}
+
+// The ipc endpoint for `file` in `dir`, joined with the native separator.
+std::string ipc_in(fs::path const &dir, std::string const &file) {
+  return "ipc://" + (dir / file).string();
+}
+
 // A short, per-test ipc directory under the runtime dir, removed on exit.
 struct IpcDir {
   fs::path path;
@@ -298,9 +310,9 @@ TEST_CASE("resolve_broker_ipc derives per-role endpoints from the tcp ports",
   auto r = resolve_broker_ipc(cfg["broker"], "tcp://*:9090", "tcp://*:9091",
                               "tcp://*:9092");
   CHECK(r.warnings.empty());
-  CHECK(r.frontend == "ipc:///tmp/x/broker-9090-front.ipc");
-  CHECK(r.backend == "ipc:///tmp/x/broker-9091-back.ipc");
-  CHECK(r.settings == "ipc:///tmp/x/broker-9092-settings.ipc");
+  CHECK(r.frontend == ipc_in("/tmp/x", "broker-9090-front.ipc"));
+  CHECK(r.backend == ipc_in("/tmp/x", "broker-9091-back.ipc"));
+  CHECK(r.settings == ipc_in("/tmp/x", "broker-9092-settings.ipc"));
 
   SECTION("ipc = false disables every endpoint") {
     toml::table off = toml::parse("[broker]\nipc = false\n");
@@ -327,14 +339,14 @@ TEST_CASE("resolve_broker_ipc derives per-role endpoints from the tcp ports",
                                 "tcp://*:9092");
     CHECK(d.frontend == "ipc:///tmp/x/f.ipc");
     CHECK(d.backend.empty());
-    CHECK(d.settings == "ipc:///tmp/x/broker-9092-settings.ipc");
+    CHECK(d.settings == ipc_in("/tmp/x", "broker-9092-settings.ipc"));
     CHECK(d.warnings.size() == 1);
   }
   SECTION("a tcp address without a numeric port needs an override") {
     auto d = resolve_broker_ipc(cfg["broker"], "tcp://*:*", "tcp://*:9091",
                                 "tcp://*:9092");
     CHECK(d.frontend.empty());
-    CHECK(d.backend == "ipc:///tmp/x/broker-9091-back.ipc");
+    CHECK(d.backend == ipc_in("/tmp/x", "broker-9091-back.ipc"));
     CHECK(d.warnings.size() == 1);
   }
 }
@@ -395,11 +407,11 @@ TEST_CASE("bind_broker_ipc replaces a stale socket file but never a live one",
   second.close();
   ctx.close();
   // libzmq 4.3.5 leaves the file behind on close: removing it is ours.
-  CHECK(fs::exists(path));
+  CHECK(socket_file_exists(path));
   file2.remove(); // never claimed: a no-op
-  CHECK(fs::exists(path));
+  CHECK(socket_file_exists(path));
   file1.remove();
-  CHECK_FALSE(fs::exists(path));
+  CHECK_FALSE(socket_file_exists(path));
 }
 
 TEST_CASE("bind_broker_ipc refuses to replace a file that is not a socket",
@@ -434,7 +446,7 @@ TEST_CASE("the broker's transport reply offers its bound ipc endpoints",
   CHECK(info->backend_ipc == broker.ipc.backend);
   CHECK(info->settings_ipc == broker.ipc.settings);
   CHECK_FALSE(info->curve);
-  CHECK(fs::exists(parse_endpoint(info->frontend_ipc)->path));
+  CHECK(socket_file_exists(parse_endpoint(info->frontend_ipc)->path));
 
   // The same command answered over the ipc settings endpoint itself.
   auto again =
