@@ -73,6 +73,15 @@ int main(int argc, char *argv[]) {
     // network round-trip and no mads.ini section required (Agent::init(),
     // src/agent.cpp). Passing -s/--settings overrides this back to the
     // normal broker-query/local-file path other mads-* executables use.
+    // Settings that have no [echo] section (typically a broker found with
+    // -r/--room) are fine too: echo then subscribes to everything, using the
+    // rest of those settings (endpoints) as served.
+    echo.fetch_settings(options_parsed, "none");
+    if (echo.add_default_section()) {
+      cout << fg::gray << style::italic << "No [" << echo.name()
+           << "] section in settings: subscribing to all topics" << style::reset
+           << fg::reset << endl;
+    }
     echo.init(options_parsed, "none");
   } catch (const std::exception &e) {
     cerr << fg::red << "Error initializing agent: " << e.what() << fg::reset

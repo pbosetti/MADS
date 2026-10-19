@@ -113,6 +113,13 @@ ClockSource clock_source_from_name(const string &s) {
   return ClockSource::None;
 }
 
+// The section an agent gets when its settings do not name it: what the
+// zero-config "none" settings URI builds, and what add_default_section()
+// inserts. Publishes on its own name, subscribes to everything.
+toml::table default_agent_section(const string &name) {
+  return toml::table{{"pub_topic", name}, {"sub_topic", toml::array{""}}};
+}
+
 } // namespace
 
 unique_ptr<Agent> start_agent(string name, string settings_uri,
@@ -280,11 +287,7 @@ void Agent::fetch_settings(bool crypto) {
   }
   string attachment;
   if (_settings_uri == "none") {
-    stringstream ss;
-    ss << "[" << _name << "]\n";
-    ss << "pub_topic = \"" << _name << "\"\n";
-    ss << "sub_topic = [\"\"]\n";
-    _config = toml::parse(ss.str());
+    _config = toml::table{{_name, default_agent_section(_name)}};
   }
   // Load config URI/file
   else if (settings_are_local()) {
@@ -316,6 +319,18 @@ void Agent::fetch_settings(bool crypto) {
   }
 
   _settings_fetched = true;
+}
+
+bool Agent::add_default_section() {
+  if (!_settings_fetched) {
+    throw AgentError("add_default_section() called before settings were "
+                     "fetched");
+  }
+  if (_config[_name].type() == toml::node_type::table) {
+    return false;
+  }
+  _config.insert_or_assign(_name, default_agent_section(_name));
+  return true;
 }
 
 void Agent::init(bool crypto, bool install_watchdog) {

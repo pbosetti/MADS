@@ -47,7 +47,9 @@ model" section): a plain string subscribes exactly as-is, while **+** (exactly o
 - **\-s, \-\-settings**, for consistency with every other **mads-\*** executable. **mads-echo** then
   behaves exactly like **mads-logger** etc.: it queries the broker (or reads a local **.ini** file) for a
   **[echo]** section (or **[**name**]** with **\-n/\-\-name**), taking its **sub_topic** from there unless
-  overridden by positional *topic* arguments on the command line.
+  overridden by positional *topic* arguments on the command line. If the settings have no such section
+  (typically a broker found with **\-r/\-\-room**), **mads-echo** does not fail: it subscribes to every
+  topic, still using the endpoints from the settings' **[agents]** section.
 
 **\-\-broker** can be combined with either mode: it always overrides whatever subscribe endpoint the
 other mode resolved to, which is the most direct way to point at a specific broker with zero setup.
@@ -105,6 +107,7 @@ other mode resolved to, which is the most direct way to point at a specific brok
 
 **\-r**, **\-\-room[=room]**
 :  Discover the broker's settings endpoint by service-discovery room name, instead of **\-\-settings**.
+   An **[echo]** section is not required on that broker: without one, every topic is subscribed.
 
 **\-v**, **\-\-version**
 :  Show version information.

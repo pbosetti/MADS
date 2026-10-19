@@ -123,6 +123,7 @@ Press **q** (or Ctrl-C) to quit.
 
 **\-r**, **\-\-room[=room]**
 :  Discover the broker's settings endpoint by service-discovery room name, instead of **\-\-settings**.
+   A **[top]** section is not required on that broker: without one, every topic is subscribed.
 
 **\-v**, **\-\-version**
 :  Show version information.
@@ -169,8 +170,9 @@ number.
 
 # FILES
 
-**mads.ini**: only consulted when **\-s/\-\-settings** is given; must then contain a **[top]**-style
-section (the exact name is set via **\-n/\-\-name**) if a non-default **sub_topic** is wanted.
+**mads.ini**: only consulted when **\-s/\-\-settings** or **\-r/\-\-room** is given. A **[top]**-style
+section (the exact name is set via **\-n/\-\-name**) is only needed if a non-default **sub_topic** is
+wanted; without one, every topic is subscribed.
 
 # AUTHOR
 

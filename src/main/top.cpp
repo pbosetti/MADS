@@ -368,7 +368,15 @@ int main(int argc, char *argv[]) {
 
   try {
     // Same zero-config-by-default duality as mads-echo: "none" needs no
-    // mads.ini section unless -s/--settings is given.
+    // mads.ini section unless -s/--settings is given, and settings without a
+    // [top] section (e.g. from a broker found with -r/--room) fall back to
+    // subscribing to everything.
+    top.fetch_settings(options_parsed, "none");
+    if (top.add_default_section()) {
+      cout << fg::gray << style::italic << "No [" << top.name()
+           << "] section in settings: subscribing to all topics" << style::reset
+           << fg::reset << endl;
+    }
     top.init(options_parsed, "none");
   } catch (const std::exception &e) {
     cerr << fg::red << "Error initializing agent: " << e.what() << fg::reset

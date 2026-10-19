@@ -302,6 +302,23 @@ public:
    */
   void fetch_settings(bool crypto = false);
 
+  /**
+   * @brief Adds a default section for this agent if the fetched settings have
+   * none.
+   *
+   * Call it between fetch_settings() and init() to let an agent run with
+   * settings that do not mention it: the added section is the one the
+   * zero-config `"none"` settings URI builds (`pub_topic` = agent name,
+   * `sub_topic = [""]`, i.e. subscribe to everything), while the rest of the
+   * fetched settings (e.g. `[agents]` endpoints) still applies. Used by
+   * read-only observers such as mads-top and mads-echo.
+   *
+   * @return true if the section was missing and has been added, false if the
+   * settings already had one (left untouched).
+   * @throws AgentError if settings have not been fetched yet.
+   */
+  bool add_default_section();
+
   // Destructor
   virtual ~Agent();
 

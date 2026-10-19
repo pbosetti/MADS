@@ -124,6 +124,45 @@ TEST_CASE("init() throws AgentError when no section matches the agent name",
   REQUIRE(threw);
 }
 
+// ---------------------------------------------------------------------------
+// add_default_section(): run with settings that do not name the agent
+// (mads-top / mads-echo against a broker found with --room)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("add_default_section() lets init() run without a matching section, "
+          "keeping the fleet-wide settings",
+          "[agent_settings]") {
+  mads_test::RunningGuard guard;
+  // valid.toml has [agents] endpoints but no [observer] section.
+  Mads::Agent a("observer", fixture("valid.toml"));
+  a.fetch_settings(false);
+  REQUIRE(a.add_default_section());
+  REQUIRE_NOTHROW(a.init(false, false));
+
+  REQUIRE(a.pub_topic() == "observer");
+  REQUIRE(a.sub_topic() == std::vector<std::string>{""});
+  REQUIRE(a.pub_endpoint() == "tcp://localhost:42210");
+  REQUIRE(a.sub_endpoint() == "tcp://localhost:42211");
+}
+
+TEST_CASE("add_default_section() leaves an existing section untouched",
+          "[agent_settings]") {
+  mads_test::RunningGuard guard;
+  Mads::Agent a("settingstest", fixture("valid.toml"));
+  a.fetch_settings(false);
+  REQUIRE_FALSE(a.add_default_section());
+  a.init(false, false);
+  REQUIRE(a.pub_topic() == "settingstest_pub");
+  REQUIRE(a.sub_topic() == std::vector<std::string>{"topicA", "topicB"});
+}
+
+TEST_CASE("add_default_section() before fetch_settings() throws AgentError",
+          "[agent_settings]") {
+  mads_test::RunningGuard guard;
+  Mads::Agent a("observer", fixture("valid.toml"));
+  REQUIRE_THROWS_AS(a.add_default_section(), Mads::AgentError);
+}
+
 TEST_CASE("save_settings() throws AgentError when settings are local",
           "[agent_settings]") {
   mads_test::RunningGuard guard;

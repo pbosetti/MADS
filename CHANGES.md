@@ -1,3 +1,17 @@
+# Release v2.5.2
+
+## Improvements
+
+- **mads-top and mads-echo no longer exit when their settings have no
+  `[top]`/`[echo]` section** (typically a broker found with `-r/--room`, but
+  also `-s`): they subscribe to every topic, keeping the endpoints from the
+  served `[agents]` section. New `Agent::add_default_section()` (additive,
+  ABI-compatible) provides this for any agent that wants the same behaviour.
+- **The Android package is a plain SDK archive**,
+  `Mads-<version>-Android-<abi>.tar.gz` with `lib/`, `include/` and the zmq
+  license at its root. It used to go through the Linux branch, building a `.deb`
+  (with a bogus architecture, as the host has no dpkg) under `usr/local`.
+
 # Release v2.5.1
 
 > **NOTE**: although technically this should be marked as a minor release (eg v2.6.0), the ABI of MadsCore has not changed nor have the wire protocol and the plugin loading protocol. Consequently, this release is fully compatible with previous 2.5.x releases, downstream C++ agents do not need to be recompiled, and it has consequently been marked as a patch release v2.5.1.
@@ -33,10 +47,6 @@
   the latter two optional and selected by default. Previously `MadsCore.dll`,
   the bundled plugins and libzmq ended up in stray `Unspecified`/`SDK`/`Runtime`
   components.
-- **The Android package is a plain SDK archive**,
-  `Mads-<version>-Android-<abi>.tar.gz` with `lib/`, `include/` and the zmq
-  license at its root. It used to go through the Linux branch, building a `.deb`
-  (with a bogus architecture, as the host has no dpkg) under `usr/local`.
 - **Library-only builds (`MADS_BUILD_APPS=OFF`) no longer install app data**:
   templates, skills, plugin migrations, Python and shell scripts, the Rust crate
   and `share/images`.
