@@ -158,5 +158,6 @@ products/android/arm64-v8a-auto/lib/libMadsCore.so
 ### Notes
 
 - The currently validated configuration is `arm64-v8a` with `android-24`.
+- `ANDROID_PLATFORM` must be `android-23` or later; configure stops with an error otherwise. If `ANDROID_ABI` or `ANDROID_PLATFORM` is missing, the NDK silently falls back to `armeabi-v7a` and API 21, so always pass both (and check that `$NDK`/`$ABI` are set in the current shell).
 - `MADS_ENABLE_MONGOCXX=OFF` is required for Android.
 - `MADS_BUILD_APPS=OFF` and `MADS_ENABLE_GUI=OFF` are recommended, since the Android flow is for the core native library rather than the desktop tools.

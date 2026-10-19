@@ -78,6 +78,23 @@ if(APPLE)
   add_link_options(-Wl,-no_warn_duplicate_libraries)
 endif()
 
+# reproc needs sigtimedwait(), which Bionic only has from API 23. Without
+# ANDROID_PLATFORM the NDK silently picks its minimum (21), and the build would
+# fail deep inside reproc: catch it here. The legacy NDK toolchain file (the
+# default) sets ANDROID_PLATFORM_LEVEL, the new one CMAKE_SYSTEM_VERSION.
+if(ANDROID)
+  set(_mads_android_api "${ANDROID_PLATFORM_LEVEL}")
+  if(NOT _mads_android_api)
+    set(_mads_android_api "${CMAKE_SYSTEM_VERSION}")
+  endif()
+  if(_mads_android_api LESS 23)
+    message(FATAL_ERROR "Android API level ${_mads_android_api} is too old: MADS needs 23 or later. "
+      "Pass -DANDROID_PLATFORM=android-24 (and -DANDROID_ABI=<abi>) when configuring; "
+      "if they were lost, the cache was recreated without them.")
+  endif()
+  unset(_mads_android_api)
+endif()
+
 include(GNUInstallDirs)
 option(MADS_ENABLE_MONGOCXX "Enable MongoDB C++ driver dependency" ON)
 option(MADS_BUILD_APPS "Build executables" ${PROJECT_IS_TOP_LEVEL})
@@ -479,75 +496,79 @@ install(
   COMPONENT MadsCore
 )
 
-# Rust plugin ABI header — lets C/C++ plugin wrappers include the vtable struct
-if(NOT WIN32)
-  install(
-    FILES ${CMAKE_CURRENT_LIST_DIR}/src/main/mads_rust_plugin.h
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+# Data and scripts for the command line utilities (and the GUI apps): useless,
+# and not installed, in a library-only build (MADS_BUILD_APPS=OFF, e.g. Android).
+if(MADS_BUILD_APPS)
+  # Rust plugin ABI header — lets C/C++ plugin wrappers include the vtable struct
+  if(NOT WIN32)
+    install(
+      FILES ${CMAKE_CURRENT_LIST_DIR}/src/main/mads_rust_plugin.h
+      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+      COMPONENT MadsApps
+    )
+
+    # mads-plugin Rust crate source — installed so plugin authors can use a local
+    # path dependency without network access when crates.io is unavailable.
+    install(
+      DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/rust/mads-plugin
+      DESTINATION share/rust
+      COMPONENT MadsApps
+      PATTERN "target" EXCLUDE
+    )
+  endif()
+
+  # Used by both the command line utilities and the GUI apps.
+  install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/images
+    DESTINATION share
+    COMPONENT MadsCore
+  )
+
+  install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/templates
+    DESTINATION share
     COMPONENT MadsApps
   )
 
-  # mads-plugin Rust crate source — installed so plugin authors can use a local
-  # path dependency without network access when crates.io is unavailable.
-  install(
-    DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/rust/mads-plugin
-    DESTINATION share/rust
-    COMPONENT MadsApps
-    PATTERN "target" EXCLUDE
-  )
-endif()
-
-# Used by both the command line utilities and the GUI apps.
-install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/images
-  DESTINATION share
-  COMPONENT MadsCore
-)
-
-install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/templates
-  DESTINATION share
-  COMPONENT MadsApps
-)
-
-# Agent skill scaffolded into new plugin projects by `mads plugin` (and
-# refreshed by `mads plugin --update`): the runtime context a plugin author's
-# AI assistant needs but cannot read out of the plugin API.
-install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/skills
-  DESTINATION share
-  COMPONENT MadsApps
-)
-
-# Data-driven plugin migration: definitions consumed by `mads plugin --update`,
-# plus the dependency manifest that pins versions for freshly scaffolded plugins.
-install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/plugin_migrations
-  DESTINATION share
-  COMPONENT MadsApps
-)
-
-install(FILES ${CMAKE_CURRENT_LIST_DIR}/share/plugin_deps.json
-  DESTINATION share
-  COMPONENT MadsApps
-)
-
-file(GLOB PYTHON_SCRIPTS ${CMAKE_CURRENT_LIST_DIR}/scripts/*.py)
-install(PROGRAMS ${PYTHON_SCRIPTS}
-  DESTINATION python
-  COMPONENT MadsApps
-)
-
-# Isolated copy of the Python wrapper used by `mads setup-python`: a .pth file
-# is written into the target environment pointing at this directory, so only
-# mads_agent (and not the other helper scripts) becomes importable.
-install(FILES ${CMAKE_CURRENT_LIST_DIR}/scripts/mads_agent.py
-  DESTINATION share/mads-python
-  COMPONENT MadsApps
-)
-
-if(UNIX)
-  file(GLOB MADS_SHELL_SCRPTS ${CMAKE_CURRENT_LIST_DIR}/scripts/mads-*)
-  install(PROGRAMS ${MADS_SHELL_SCRPTS}
-    DESTINATION bin
+  # Agent skill scaffolded into new plugin projects by `mads plugin` (and
+  # refreshed by `mads plugin --update`): the runtime context a plugin author's
+  # AI assistant needs but cannot read out of the plugin API.
+  install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/skills
+    DESTINATION share
     COMPONENT MadsApps
   )
+
+  # Data-driven plugin migration: definitions consumed by `mads plugin --update`,
+  # plus the dependency manifest that pins versions for freshly scaffolded plugins.
+  install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/share/plugin_migrations
+    DESTINATION share
+    COMPONENT MadsApps
+  )
+
+  install(FILES ${CMAKE_CURRENT_LIST_DIR}/share/plugin_deps.json
+    DESTINATION share
+    COMPONENT MadsApps
+  )
+
+  file(GLOB PYTHON_SCRIPTS ${CMAKE_CURRENT_LIST_DIR}/scripts/*.py)
+  install(PROGRAMS ${PYTHON_SCRIPTS}
+    DESTINATION python
+    COMPONENT MadsApps
+  )
+
+  # Isolated copy of the Python wrapper used by `mads setup-python`: a .pth file
+  # is written into the target environment pointing at this directory, so only
+  # mads_agent (and not the other helper scripts) becomes importable.
+  install(FILES ${CMAKE_CURRENT_LIST_DIR}/scripts/mads_agent.py
+    DESTINATION share/mads-python
+    COMPONENT MadsApps
+  )
+
+  if(UNIX)
+    file(GLOB MADS_SHELL_SCRPTS ${CMAKE_CURRENT_LIST_DIR}/scripts/mads-*)
+    install(PROGRAMS ${MADS_SHELL_SCRPTS}
+      DESTINATION bin
+      COMPONENT MadsApps
+    )
+  endif()
 endif()
 
 
@@ -609,6 +630,14 @@ elseif(WIN32)
       INSTALL_TYPES Full
     )
   endif()
+
+elseif(ANDROID)
+  # Cross build: a plain SDK archive (lib/, include/) for the target ABI. The
+  # Linux branch below would build a .deb, which makes no sense here and needs
+  # dpkg tools the (usually Windows or macOS) host lacks.
+  set(CPACK_GENERATOR "TGZ")
+  set(CPACK_PACKAGING_INSTALL_PREFIX "/")
+  set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${GIT_TAG}-Android-${CMAKE_ANDROID_ARCH_ABI}")
 
 else()
   # Runtime dependencies are computed by dpkg-shlibdeps from the binaries

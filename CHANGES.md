@@ -33,6 +33,13 @@
   the latter two optional and selected by default. Previously `MadsCore.dll`,
   the bundled plugins and libzmq ended up in stray `Unspecified`/`SDK`/`Runtime`
   components.
+- **The Android package is a plain SDK archive**,
+  `Mads-<version>-Android-<abi>.tar.gz` with `lib/`, `include/` and the zmq
+  license at its root. It used to go through the Linux branch, building a `.deb`
+  (with a bogus architecture, as the host has no dpkg) under `usr/local`.
+- **Library-only builds (`MADS_BUILD_APPS=OFF`) no longer install app data**:
+  templates, skills, plugin migrations, Python and shell scripts, the Rust crate
+  and `share/images`.
 
 # Release 2.5.0
 
