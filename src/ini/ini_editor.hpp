@@ -94,8 +94,8 @@ public:
   /// All edges, catch-all ones included (see TopologyEdge::catch_all).
   const std::vector<TopologyEdge> &edges() const { return _edges; }
   const DanglingTopics &dangling() const { return _dangling; }
-  /// Parse diagnostics of the last load plus validate() and lint() of the
-  /// current document.
+  /// Parse diagnostics, validate() and lint() of the current document (not
+  /// of the text as loaded: fixed lines stop being reported).
   const std::vector<Diagnostic> &diagnostics() const { return _diagnostics; }
 
   // ---------------------------------------------------------- node ops
@@ -170,7 +170,6 @@ private:
   std::unique_ptr<Source> _source;
   std::string _etag;            // of the last load/save
   std::string _saved_text;      // serialize() at the last load/save
-  std::vector<Diagnostic> _load_diagnostics;
   struct Step {
     std::string text;
     std::string label;

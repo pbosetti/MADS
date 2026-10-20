@@ -11,6 +11,7 @@
 
 #include "ini_editor.hpp"
 
+using Mads::Ini::Diagnostic;
 using Mads::Ini::Editor;
 using Mads::Ini::SaveResult;
 
@@ -215,6 +216,37 @@ TEST_CASE("add_node names, meta and rejections", "[ini][editor]") {
   CHECK(ed.type_of("filter") == "filter");
   CHECK(ed.undo_label() == "Add filter_2");
   CHECK(ed.dirty());
+}
+
+TEST_CASE("parse errors follow the current text, not the loaded one",
+          "[ini][editor]") {
+  Editor ed;
+  ed.new_document("[a]\nk = 1\nthis is garbage\n\n[b]\nj = 2\n");
+  const auto parse_errors = [&] {
+    return std::count_if(ed.diagnostics().begin(), ed.diagnostics().end(),
+                         [](const Diagnostic &d) {
+                           // Line numbers are those of the current text
+                           // (the layout adds `#@` lines), so match the error.
+                           return d.severity == Diagnostic::Severity::Error &&
+                                  d.message.find("key = value") !=
+                                      std::string::npos;
+                         });
+  };
+  REQUIRE(parse_errors() > 0);
+
+  // Drop the garbage line wherever the parser kept it, as an edit would.
+  for (auto &section : ed.doc().sections()) {
+    std::erase(section.trailing, "this is garbage");
+    for (auto &entry : section.entries) {
+      std::erase(entry.leading_comments, "this is garbage");
+    }
+  }
+  ed.commit("Remove garbage");
+  CHECK(parse_errors() == 0);
+  CHECK(std::none_of(ed.diagnostics().begin(), ed.diagnostics().end(),
+                     [](const Diagnostic &d) {
+                       return d.severity == Diagnostic::Severity::Error;
+                     }));
 }
 
 TEST_CASE("add_node names a node after the type's aliases first",

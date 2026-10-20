@@ -62,7 +62,10 @@ std::vector<std::string> comment_lines(const std::string &text) {
 // Inline comments (`value # note`) on active lines, whitespace-collapsed.
 std::vector<std::string> inline_comments(const std::string &text) {
   std::vector<std::string> out;
-  for (const auto &section : Document::parse(text).sections()) {
+  // Named: iterating `Document::parse(text).sections()` directly would
+  // dangle (range-for does not extend the temporary Document's lifetime).
+  const Document doc = Document::parse(text);
+  for (const auto &section : doc.sections()) {
     for (const auto &entry : section.entries) {
       if (!entry.inline_comment.empty()) {
         out.push_back(entry.inline_comment);

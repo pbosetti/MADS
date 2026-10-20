@@ -112,8 +112,7 @@ Editor::Editor(const Schema &schema) : _schema(schema) { new_document(""); }
 // ------------------------------------------------------------- documents
 
 void Editor::new_document(const std::string &text) {
-  _load_diagnostics.clear();
-  _doc = Document::parse(text, &_load_diagnostics);
+  _doc = Document::parse(text);
   _source.reset();
   _etag.clear();
   finish_load();
@@ -130,8 +129,7 @@ bool Editor::open(const std::filesystem::path &path, std::string *error) {
     }
     return false;
   }
-  _load_diagnostics.clear();
-  _doc = Document::parse(loaded.text, &_load_diagnostics);
+  _doc = Document::parse(loaded.text);
   _source = std::move(source);
   _etag = loaded.etag;
   finish_load();
@@ -154,8 +152,7 @@ bool Editor::reload(std::string *error) {
     }
     return false;
   }
-  _load_diagnostics.clear();
-  _doc = Document::parse(loaded.text, &_load_diagnostics);
+  _doc = Document::parse(loaded.text);
   _etag = loaded.etag;
   finish_load();
   return true;
@@ -307,7 +304,12 @@ void Editor::recompute() {
     parse_error = err.what();
   }
 
-  _diagnostics = _load_diagnostics;
+  // Parse problems of the current text, not of the text as loaded: the
+  // offending lines are kept verbatim, so re-parsing reports them with their
+  // current line numbers and drops them once the user fixes or removes them.
+  std::string text = _doc.serialize();
+  _diagnostics.clear();
+  Document::parse(text, &_diagnostics);
   auto invalid = _doc.validate();
   _diagnostics.insert(_diagnostics.end(), invalid.begin(), invalid.end());
   if (!parse_error.empty() && invalid.empty()) {
