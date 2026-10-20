@@ -374,40 +374,9 @@ int run_graph_check(const string &settings_path, const string &output_path,
     return 1;
   }
 
-  map<string, Mads::AgentTopicInfo> agents;
-  for (const auto &[key, node] : config) {
-    const string section = string(key.str());
-    if (section == "agents" || section == "broker") {
-      continue;
-    }
-    const auto *table = node.as_table();
-    if (!table) {
-      continue;
-    }
-    Mads::AgentTopicInfo info;
-    if (auto pub = (*table)["pub_topic"].value<string>()) {
-      info.pub_topic = *pub;
-    } else {
-      // Agent::init() reads `cfg["pub_topic"].value_or(_name)`, so a section
-      // with no pub_topic key still publishes -- under its own name. Filters
-      // routinely rely on that (`[running_avg] sub_topic = ["serial_reader"]`
-      // with no pub_topic publishes "running_avg"), and omitting it here used
-      // to drop those edges from the graph entirely. Flagged as implicit so
-      // topology_graph() can draw it muted and never call it dangling: a pure
-      // sink inherits exactly the same default and nobody listening to it is
-      // the normal case.
-      info.pub_topic = section;
-      info.pub_implicit = true;
-    }
-    const auto &sub_node = (*table)["sub_topic"];
-    if (sub_node.type() == toml::node_type::string) {
-      info.sub_topic.push_back(sub_node.value_or(string("")));
-    } else if (const auto *arr = sub_node.as_array()) {
-      arr->for_each(
-          [&](auto &&el) { info.sub_topic.push_back(el.value_or(string(""))); });
-    }
-    agents.emplace(section, std::move(info));
-  }
+  // Per-section pub/sub extraction (including the implicit pub_topic default
+  // and the 'agents'/'broker' skip) lives in Mads::agent_topic_infos().
+  map<string, Mads::AgentTopicInfo> agents = Mads::agent_topic_infos(config);
 
   if (live) {
     // The table is published on the broker's *backend* -- where every agent

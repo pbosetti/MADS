@@ -20,9 +20,15 @@ Author(s): Paolo Bosetti
 */
 #pragma once
 
+#include "topic_match.hpp"
+
+#include <toml++/toml.hpp>
+
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Mads {
@@ -47,6 +53,35 @@ struct AgentTopicInfo {
   /// default and nobody listening to it is normal, not a misconfiguration.
   bool pub_implicit = false;
 };
+
+/**
+ * @brief Extracts one `mads.ini` agent section's topics.
+ *
+ * Reads `pub_topic` and `sub_topic` from `table`, the body of the section
+ * named `section`. A missing `pub_topic` key falls back to the section name
+ * and sets `pub_implicit`, mirroring `Agent`'s own
+ * `cfg["pub_topic"].value_or(_name)` default. `sub_topic` may be a single
+ * string or an array of strings; any other type leaves `sub_topic` empty.
+ *
+ * @param section Section name, i.e. the key the table sits under.
+ * @param table The section's table.
+ * @return The section's topics.
+ */
+AgentTopicInfo agent_topic_info(std::string_view section,
+                                const toml::table &table);
+
+/**
+ * @brief Extracts the topics of every agent section in a settings file.
+ *
+ * Loops the top-level nodes of `config`, skipping the reserved `agents` and
+ * `broker` sections and any node that is not a table. Each remaining table
+ * is handed to agent_topic_info().
+ *
+ * @param config The whole parsed settings file.
+ * @return Map of section name -> topics, alphabetically ordered.
+ */
+std::map<std::string, AgentTopicInfo>
+agent_topic_infos(const toml::table &config);
 
 /// A live topic -> subscriber-count table as published by a broker running
 /// with `[broker] subscription_table = true` (see
@@ -98,6 +133,86 @@ struct GraphOptions {
   /// already shows.
   std::optional<LiveSubscriptions> live;
 };
+
+/// One publisher -> subscriber arrow of the declared topology, as
+/// topology_graph() draws it. Produced by topology_edges(), which is the
+/// structured form a GUI can reuse without parsing DOT text.
+struct TopologyEdge {
+  /// Publisher section.
+  std::string from;
+  /// Subscriber section.
+  std::string to;
+  /// The publisher's (possibly implicit) pub_topic.
+  std::string topic;
+  /// The strongest match kind among the subscriber's matching sub_topic
+  /// entries, ranked Exact > Wildcard > Prefix; the same rule DOT uses to
+  /// pick solid / dashed / dotted.
+  SubMatch kind = SubMatch::None;
+  /// Every matching sub_topic entry of the subscriber, in declaration order,
+  /// filled only when `kind` is not Exact (an exact edge needs no "via"
+  /// line). Entries are kept verbatim: the subscribe-all entry is "" here,
+  /// and DOT renders it as "(all)".
+  std::vector<std::string> via_patterns;
+  /// True when `topic` came from the implicit pub_topic default
+  /// (AgentTopicInfo::pub_implicit). DOT draws such edges in grey.
+  bool implicit_pub = false;
+  /// True when the subscriber matched ONLY through its subscribe-all ("")
+  /// entry. topology_graph() collapses these into a count on the
+  /// subscriber's `(all)` line unless GraphOptions::expand_catch_all is set.
+  bool catch_all = false;
+};
+
+/**
+ * @brief Computes every publisher -> subscriber edge of the declared
+ * topology, in the order topology_graph() emits them.
+ *
+ * Outer loop over publishers (section name order), inner loop over
+ * subscribers (section name order). A publisher must have a non-empty
+ * pub_topic and a subscriber must have at least one sub_topic entry. Each
+ * pair is tested with Mads::subscription_match() against every entry, so
+ * prefix, wildcard and exact matches all count, exactly as on the wire.
+ *
+ * Self-pairs (a section matching its own sub_topic) never produce an edge;
+ * they do count toward satisfaction, which dangling_topics() accounts for.
+ * Catch-all edges are returned too (with `catch_all` set): callers that
+ * want the default collapsed rendering filter them out themselves.
+ *
+ * @param agents Map of section name -> declared topics.
+ * @return All edges, possibly empty.
+ */
+std::vector<TopologyEdge>
+topology_edges(const std::map<std::string, AgentTopicInfo> &agents);
+
+/// The dangling topics of a declared topology: the declarations that no
+/// counterpart on the wire reaches. This is exactly what topology_graph()
+/// marks with `[!]` and what turns a node's contour dashed.
+struct DanglingTopics {
+  /// Sections whose declared (non-implicit) pub_topic reaches no subscriber.
+  /// Implicit pub_topic defaults are never listed here.
+  std::set<std::string> pub;
+  /// Section -> its dead sub_topic entries (entries no publisher reaches).
+  /// Sections with no dead entries have no key. Entries are stored by text:
+  /// satisfaction depends only on the text, so duplicate entries share one
+  /// verdict.
+  std::map<std::string, std::set<std::string>> sub;
+};
+
+/**
+ * @brief Computes the dangling pub_topic and sub_topic declarations of a
+ * declared topology.
+ *
+ * A declared pub_topic is satisfied when at least one subscriber entry
+ * matches it, a sub_topic entry when at least one publisher's pub_topic
+ * matches it. Both checks run over every section pair, self-pairs included,
+ * so an agent whose pub_topic matches its own sub_topic is satisfied on
+ * both sides, matching real broker behavior.
+ *
+ * @param agents Map of section name -> declared topics.
+ * @return The dangling declarations; both members are empty for a fully
+ * wired topology.
+ */
+DanglingTopics
+dangling_topics(const std::map<std::string, AgentTopicInfo> &agents);
 
 /**
  * @brief Builds Graphviz DOT text describing the declared pub/sub topology

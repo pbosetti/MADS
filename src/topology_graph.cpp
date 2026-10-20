@@ -87,17 +87,14 @@ const char *role_color(Role role) {
   return nullptr;
 }
 
-// Everything the match pass works out about one agent, kept together so the
-// node-emission loop below is a straight read with no second matching sweep.
+// Everything the rendering pass needs to know about one agent, kept together
+// so the node-emission loop below is a straight read.
 struct NodeState {
-  // Per sub_topic entry: was it satisfied by at least one publisher? A
-  // section can declare several entries and only one need be dead to be
-  // worth flagging, so this is tracked per entry rather than per agent.
-  std::vector<bool> sub_satisfied;
-  // Declared pub_topic reached at least one subscriber. Implicit pub topics
-  // are left `true` -- nobody listening to a sink's defaulted topic is
-  // normal, not a misconfiguration.
-  bool pub_matched = true;
+  // Declared pub_topic reaches no subscriber (see DanglingTopics::pub).
+  bool pub_dangling = false;
+  // Entries of this section's sub_topic that no publisher reaches, stored by
+  // text (see DanglingTopics::sub).
+  std::set<std::string> dead_subs;
   // Per sub_topic entry: how many live subscribers the broker currently
   // reports for the prefix that entry subscribes. Left EMPTY when no live
   // overlay was requested, which is what every render path tests on.
@@ -106,26 +103,6 @@ struct NodeState {
   // i.e. the edges GraphOptions::expand_catch_all would draw and the default
   // rendering shows as a count on the `(all)` line instead.
   std::size_t catch_all_pubs = 0;
-};
-
-// One drawn arrow, plus how it came to be. `patterns` lists every sub_topic
-// entry of the target that accepts this topic (usually one; more than one is
-// itself worth seeing, e.g. `["sensors", "sensors/#"]` both catching the same
-// message), and `kind` is the most explicit of them, ranked
-// Exact > Wildcard > Prefix: an exact entry means the wiring was spelled out,
-// a wildcard means it was asked for on purpose, and a bare prefix catch is
-// the incidental one, so it only wins when nothing else matched.
-struct Edge {
-  std::string from;
-  std::string to;
-  std::string topic;
-  std::vector<std::string> patterns;
-  SubMatch kind = SubMatch::None;
-  bool implicit_pub = false;
-  // Every matching pattern is the subscribe-all one: this arrow carries no
-  // information the target's `(all)` line doesn't already state, so it is
-  // collapsed into a count unless GraphOptions::expand_catch_all is set.
-  bool catch_all_only = false;
 };
 
 int match_rank(SubMatch kind) {
@@ -163,7 +140,7 @@ std::string record_label(const std::string &name, const AgentTopicInfo &info,
   // A declared pub_topic that reaches nobody is otherwise invisible: it never
   // becomes an edge, so without this line the node would be dashed with no
   // hint of which topic is falling on deaf ears.
-  if (!state.pub_matched) {
+  if (state.pub_dangling) {
     top += "\\lpub " + escape_topic(info.pub_topic) + " [!]";
   }
   if (info.sub_topic.empty()) {
@@ -179,7 +156,7 @@ std::string record_label(const std::string &name, const AgentTopicInfo &info,
       const int n = state.sub_live[i];
       label += n > 0 ? " [live " + std::to_string(n) + "]" : " [offline]";
     }
-    if (!state.sub_satisfied[i]) {
+    if (state.dead_subs.count(info.sub_topic[i]) > 0) {
       label += " [!]";
     } else if (info.sub_topic[i].empty() && state.catch_all_pubs > 0) {
       // Collapsed fan-in: the arrows aren't drawn, so say how many there
@@ -193,18 +170,18 @@ std::string record_label(const std::string &name, const AgentTopicInfo &info,
   return label;
 }
 
-std::string edge_label(const Edge &edge) {
+std::string edge_label(const TopologyEdge &edge) {
   std::string label = escape_topic(edge.topic);
   // An exact match adds nothing by repeating itself: the pattern *is* the
   // topic. Every looser match names what caught it, which is the whole point
   // of drawing the graph in the first place.
   if (edge.kind != SubMatch::Exact) {
     label += "\\lvia ";
-    for (std::size_t i = 0; i < edge.patterns.size(); ++i) {
+    for (std::size_t i = 0; i < edge.via_patterns.size(); ++i) {
       if (i > 0) {
         label += ", ";
       }
-      label += pattern_text(edge.patterns[i]);
+      label += pattern_text(edge.via_patterns[i]);
     }
     label += "\\l";
   }
@@ -245,24 +222,155 @@ bool is_implicitly_subscribed_topic(const std::string &topic) {
   return topic == "control" || topic == "subscriptions";
 }
 
+AgentTopicInfo agent_topic_info(std::string_view section,
+                                const toml::table &table) {
+  AgentTopicInfo info;
+  if (auto pub = table["pub_topic"].value<std::string>()) {
+    info.pub_topic = *pub;
+  } else {
+    // Agent::init() reads `cfg["pub_topic"].value_or(_name)`, so a section
+    // with no pub_topic key still publishes -- under its own name. Filters
+    // routinely rely on that (`[running_avg] sub_topic = ["serial_reader"]`
+    // with no pub_topic publishes "running_avg"), and omitting it here used
+    // to drop those edges from the graph entirely. Flagged as implicit so
+    // topology_graph() can draw it muted and never call it dangling: a pure
+    // sink inherits exactly the same default and nobody listening to it is
+    // the normal case.
+    info.pub_topic = std::string(section);
+    info.pub_implicit = true;
+  }
+  const auto &sub_node = table["sub_topic"];
+  if (sub_node.type() == toml::node_type::string) {
+    info.sub_topic.push_back(sub_node.value_or(std::string("")));
+  } else if (const auto *arr = sub_node.as_array()) {
+    arr->for_each(
+        [&](auto &&el) { info.sub_topic.push_back(el.value_or(std::string(""))); });
+  }
+  return info;
+}
+
+std::map<std::string, AgentTopicInfo>
+agent_topic_infos(const toml::table &config) {
+  // Every top-level table is an agent section, except the reserved 'agents'
+  // and 'broker' sections; the plugin `attachment` scan in doctor follows the
+  // same convention.
+  std::map<std::string, AgentTopicInfo> agents;
+  for (const auto &[key, node] : config) {
+    const std::string section = std::string(key.str());
+    if (section == "agents" || section == "broker") {
+      continue;
+    }
+    const auto *table = node.as_table();
+    if (!table) {
+      continue;
+    }
+    agents.emplace(section, agent_topic_info(section, *table));
+  }
+  return agents;
+}
+
+std::vector<TopologyEdge>
+topology_edges(const std::map<std::string, AgentTopicInfo> &agents) {
+  std::vector<TopologyEdge> edges;
+  for (const auto &[a_name, a_info] : agents) {
+    if (a_info.pub_topic.empty()) {
+      continue;
+    }
+    for (const auto &[b_name, b_info] : agents) {
+      // A self-match is satisfied wiring, not an arrow (see
+      // dangling_topics()), so it never reaches the edge list.
+      if (b_info.sub_topic.empty() || a_name == b_name) {
+        continue;
+      }
+      TopologyEdge edge;
+      edge.from = a_name;
+      edge.to = b_name;
+      edge.topic = a_info.pub_topic;
+      edge.implicit_pub = a_info.pub_implicit;
+
+      bool matched_named_pattern = false;
+      std::vector<std::string> matched;
+      for (const auto &entry : b_info.sub_topic) {
+        const SubMatch kind = Mads::subscription_match(entry, a_info.pub_topic);
+        if (kind == SubMatch::None) {
+          continue;
+        }
+        matched.push_back(entry);
+        matched_named_pattern = matched_named_pattern || !entry.empty();
+        if (match_rank(kind) > match_rank(edge.kind)) {
+          edge.kind = kind;
+        }
+      }
+      if (edge.kind == SubMatch::None) {
+        continue;
+      }
+      edge.catch_all = !matched_named_pattern;
+      if (edge.kind != SubMatch::Exact) {
+        edge.via_patterns = std::move(matched);
+      }
+      edges.push_back(std::move(edge));
+    }
+  }
+  return edges;
+}
+
+DanglingTopics
+dangling_topics(const std::map<std::string, AgentTopicInfo> &agents) {
+  // One pass over every (publisher, subscriber) pair -- INCLUDING self-pairs,
+  // so an agent's own pub_topic matching its own sub_topic satisfies both
+  // sides -- recording which declarations were reached at least once.
+  std::set<std::string> pub_reached;
+  std::map<std::string, std::vector<bool>> sub_reached;
+  for (const auto &[name, info] : agents) {
+    sub_reached[name].assign(info.sub_topic.size(), false);
+  }
+  for (const auto &[a_name, a_info] : agents) {
+    if (a_info.pub_topic.empty()) {
+      continue;
+    }
+    for (const auto &[b_name, b_info] : agents) {
+      auto &reached = sub_reached[b_name];
+      for (std::size_t i = 0; i < b_info.sub_topic.size(); ++i) {
+        if (Mads::subscription_match(b_info.sub_topic[i], a_info.pub_topic) !=
+            SubMatch::None) {
+          reached[i] = true;
+          pub_reached.insert(a_name);
+        }
+      }
+    }
+  }
+
+  DanglingTopics result;
+  for (const auto &[name, info] : agents) {
+    // An implicit pub_topic is never dangling: a pure sink inherits the same
+    // default and nobody listening to it is the normal case.
+    if (!info.pub_topic.empty() && !info.pub_implicit &&
+        pub_reached.count(name) == 0) {
+      result.pub.insert(name);
+    }
+    const auto &reached = sub_reached[name];
+    for (std::size_t i = 0; i < info.sub_topic.size(); ++i) {
+      if (!reached[i]) {
+        result.sub[name].insert(info.sub_topic[i]);
+      }
+    }
+  }
+  return result;
+}
+
 std::string topology_graph(const std::map<std::string, AgentTopicInfo> &agents,
                            const GraphOptions &options) {
-  // Single combined pass over every (publisher, subscriber) pair --
-  // INCLUDING self-pairs, so an agent's own pub_topic matching its own
-  // sub_topic satisfies both sides without ever becoming a drawn edge --
-  // that simultaneously: (a) records which sections' pub_topic matched at
-  // least one subscriber (for pub-side dangling detection), (b) records,
-  // per subscriber and per sub_topic entry, whether that specific pattern
-  // was satisfied by at least one publisher (for sub-side dangling
-  // detection), and (c) collects the cross-section edges to draw, together
-  // with the patterns and match kind that produced each one. This is the one
-  // match pass everything downstream reads, rather than a separate O(n^2)
-  // sweep per question.
+  const std::vector<TopologyEdge> all_edges = topology_edges(agents);
+  const DanglingTopics dangling = dangling_topics(agents);
+
   std::map<std::string, NodeState> states;
   for (const auto &[name, info] : agents) {
     NodeState state;
-    state.sub_satisfied.assign(info.sub_topic.size(), false);
-    state.pub_matched = info.pub_topic.empty() || info.pub_implicit;
+    state.pub_dangling = dangling.pub.count(name) > 0;
+    const auto dead = dangling.sub.find(name);
+    if (dead != dangling.sub.end()) {
+      state.dead_subs = dead->second;
+    }
     if (options.live) {
       state.sub_live.reserve(info.sub_topic.size());
       for (const auto &entry : info.sub_topic) {
@@ -273,54 +381,15 @@ std::string topology_graph(const std::map<std::string, AgentTopicInfo> &agents,
     states.emplace(name, std::move(state));
   }
 
-  std::vector<Edge> edges;
-
-  for (const auto &[a_name, a_info] : agents) {
-    if (a_info.pub_topic.empty()) {
+  // Catch-all edges are collapsed into a count on the subscriber's `(all)`
+  // line unless the caller asked for every arrow.
+  std::vector<TopologyEdge> edges;
+  for (const auto &edge : all_edges) {
+    if (edge.catch_all && !options.expand_catch_all) {
+      ++states[edge.to].catch_all_pubs;
       continue;
     }
-    for (const auto &[b_name, b_info] : agents) {
-      if (b_info.sub_topic.empty()) {
-        continue;
-      }
-      Edge edge;
-      edge.from = a_name;
-      edge.to = b_name;
-      edge.topic = a_info.pub_topic;
-      edge.implicit_pub = a_info.pub_implicit;
-
-      auto &b_state = states[b_name];
-      bool matched_named_pattern = false;
-      for (std::size_t i = 0; i < b_info.sub_topic.size(); ++i) {
-        const SubMatch kind =
-            Mads::subscription_match(b_info.sub_topic[i], a_info.pub_topic);
-        if (kind == SubMatch::None) {
-          continue;
-        }
-        b_state.sub_satisfied[i] = true;
-        edge.patterns.push_back(b_info.sub_topic[i]);
-        matched_named_pattern =
-            matched_named_pattern || !b_info.sub_topic[i].empty();
-        if (match_rank(kind) > match_rank(edge.kind)) {
-          edge.kind = kind;
-        }
-      }
-      if (edge.kind == SubMatch::None) {
-        continue;
-      }
-      // Set before any collapsing: whether the arrow ends up drawn has no
-      // bearing on whether the topic found a listener.
-      states[a_name].pub_matched = true;
-      if (a_name == b_name) {
-        continue;
-      }
-      edge.catch_all_only = !matched_named_pattern;
-      if (edge.catch_all_only && !options.expand_catch_all) {
-        ++b_state.catch_all_pubs;
-        continue;
-      }
-      edges.push_back(std::move(edge));
-    }
+    edges.push_back(edge);
   }
 
   // Live subscriptions nobody declared: the one case a settings-only graph
@@ -377,16 +446,12 @@ std::string topology_graph(const std::map<std::string, AgentTopicInfo> &agents,
 
   for (const auto &[name, info] : agents) {
     const NodeState &state = states.at(name);
-    const bool sub_dangling =
-        std::find(state.sub_satisfied.begin(), state.sub_satisfied.end(),
-                  false) != state.sub_satisfied.end();
-
     out << "  " << pad(name, node_name_width) << " [label=\""
         << record_label(name, info, state) << "\"";
     if (const char *color = role_color(infer_role(info))) {
       out << ", color=" << color;
     }
-    if (!state.pub_matched || sub_dangling) {
+    if (state.pub_dangling || !state.dead_subs.empty()) {
       out << ", style=dashed";
     }
     out << "];\n";
