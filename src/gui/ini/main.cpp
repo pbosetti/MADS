@@ -16,7 +16,12 @@
 
 #include "gui_style.hpp"
 
+#include "ini_cli.hpp"
+
 #include <algorithm>
+#include <iostream>
+#include <optional>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -126,16 +131,24 @@ void draw_editor(EditorState &state) {
 
 } // namespace
 
-int main() {
+int run_gui(std::optional<std::filesystem::path> file) {
   if (!glfwInit()) {
+    std::cerr << "mads ini: cannot start the GUI (no display?). Use "
+                 "`mads ini --print` or `mads ini --check FILE` instead.\n";
     return 1;
   }
 
   const char *glsl_version = MadsGui::setup_gl_hints();
 
-  GLFWwindow *window = glfwCreateWindow(MadsGui::kWindowWidth, MadsGui::kWindowHeight, kWindowTitle, nullptr, nullptr);
+  std::string title = kWindowTitle;
+  if (file) {
+    title += " - " + file->string();
+  }
+  GLFWwindow *window = glfwCreateWindow(MadsGui::kWindowWidth, MadsGui::kWindowHeight, title.c_str(), nullptr, nullptr);
   if (window == nullptr) {
     glfwTerminate();
+    std::cerr << "mads ini: cannot open a window (no display?). Use "
+                 "`mads ini --print` or `mads ini --check FILE` instead.\n";
     return 1;
   }
 
@@ -188,4 +201,8 @@ int main() {
   glfwDestroyWindow(window);
   glfwTerminate();
   return 0;
+}
+
+int main(int argc, char **argv) {
+  return Mads::Ini::run_cli(argc, argv, run_gui);
 }

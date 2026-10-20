@@ -14,6 +14,7 @@ file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/ini_schema_data.hpp
 )
 
 add_library(mads_ini_core STATIC
+  ini_cli.cpp
   ini_document.cpp
   ini_schema.cpp
 )

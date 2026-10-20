@@ -17,6 +17,7 @@ Author: Paolo Bosetti, July 2024
 #include "../https_client.hpp"
 #include "../TerminalLogoRenderer.hpp"
 #include "../service_discovery.hpp"
+#include "../ini/ini_cli.hpp"
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -186,142 +187,6 @@ bool save_keypair(pair<string, string> &key_files, const string &path, const str
   return true;
 }
 
-
-/*
-  _       _                                                 _
- (_)_ __ (_)   ___ ___  _ __ ___  _ __ ___   __ _ _ __   __| |
- | | '_ \| |  / __/ _ \| '_ ` _ \| '_ ` _ \ / _` | '_ \ / _` |
- | | | | | | | (_| (_) | | | | | | | | | | | (_| | | | | (_| |
- |_|_| |_|_|  \___\___/|_| |_| |_|_| |_| |_|\__,_|_| |_|\__,_|
-
-*/
-
-int make_ini(int argc, char **argv) {
-  string template_dir = Mads::exec_dir("../share/templates/");
-  string etc_dir = Mads::exec_dir("../etc/");
-  string output = "";
-  json data;
-  data["broker"] = "localhost";
-  data["port_frontend"] = "9090";
-  data["port_backend"] = "9091";
-  data["port_settings"] = "9092";
-  data["mongo_uri"] = "mongodb://localhost:27017";
-  Options options("mads ini",
-                  "Create INI file template, version " + Mads::version());
-  // clang-format off
-  options.add_options()
-    ("o,output", "Output file on a given path", value<string>())
-#ifndef _WIN32
-    ("i,install", "Install INI file to " + etc_dir, value<bool>())
-#endif
-    ("b,broker", "broker hostname or IP", value<string>())
-    ("F,frontend", "frontend port", value<int>())
-    ("B,backend", "backend port", value<int>())
-    ("s,settings", "settings port", value<int>())
-    ("f,fps", "Frames per second", value<int>())
-    ("m,mongo", "MongoDB URI", value<string>())
-    ("h,help", "Print help");
-  // clang-format on
-  ParseResult options_parsed;
-  try {
-    options_parsed = options.parse(argc, argv);
-  } catch (const std::exception &e) {
-    cerr << e.what() << endl;
-    cerr << fg::red << "Unknown CLI option" << fg::reset << '\n';
-    cerr << options.help() << endl;
-    return -1;
-  }
-  if (options_parsed.count("help")) {
-    cout << options.help() << endl;
-    return 0;
-  }
-  if (options_parsed.count("output")) {
-    if (options_parsed.count("install")) {
-      cerr << fg::red << "Cannot install and write to file at the same time"
-           << fg::reset << endl;
-      return -1;
-    }
-    output = options_parsed["output"].as<string>();
-  }
-  if (options_parsed.count("broker")) {
-    data["broker"] = options_parsed["broker"].as<string>();
-  }
-  if (options_parsed.count("frontend")) {
-    data["port_frontend"] = options_parsed["frontend"].as<int>();
-  }
-  if (options_parsed.count("backend")) {
-    data["port_backend"] = options_parsed["backend"].as<int>();
-  }
-  if (options_parsed.count("settings")) {
-    data["port_settings"] = options_parsed["settings"].as<int>();
-  }
-  if (options_parsed.count("fps")) {
-    data["fps"] = options_parsed["fps"].as<int>();
-  }
-  if (options_parsed.count("mongo")) {
-    data["mongo_uri"] = options_parsed["mongo"].as<string>();
-  }
-  if (output != "") {
-    filesystem::path out_path{output};
-    if (out_path.is_relative()) {
-      out_path = filesystem::absolute(out_path);
-    }
-    auto path = out_path.parent_path();
-    auto file = out_path.filename();
-    auto tmp = filesystem::temp_directory_path();
-    if (!filesystem::exists(path)) {
-      cerr << fg::red << "Path " << path << " does not exist" << fg::reset
-           << endl;
-      return -1;
-    }
-    Environment env{template_dir + "/", tmp.string() + "/"};
-    env.write("mads.ini", data, file.string());
-    try {
-      filesystem::copy(tmp / file, path / file);
-      filesystem::remove(tmp / file);
-    } catch (const filesystem::filesystem_error &e) {
-      filesystem::remove(tmp / file);
-      cerr << e.what() << endl;
-      cerr << fg::red << "Cannot write or overwrite " << path / file
-           << fg::reset << endl;
-      return -1;
-    }
-    cout << fg::green << "INI file written to " << output << fg::reset << endl;
-    return 0;
-  } 
-#ifndef _WIN32
-  if (options_parsed.count("install")) {
-    if (!filesystem::exists(etc_dir)) {
-      try {
-        filesystem::create_directory(etc_dir);
-      } catch (const filesystem::filesystem_error &e) {
-        cerr << fg::red << "Cannot create directory " << etc_dir
-             << " (need sudo?)" << fg::reset << endl;
-        return -1;
-      }
-    }
-    auto etc = filesystem::absolute(etc_dir);
-    auto tmp = filesystem::temp_directory_path();
-    Environment env{template_dir + "/", tmp.string() + "/"};
-    env.write("mads.ini", data, "mads.ini");
-    try {
-      filesystem::copy(tmp / "mads.ini", etc / "mads.ini");
-      filesystem::remove(tmp / "mads.ini");
-    } catch (const filesystem::filesystem_error &e) {
-      filesystem::remove(tmp / "mads.ini");
-      cerr << fg::red << "Cannot write or overwrite " << etc / "mads.ini"
-           << fg::reset << endl;
-      return -1;
-    }
-    cout << fg::green << "INI file installed to " << etc_dir << "/mads.ini"
-         << fg::reset << endl;
-    return 0;
-  }
-#endif
-  Environment env{template_dir + "/", "."};
-  cout << env.render_file("mads.ini", data) << endl;
-  return 0;
-}
 
 /*
   _   _           _       _       
@@ -797,7 +662,7 @@ int main(int argc, char **argv) {
       execv(cmd.c_str(), argv + 1);
 #endif
     } else if (strncmp(argv[1], "ini", 3) == 0) {
-      return make_ini(argc - 1, argv + 1);
+      return Mads::Ini::run_cli(argc - 1, argv + 1);
     } else if (strncmp(argv[1], "update", 3) == 0) {
       check_update(false);
       return 0;
@@ -1020,8 +885,10 @@ int main(int argc, char **argv) {
     cout << setw(FIELD_WIDTH) << cmd << style::italic << " (wraps "
          << MADS_PREFIX << cmd << ")" << style::reset << endl;
   }
-  cout << setw(FIELD_WIDTH) << "ini" << style::italic << " (internal)"
-       << style::reset << endl;
+  if (!includes(ext_commands, "ini")) {
+    cout << setw(FIELD_WIDTH) << "ini" << style::italic << " (internal)"
+         << style::reset << endl;
+  }
   cout << setw(FIELD_WIDTH) << "update" << style::italic << " (internal)"
        << style::reset << endl;
   cout << setw(FIELD_WIDTH) << "beta" << style::italic << " (internal)"

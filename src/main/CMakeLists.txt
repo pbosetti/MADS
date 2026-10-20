@@ -68,7 +68,12 @@ foreach(main_source IN LISTS MADS_MAIN_SOURCES)
     continue()
   endif()
   message(STATUS "Preparing executable ${main_name} (from ${main_source})")
-  create_mads_target("${main_name}" "${main_source}")
+  set(_main_libs)
+  if(main_name STREQUAL "mads")
+    # `mads ini` runs in-process (see src/ini/ini_cli.hpp).
+    set(_main_libs LIBS mads_ini_core)
+  endif()
+  create_mads_target("${main_name}" "${main_source}" ${_main_libs})
 endforeach()
 
 create_mads_target(source plugin_loader.cpp DEFS "PLUGIN_LOADER_SOURCE")
