@@ -25,9 +25,44 @@
   `mads up` uses): the process list is shown in dependency order, non-table
   top-level entries are warnings, and invalid `ready` values are errors.
 - **mads-director is restyled to match mads-chat** (colors, fonts, status footer).
+- **New `mads-ini` node editor for mads.ini.** `mads ini` opens a graphical
+  editor of the settings file: one node per agent section, colored by role,
+  and one link per topic, computed with the same matching rules the agents
+  use (exact, prefix, MQTT wildcards). Drag from an output to an input to
+  subscribe, Ctrl-click or Delete to disconnect, and edit every schema key in
+  the inspector. Comments and the file layout are preserved, saves are atomic
+  with a `.bak` copy and conflict detection, and the editor warns when the
+  file changes on disk. See **mads-ini**(1).
+- **Headless `mads ini` subcommands.** `--check [FILE]` lints a file (exit 0
+  clean, 1 warnings, 2 errors), `--get SECTION.KEY` prints a raw value, and
+  `--set SECTION.KEY=VALUE` (repeatable, with `--comment`) changes keys while
+  keeping every comment. A plain word is stored as a string.
+- **`mads doctor --graph` output is unchanged.** Its topology code moved into
+  a shared module that the editor also uses.
+- **Behavior change:** a bare `mads ini` now opens the editor on
+  `<prefix>/etc/mads.ini` (or a new document from the template if that file
+  does not exist) instead of printing the template. `mads ini --print` prints
+  the template as before, and builds without the GUI keep printing it.
+
+## Fixes
+
+- **The broker kept reloading its settings file only until the first
+  "atomic" save.** Many editors (and now `mads ini`) save by writing a new
+  file and renaming it over the old one; the broker's file watcher (inotify
+  on Linux, kqueue on macOS) followed the replaced inode, so later changes
+  went unnoticed until a restart. The watcher now re-arms on the path when
+  the file is replaced (also used by `mads top`).
 
 ## For developers
 
+- **New static library `mads_ini_core`** (`src/ini`): the comment-preserving
+  mads.ini document model, the key schema (`ini_schema.toml`, embedded at build
+  time), the editor state and the `mads ini` command line. It is GUI-free, so
+  the `mads` dispatcher uses it in headless builds too.
+- **imnodes is a new FetchContent dependency** of the GUI, pinned to commit
+  `2d0c280b07b2f62b120034811cc6e41251673961`.
+- **`MadsGui::draw_status_footer` takes an optional `line2_color`** argument
+  (e.g. `kErrorColor`) to color the second line of the status footer.
 - **New option `MADS_ENABLE_GUI` replaces `MADS_DIRECTOR`.** An old cache value
   is migrated automatically, with a deprecation warning.
 - **Packages no longer ship GLFW headers, static library or CMake config.**

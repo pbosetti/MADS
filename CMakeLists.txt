@@ -647,7 +647,7 @@ elseif(WIN32)
     list(APPEND CPACK_COMPONENTS_ALL MadsGui)
     cpack_add_component(MadsGui
       DISPLAY_NAME "GUI components"
-      DESCRIPTION "The mads-director and mads-chat apps"
+      DESCRIPTION "The mads-director, mads-chat and mads-ini apps"
       DEPENDS MadsCore
       INSTALL_TYPES Full
     )

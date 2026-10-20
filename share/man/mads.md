@@ -73,8 +73,8 @@ In addition, the **mads** command allows to create systemd services for running 
 **service**
 :  Create a systemd service for a MADS agent. The service is created in /etc/systemd/system and can be started, stopped, enabled and disabled using the systemctl command. See below for more details.
 
-**info**
-:  Create a base **mads.ini** file.
+**ini**
+:  Open the **mads.ini** node editor, or check, read or change the file from the command line. See **mads-ini**(1).
 
 ## SERVICE SUBCOMMAND (LINUX ONLY)
 
@@ -90,9 +90,18 @@ Then, use **systemctl start** *service_name* to start the service, **systemctl s
 
 ## INI SUBCOMMAND
 
-The **ini** subcommand generates a stub for the **mads.ini** file, allowing some minor configuration on the command line. It has the following syntax:
+The **ini** subcommand manages the **mads.ini** settings file. It is described in full in **mads-ini**(1).
+
+**mads ini** [*FILE*]
+  opens the graphical node editor on *FILE*, or on *<prefix>/etc/mads.ini* when *FILE* is omitted (a new document from the template if that file does not exist). Without the GUI, a bare **mads ini** prints the template, as in earlier releases.
+
+**mads ini** **\-\-check** [*FILE*], **mads ini** **\-\-get** *section.key* [*FILE*], **mads ini** **\-\-set** *section.key=value* [**\-\-comment** *text*] [*FILE*]
+  parse and lint the file, print a raw value, or set keys while keeping the comments. See **mads-ini**(1) for exit codes and the syntax of values.
+
+The template options generate a stub for the **mads.ini** file, allowing some minor configuration on the command line. They are unchanged: **mads ini** **\-\-print** prints the template, and the options below write it to a file or install it:
 
 **mads ini**
+  [**\-p,\-\-print**]
   [**\-o,\-\-output**] *filename*
   [**\-i,\-\-install**]
   [**\-b,\-\-broker**] *broker address*
