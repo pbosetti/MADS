@@ -16,10 +16,11 @@ file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/ini_schema_data.hpp
 add_library(mads_ini_core STATIC
   ini_cli.cpp
   ini_document.cpp
+  ini_editor.cpp
   ini_schema.cpp
 )
 target_include_directories(mads_ini_core
-  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src
   PRIVATE ${CMAKE_CURRENT_BINARY_DIR}
 )
 target_link_libraries(mads_ini_core PUBLIC MadsCore MadsMainDeps)
