@@ -23,6 +23,10 @@ FetchContent_Declare(imgui
   GIT_TAG v1.92.6
   GIT_SHALLOW TRUE
 )
+FetchContent_Declare(imnodes
+  GIT_REPOSITORY https://github.com/Nelarius/imnodes.git
+  GIT_TAG 2d0c280b07b2f62b120034811cc6e41251673961 # master, 2026-10-18
+)
 FetchContent_Declare(portable_file_dialogs
   GIT_REPOSITORY https://github.com/samhocevar/portable-file-dialogs.git
   GIT_TAG 0.1.0
@@ -38,6 +42,10 @@ FetchContent_MakeAvailable(glfw)
 FetchContent_GetProperties(imgui)
 if(NOT imgui_POPULATED)
   FetchContent_Populate(imgui)
+endif()
+FetchContent_GetProperties(imnodes)
+if(NOT imnodes_POPULATED)
+  FetchContent_Populate(imnodes)
 endif()
 FetchContent_GetProperties(portable_file_dialogs)
 if(NOT portable_file_dialogs_POPULATED)
@@ -71,8 +79,12 @@ if(WIN32)
   target_compile_definitions(mads_imgui PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
 
+add_library(mads_imnodes STATIC ${imnodes_SOURCE_DIR}/imnodes.cpp)
+target_include_directories(mads_imnodes PUBLIC ${imnodes_SOURCE_DIR})
+target_link_libraries(mads_imnodes PUBLIC mads_imgui)
+
 # Silence third-party warnings.
-foreach(_mads_gui_third_party glfw mads_imgui)
+foreach(_mads_gui_third_party glfw mads_imgui mads_imnodes)
   if(MSVC)
     # glfw sets its own /W3 (and so may we); appending /w on top of either makes
     # MSVC emit a D9025 command-line warning ("overriding '/Wn' with '/w'").
@@ -143,3 +155,4 @@ endfunction()
 
 add_subdirectory(director)
 add_subdirectory(chat)
+add_subdirectory(ini)
