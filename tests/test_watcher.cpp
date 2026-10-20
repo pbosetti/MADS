@@ -165,3 +165,50 @@ TEST_CASE("a process-wide stop request also ends watch()", "[watcher]") {
 
   fs::remove(file_path);
 }
+
+TEST_CASE("Watcher keeps watching after the file is replaced by a rename",
+          "[watcher]") {
+  // Editors and Mads::Ini::FileSource save by writing a temporary file and
+  // renaming it over the original. inotify/kqueue watch the old inode, so the
+  // watch must be re-armed on the path, or every later change is missed.
+  auto file_path = unique_temp_file("replace");
+  {
+    std::ofstream ofs(file_path);
+    ofs << "initial\n";
+  }
+
+  Mads::Watcher watcher(file_path.string(), std::chrono::milliseconds(100));
+  std::atomic<int> calls{0};
+  std::thread t([&]() {
+    watcher.watch([&](const std::string &) { ++calls; });
+  });
+  std::this_thread::sleep_for(std::chrono::milliseconds(250));
+
+  // 1. Atomic replace.
+  auto tmp_path = file_path;
+  tmp_path += ".tmp";
+  {
+    std::ofstream ofs(tmp_path);
+    ofs << "replaced\n";
+  }
+  fs::rename(tmp_path, file_path);
+  bool seen_replace = mads_test::wait_for([&]() { return calls.load() >= 1; },
+                                          std::chrono::milliseconds(3000));
+
+  // 2. In-place change of the new file. Wait past the Windows debounce (1 s)
+  // so the two changes are reported separately everywhere.
+  std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+  const int before = calls.load();
+  {
+    std::ofstream ofs(file_path, std::ios::app);
+    ofs << "modified after replace\n";
+  }
+  bool seen_modify = mads_test::wait_for(
+      [&]() { return calls.load() > before; }, std::chrono::milliseconds(3000));
+
+  watcher.stop();
+  t.join();
+  fs::remove(file_path);
+  REQUIRE(seen_replace);
+  REQUIRE(seen_modify);
+}

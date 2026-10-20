@@ -33,17 +33,15 @@ public:
   Watcher(const std::string &file_name, std::chrono::duration<float> to = 0s)
       : _file_name(file_name), _timeout(to) {
 #if defined(__APPLE__)
-    _fd = open(_file_name.c_str(), O_EVTONLY);
     _ts.tv_sec =
         std::chrono::duration_cast<std::chrono::seconds>(_timeout).count();
     _ts.tv_nsec =
         std::chrono::duration_cast<std::chrono::nanoseconds>(_timeout).count() %
         1000000000;
-    EV_SET(&_change, _fd, EVFILT_VNODE, EV_ADD | EV_ENABLE | EV_CLEAR,
-           NOTE_WRITE, 0, (void *)_file_name.c_str());
+    arm();
 #elif defined(__linux__)
     _inotify_fd = inotify_init1(IN_NONBLOCK);
-    _watch = inotify_add_watch(_inotify_fd, _file_name.c_str(), IN_MODIFY);
+    arm();
 #elif defined(_WIN32)
     _to =
         std::chrono::duration_cast<std::chrono::milliseconds>(_timeout).count();
@@ -59,10 +57,10 @@ public:
 
   ~Watcher() {
 #if defined(__APPLE__)
-    close(_fd);
+    if (_fd >= 0) close(_fd);
     close(_kq);
 #elif defined(__linux__)
-    inotify_rm_watch(_inotify_fd, _watch);
+    if (_watch >= 0) inotify_rm_watch(_inotify_fd, _watch);
     close(_inotify_fd);
 #elif defined(_WIN32)
     FindCloseChangeNotification(_change_handle);
@@ -99,12 +97,12 @@ private:
   std::chrono::duration<float> _timeout;
   std::atomic<bool> _watching{false};
 #if defined(__linux__)
-  char _buffer[BUF_LEN];
+  alignas(struct inotify_event) char _buffer[BUF_LEN];
   int _inotify_fd;
-  int _watch;
+  int _watch = -1;
 #elif defined(__APPLE__)
   struct timespec _ts;
-  int _fd;
+  int _fd = -1;
   int _kq = kqueue();
   struct kevent _change;
   struct kevent _event;
@@ -114,26 +112,79 @@ private:
   std::chrono::steady_clock::time_point _last_change_time;
 #endif
 
+  // Both inotify and kqueue watch an inode, not a path. Editors and
+  // Mads::Ini::FileSource save by writing a temporary file and renaming it
+  // over the original, which replaces the inode: the old watch then never
+  // fires again. So a delete/rename of the watched inode re-arms the watch on
+  // the path (retrying while the path is missing) and counts as a change.
+#if defined(__linux__)
+  void arm() {
+    _watch = inotify_add_watch(_inotify_fd, _file_name.c_str(),
+                               IN_MODIFY | IN_DELETE_SELF | IN_MOVE_SELF);
+  }
+#elif defined(__APPLE__)
+  void arm() {
+    _fd = open(_file_name.c_str(), O_EVTONLY);
+    if (_fd >= 0) {
+      EV_SET(&_change, _fd, EVFILT_VNODE, EV_ADD | EV_ENABLE | EV_CLEAR,
+             NOTE_WRITE | NOTE_EXTEND | NOTE_DELETE | NOTE_RENAME, 0,
+             (void *)_file_name.c_str());
+    }
+  }
+#endif
+
   int file_modified() {
 #if defined(__linux__)
-    // Use inotify to monitor file changes on Linux
-    int rc = read(_inotify_fd, _buffer, BUF_LEN);
-    if (rc < 0 && errno == EAGAIN) {
+    if (_watch < 0) {
+      // Replaced and not there yet: report the change once it reappears.
+      arm();
+      if (_watch < 0) {
+        std::this_thread::sleep_for(_timeout);
+      }
+      return _watch >= 0 ? 1 : 0;
+    }
+    ssize_t rc = read(_inotify_fd, _buffer, BUF_LEN);
+    if (rc < 0) {
+      if (errno != EAGAIN) {
+        perror("read");
+      }
       std::this_thread::sleep_for(_timeout);
       return 0;
     }
-    if (rc < 0 && errno != EAGAIN) {
-      perror("read");
+    bool modified = false;
+    bool replaced = false;
+    for (ssize_t i = 0; i < rc;) {
+      const auto *event = reinterpret_cast<const struct inotify_event *>(_buffer + i);
+      modified = modified || (event->mask & IN_MODIFY);
+      replaced = replaced ||
+                 (event->mask & (IN_DELETE_SELF | IN_MOVE_SELF | IN_IGNORED));
+      i += static_cast<ssize_t>(sizeof(struct inotify_event) + event->len);
     }
-    return rc;
+    if (replaced) {
+      inotify_rm_watch(_inotify_fd, _watch); // harmless if already gone
+      arm();
+      return _watch >= 0 ? 1 : 0;
+    }
+    return modified ? 1 : 0;
 #elif defined(__APPLE__)
-    if (_timeout > 0s) {
-      return kevent(_kq, &_change, 1, &_event, 1, &_ts);
-    } else {
-      // Bounded wait instead of blocking forever, so stop() stays responsive.
-      struct timespec ts{1, 0};
-      return kevent(_kq, &_change, 1, &_event, 1, &ts);
+    if (_fd < 0) {
+      // Replaced and not there yet: report the change once it reappears.
+      arm();
+      if (_fd < 0) {
+        std::this_thread::sleep_for(_timeout > 0s ? _timeout : 1s);
+      }
+      return _fd >= 0 ? 1 : 0;
     }
+    // Bounded wait even with no timeout, so stop() stays responsive.
+    struct timespec one_second{1, 0};
+    const int rc = kevent(_kq, &_change, 1, &_event, 1,
+                          _timeout > 0s ? &_ts : &one_second);
+    if (rc > 0 && (_event.fflags & (NOTE_DELETE | NOTE_RENAME))) {
+      close(_fd); // also removes the kevent
+      arm();
+      return _fd >= 0 ? 1 : 0;
+    }
+    return rc > 0 ? 1 : 0;
 #elif defined(_WIN32)
     // Debounce: only report a change if enough time has passed since the last one
     auto now = std::chrono::steady_clock::now();
