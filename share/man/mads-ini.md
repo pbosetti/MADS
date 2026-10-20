@@ -210,7 +210,7 @@ the key if needed. If the target already receives the topic through an existing 
 changed and the status footer names the entry. Connecting a node to itself, or from a node without a
 topic, is refused.
 
-To disconnect, Ctrl-click the link's pin, or select the link and press **Delete**. The editor removes
+To disconnect, Ctrl-click (Cmd-click on macOS) the link's pin, or select the link and press **Delete**. The editor removes
 the **sub_topic** entries that equal the topic exactly. Removing the last entry leaves
 **sub_topic = []**. If another entry (a prefix, a wildcard, or the catch-all `""`) also delivers
 the topic, the editor refuses and names the pattern: edit that **sub_topic** by hand.
@@ -235,7 +235,7 @@ The shortcuts below use Ctrl. On macOS the editor shows and uses Cmd in their pl
 | Delete selected nodes and links | Delete or Backspace, with the pointer over the canvas |
 | Find node | Shift+Space, or View > Find node... |
 | Pan the canvas | Hold Space and drag over the canvas, nodes included |
-| Detach a link | Ctrl-click a link's pin (same as deleting it) |
+| Detach a link | Ctrl-click (Cmd-click on macOS) a link's pin (same as deleting it) |
 | Move a node | Drag it; the new position is saved in the document |
 
 The shortcuts are inactive while a dialog is open. While a text field has the keyboard, undo, redo,

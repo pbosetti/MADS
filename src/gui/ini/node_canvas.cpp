@@ -220,6 +220,7 @@ void NodeCanvas::Impl::setup_context() {
   }
   ImNodes::EditorContextSet(context);
 
+  // KeyCtrl is the Cmd key on macOS (ImGui swaps them there).
   ImNodes::GetIO().LinkDetachWithModifierClick.Modifier = &ImGui::GetIO().KeyCtrl;
 
   if (styled) {
@@ -531,7 +532,7 @@ void NodeCanvas::Impl::handle_link_events() {
     }
   }
 
-  // Detached link (Ctrl+click on a pin): same as deleting it.
+  // Detached link (Ctrl+click on a pin, Cmd+click on macOS): same as deleting it.
   int destroyed = 0;
   if (ImNodes::IsLinkDestroyed(&destroyed)) {
     const auto &edges = editor.edges();

@@ -29,10 +29,10 @@
   editor of the settings file: one node per agent section, colored by role,
   and one link per topic, computed with the same matching rules the agents
   use (exact, prefix, MQTT wildcards). Drag from an output to an input to
-  subscribe, Ctrl-click or Delete to disconnect, and edit every schema key in
-  the inspector. Comments and the file layout are preserved, saves are atomic
-  with a `.bak` copy and conflict detection, and the editor warns when the
-  file changes on disk. See **mads-ini**(1).
+  subscribe, Ctrl-click (Cmd-click on macOS) or Delete to disconnect, and
+  edit every schema key in the inspector. Comments and the file layout are
+  preserved, saves are atomic with a `.bak` copy and conflict detection, and
+  the editor warns when the file changes on disk. See **mads-ini**(1).
 - **Headless `mads ini` subcommands.** `--check [FILE]` lints a file (exit 0
   clean, 1 warnings, 2 errors), `--get SECTION.KEY` prints a raw value, and
   `--set SECTION.KEY=VALUE` (repeatable, with `--comment`) changes keys while
