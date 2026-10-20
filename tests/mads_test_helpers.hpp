@@ -31,7 +31,8 @@ Conventions for test authors:
     test_clock_offset_agent               44500-44599
     test_ipc_transport                    44600-44699
     test_agent_shm                        44700-44749
-    (spare)                               44750-44999
+    test_ini_remote                       44750-44759
+    (spare)                               44760-44999
   Stay inside 42100-44999: that band sits in Linux's default ephemeral range
   (32768-60999), so .github/workflows/coverage.yml reserves exactly it via
   net.ipv4.ip_local_reserved_ports.  A port outside the band can be handed out

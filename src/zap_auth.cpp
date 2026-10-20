@@ -138,9 +138,15 @@ void ZapAuth::configure_curve(const string &z85_public_key) {
   _allowed_curve_keys.insert(z85_public_key);
 }
 
+void ZapAuth::configure_domain_curve(const string &domain,
+                                     const set<string> &z85_keys) {
+  lock_guard<mutex> lock(_config_mutex);
+  _domain_curve_keys[domain] = z85_keys;
+}
+
 bool ZapAuth::_authorise(const string &domain, const string &address,
                          const string &mechanism, const string &credentials,
-                         string &reason) const {
+                         string &reason, string &user_id) const {
   lock_guard<mutex> lock(_config_mutex);
 
   if (_domain != "*" && !_domain.empty() && domain != _domain) {
@@ -164,6 +170,24 @@ bool ZapAuth::_authorise(const string &domain, const string &address,
       reason = "Address not allowed";
       return false;
     }
+  }
+
+  // A domain with its own key set never falls back to the default allowlist,
+  // and never honours "*" or an empty set as "allow all": this is how the
+  // edit socket stays closed to the (broader) set of bus keys.
+  if (const auto it = _domain_curve_keys.find(domain);
+      it != _domain_curve_keys.end()) {
+    if (mechanism != "CURVE") {
+      reason = "Unsupported mechanism " + mechanism;
+      return false;
+    }
+    const string encoded = z85_encode(credentials);
+    if (encoded.empty() || it->second.count(encoded) == 0) {
+      reason = "Unknown client key";
+      return false;
+    }
+    user_id = encoded;
+    return true;
   }
 
   if (mechanism == "CURVE") {
@@ -218,12 +242,12 @@ void ZapAuth::_serve() {
       credentials.assign(static_cast<const char *>(frame.data()), frame.size());
     }
 
-    string reason;
+    string reason, user_id;
     bool ok = version == "1.0";
     if (!ok)
       reason = "Unsupported ZAP version " + version;
     else
-      ok = _authorise(domain, address, mechanism, credentials, reason);
+      ok = _authorise(domain, address, mechanism, credentials, reason, user_id);
 
     if (ok)
       _granted++;
@@ -244,8 +268,8 @@ void ZapAuth::_serve() {
     reply.addstr(request_id);
     reply.addstr(ok ? "200" : "400");
     reply.addstr(ok ? "OK" : reason);
-    reply.addstr("");
-    reply.addstr("");
+    reply.addstr(ok ? user_id : string()); // user id: the Z85 key, if known
+    reply.addstr("");                      // metadata
     try {
       reply.send(*_socket);
     } catch (const zmq::error_t &e) {

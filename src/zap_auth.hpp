@@ -22,6 +22,7 @@ Copyright (C) 2026 Paolo Bosetti
 #endif
 
 #include <atomic>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -120,6 +121,23 @@ public:
    */
   void configure_curve(const std::string &z85_public_key);
 
+  /**
+   * @brief Give a ZAP domain its own, exclusive CURVE key set.
+   *
+   * Requests whose domain equals `domain` are checked only against
+   * `z85_keys` (never against the allowlist of configure_curve()); an empty
+   * set denies every client of the domain, `"*"` is not special, and any
+   * mechanism other than CURVE is denied. The address whitelist still
+   * applies. Other domains behave as before. For granted CURVE requests of
+   * such a domain the ZAP reply's User-Id frame carries the client's Z85 key
+   * (readable by the server via `message_t::gets("User-Id")`).
+   *
+   * @param domain The ZAP domain (ZMQ_ZAP_DOMAIN of the server socket).
+   * @param z85_keys Allowed client public keys, Z85-encoded.
+   */
+  void configure_domain_curve(const std::string &domain,
+                              const std::set<std::string> &z85_keys);
+
   /** @brief Number of requests granted so far (test/diagnostic aid). */
   int granted() const { return _granted.load(); }
 
@@ -142,11 +160,13 @@ private:
    * @param credentials The mechanism-specific credential frame; for CURVE this
    *        is the client's 32-byte binary public key.
    * @param[out] reason Human-readable denial reason, empty when granted.
+   * @param[out] user_id Z85 client key for granted per-domain CURVE requests.
    * @return true if the connection is authorised.
    */
   bool _authorise(const std::string &domain, const std::string &address,
                   const std::string &mechanism,
-                  const std::string &credentials, std::string &reason) const;
+                  const std::string &credentials, std::string &reason,
+                  std::string &user_id) const;
 
   zmq::context_t &_context;
   std::unique_ptr<zmq::socket_t> _socket;
@@ -160,6 +180,7 @@ private:
   std::string _domain = "*";
   std::set<std::string> _allowed_addresses;
   std::set<std::string> _allowed_curve_keys;
+  std::map<std::string, std::set<std::string>> _domain_curve_keys;
 };
 
 /** @brief A CURVE keypair, both keys Z85-encoded (40 characters each). */

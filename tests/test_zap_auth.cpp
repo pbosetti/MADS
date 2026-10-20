@@ -245,3 +245,136 @@ TEST_CASE("configure_domain restricts the handler to one ZAP domain",
                                  server_kp.public_key));
   REQUIRE(auth.denied() >= 1);
 }
+
+// ---------------------------------------------------------------------------
+// Per-domain CURVE key sets (configure_domain_curve)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Like CurveServer, but the server socket sits in a ZAP domain and replies
+// with the ZAP User-Id it saw ("" when none).
+struct DomainServer {
+  zmq::socket_t sock;
+  std::thread thread;
+  std::atomic<bool> stopped{false};
+
+  DomainServer(zmq::context_t &ctx, const std::string &endpoint,
+               const std::string &secret_key, const std::string &domain)
+      : sock(ctx, zmq::socket_type::rep) {
+    sock.set(zmq::sockopt::linger, 0);
+    sock.set(zmq::sockopt::rcvtimeo, 100);
+    sock.set(zmq::sockopt::curve_server, 1);
+    sock.set(zmq::sockopt::curve_secretkey, secret_key);
+    if (!domain.empty())
+      sock.set(zmq::sockopt::zap_domain, domain);
+    sock.bind(endpoint);
+    thread = std::thread([this] {
+      while (!stopped.load()) {
+        zmq::message_t m;
+        if (!sock.recv(m, zmq::recv_flags::none))
+          continue;
+        const char *uid = m.gets("User-Id");
+        zmq::message_t r(std::string(uid ? uid : ""));
+        sock.send(r, zmq::send_flags::none);
+      }
+    });
+  }
+  ~DomainServer() {
+    stopped.store(true);
+    if (thread.joinable()) thread.join();
+    sock.close();
+  }
+};
+
+// Returns true and the User-Id the server saw if the round trip completed.
+bool domain_round_trip(zmq::context_t &ctx, const std::string &endpoint,
+                       const Mads::CurveKeypair &client_kp,
+                       const std::string &server_public_key,
+                       std::string *user_id = nullptr) {
+  zmq::socket_t req(ctx, zmq::socket_type::req);
+  req.set(zmq::sockopt::linger, 0);
+  req.set(zmq::sockopt::rcvtimeo, 800);
+  req.set(zmq::sockopt::sndtimeo, 800);
+  req.set(zmq::sockopt::curve_publickey, client_kp.public_key);
+  req.set(zmq::sockopt::curve_secretkey, client_kp.secret_key);
+  req.set(zmq::sockopt::curve_serverkey, server_public_key);
+  req.connect(endpoint);
+  zmq::message_t out(std::string("ping"));
+  if (!req.send(out, zmq::send_flags::none))
+    return false;
+  zmq::message_t in;
+  if (!req.recv(in, zmq::recv_flags::none))
+    return false;
+  if (user_id)
+    *user_id = in.to_string();
+  return true;
+}
+
+} // namespace
+
+TEST_CASE("a domain with its own key set ignores the default allowlist",
+          "[zap]") {
+  const uint16_t port = 42890;
+  auto server_kp = Mads::generate_keypair();
+  auto editor_kp = Mads::generate_keypair();
+  auto agent_kp = Mads::generate_keypair();
+
+  zmq::context_t ctx;
+  Mads::ZapAuth auth(ctx);
+  auth.allow("127.0.0.1");
+  auth.configure_curve(agent_kp.public_key); // default allowlist: agents only
+  auth.configure_domain_curve("edit", {editor_kp.public_key});
+  auth.start();
+
+  DomainServer server(ctx, mads_test::loopback(port), server_kp.secret_key,
+                      "edit");
+  std::string uid;
+  REQUIRE(domain_round_trip(ctx, mads_test::loopback(port), editor_kp,
+                            server_kp.public_key, &uid));
+  REQUIRE(uid == editor_kp.public_key); // User-Id carries the Z85 key
+  REQUIRE_FALSE(domain_round_trip(ctx, mads_test::loopback(port), agent_kp,
+                                  server_kp.public_key));
+}
+
+TEST_CASE("a domain with an empty key set denies every client", "[zap]") {
+  const uint16_t port = 42891;
+  auto server_kp = Mads::generate_keypair();
+  auto client_kp = Mads::generate_keypair();
+
+  zmq::context_t ctx;
+  Mads::ZapAuth auth(ctx);
+  auth.configure_curve("*"); // would admit anyone in the default domain
+  auth.configure_domain_curve("edit", {});
+  auth.start();
+
+  DomainServer server(ctx, mads_test::loopback(port), server_kp.secret_key,
+                      "edit");
+  REQUIRE_FALSE(domain_round_trip(ctx, mads_test::loopback(port), client_kp,
+                                  server_kp.public_key));
+}
+
+TEST_CASE("sockets outside a configured domain keep the default behaviour",
+          "[zap]") {
+  const uint16_t port = 42892;
+  auto server_kp = Mads::generate_keypair();
+  auto editor_kp = Mads::generate_keypair();
+  auto agent_kp = Mads::generate_keypair();
+
+  zmq::context_t ctx;
+  Mads::ZapAuth auth(ctx);
+  auth.allow("127.0.0.1");
+  auth.configure_curve(agent_kp.public_key);
+  auth.configure_domain_curve("edit", {editor_kp.public_key});
+  auth.start();
+
+  DomainServer server(ctx, mads_test::loopback(port), server_kp.secret_key,
+                      ""); // no ZAP domain
+  std::string uid = "x";
+  REQUIRE(domain_round_trip(ctx, mads_test::loopback(port), agent_kp,
+                            server_kp.public_key, &uid));
+  REQUIRE(uid.empty()); // no User-Id outside per-domain sets
+  // The editor key is not on the default list.
+  REQUIRE_FALSE(domain_round_trip(ctx, mads_test::loopback(port), editor_kp,
+                                  server_kp.public_key));
+}

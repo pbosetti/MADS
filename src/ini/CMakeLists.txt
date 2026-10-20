@@ -18,6 +18,7 @@ add_library(mads_ini_core STATIC
   ini_document.cpp
   ini_editor.cpp
   ini_schema.cpp
+  remote_edit.cpp
 )
 target_include_directories(mads_ini_core
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src
