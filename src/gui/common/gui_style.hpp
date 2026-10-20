@@ -36,6 +36,8 @@ Texture load_texture_from_png(const std::filesystem::path &path);
 Texture load_logo(const std::filesystem::path &primary_images_dir);
 void free_texture(Texture &texture);        // glDeleteTextures if id != 0, then reset
 float status_footer_height();               // height reserved for the status footer
-void draw_status_footer(const Texture &logo, const std::string &line1, const std::string &line2);
+// line2_color, when given, colors the second line (e.g. kErrorColor).
+void draw_status_footer(const Texture &logo, const std::string &line1, const std::string &line2,
+                        const ImVec4 *line2_color = nullptr);
 
 } // namespace MadsGui

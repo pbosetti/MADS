@@ -954,17 +954,26 @@ custom_keys = true
   doc = "Dealer endpoint the worker pulls jobs from"
 
 [[types]]
-id = "image"
-label = "Image watcher"
-executable = "mads-image"
+# One section per network side ([federate_a], [federate_b] by default, see
+# --name-a/--name-b): its sub_topic lists the topics relayed from that side
+# to the other one, which republishes them under the same topic.
+id = "federate"
+label = "Federate"
+executable = "mads-federate"
+category = "Agents"
+role = "filter"
+aliases = ["federate_a", "federate_b"]
+custom_keys = false
+
+[[types]]
+# Publishes synthetic payloads to measure throughput and latency; period and
+# payload size come from its -p/-l options.
+id = "perf_assess"
+label = "Performance assessment"
+executable = "mads-perf_assess"
 category = "Agents"
 role = "source"
 custom_keys = false
-  [[types.keys]]
-  name = "watch_list"
-  type = "table"
-  group = "Watch"
-  doc = "Topic = file path pairs: each file is published on its topic when it changes"
 
 [[types]]
 id = "echo"

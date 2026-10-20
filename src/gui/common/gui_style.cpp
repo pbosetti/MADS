@@ -132,7 +132,8 @@ float status_footer_height() {
   return content_height + ImGui::GetStyle().FramePadding.y * 4.0F + ImGui::GetStyle().ItemSpacing.y;
 }
 
-void draw_status_footer(const Texture &logo, const std::string &line1, const std::string &line2) {
+void draw_status_footer(const Texture &logo, const std::string &line1, const std::string &line2,
+                        const ImVec4 *line2_color) {
   ImGui::Separator();
   const float line_height = ImGui::GetTextLineHeightWithSpacing();
   const float image_height = line_height * 2.0F;
@@ -148,7 +149,11 @@ void draw_status_footer(const Texture &logo, const std::string &line1, const std
 
   ImGui::BeginGroup();
   ImGui::Text("%s", line1.c_str());
-  ImGui::Text("%s", line2.c_str());
+  if (line2_color != nullptr) {
+    ImGui::TextColored(*line2_color, "%s", line2.c_str());
+  } else {
+    ImGui::Text("%s", line2.c_str());
+  }
   ImGui::EndGroup();
 
   ImGui::EndChild();

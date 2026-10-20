@@ -62,6 +62,10 @@ struct NodeType {
   std::string category;   ///< palette group, e.g. "Plugin loaders"
   /// "source", "filter", "sink" or "any": which pins the node shows.
   std::string role = "any";
+  /// Section names that imply this type besides `id` (e.g. federate's
+  /// default "federate_a" and "federate_b"). New nodes take the first free
+  /// alias as their name.
+  std::vector<std::string> aliases;
   bool custom_keys = false; ///< arbitrary extra keys are legitimate
   bool document = false;    ///< [agents] / [broker]: no node, no common keys
   std::vector<KeySpec> keys; ///< own keys, in display order
@@ -85,7 +89,8 @@ public:
   /// The node type of `section`:
   ///  1. `section.meta.type` if it names a known type;
   ///  2. "agents"/"broker" for those section names;
-  ///  3. a type whose id equals the section name (e.g. [logger]);
+  ///  3. a type whose id or one of its aliases equals the section name
+  ///     (e.g. [logger], [federate_a]);
   ///  4. with an `attachment` key: "source", "filter" or "sink" from the
   ///     active pub_topic/sub_topic keys (pub only, both, sub only);
   ///  5. "custom".

@@ -102,7 +102,8 @@ public:
   // Each of these commits on success.
 
   /// Adds a section of node type `type_id` at canvas position (x, y), named
-  /// `type_id` or, if taken, `type_id_2`, `type_id_3`, ... Writes the `#@`
+  /// after the type's first free alias, else `type_id` or, if taken,
+  /// `type_id_2`, `type_id_3`, ... Writes the `#@`
   /// meta. Returns the new name, or "" for an unknown or document type.
   std::string add_node(const std::string &type_id, float x, float y);
   bool delete_node(const std::string &name);

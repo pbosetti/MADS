@@ -217,6 +217,16 @@ TEST_CASE("add_node names, meta and rejections", "[ini][editor]") {
   CHECK(ed.dirty());
 }
 
+TEST_CASE("add_node names a node after the type's aliases first",
+          "[ini][editor]") {
+  Editor ed;
+  CHECK(ed.add_node("federate", 0, 0) == "federate_a");
+  CHECK(ed.add_node("federate", 0, 0) == "federate_b");
+  CHECK(ed.add_node("federate", 0, 0) == "federate");
+  CHECK(ed.add_node("federate", 0, 0) == "federate_2");
+  CHECK(ed.type_of("federate_b") == "federate");
+}
+
 TEST_CASE("duplicate, rename and delete nodes", "[ini][editor]") {
   Editor ed;
   ed.new_document(std::string(kPipeline) + "\n[flt.extra]\nk = 1\n");

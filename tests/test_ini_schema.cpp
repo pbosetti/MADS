@@ -153,6 +153,23 @@ TEST_CASE("ini_schema: infer_type rule 3, type named after the section",
           "[ini_schema]") {
   const Document doc = Document::parse("[logger]\nmax_length = 10\n");
   CHECK(Schema::builtin().infer_type(section_of(doc, "logger")) == "logger");
+  // Aliases: mads-federate's default section names.
+  const Document fed = Document::parse(
+      "[federate_a]\nsub_topic = [\"x\"]\n\n[federate_b]\nsub_topic = [\"y\"]\n"
+      "\n[perf_assess]\npub_topic = \"perf_assess\"\n");
+  CHECK(Schema::builtin().infer_type(section_of(fed, "federate_a")) ==
+        "federate");
+  CHECK(Schema::builtin().infer_type(section_of(fed, "federate_b")) ==
+        "federate");
+  CHECK(Schema::builtin().infer_type(section_of(fed, "perf_assess")) ==
+        "perf_assess");
+}
+
+TEST_CASE("ini_schema: agent list", "[ini_schema]") {
+  const auto &schema = Schema::builtin();
+  CHECK(schema.type("federate") != nullptr);
+  CHECK(schema.type("perf_assess") != nullptr);
+  CHECK(schema.type("image") == nullptr);
 }
 
 TEST_CASE("ini_schema: infer_type rule 4, plugin loaders by topics",
@@ -232,6 +249,33 @@ TEST_CASE("ini_schema: lint flags invalid wildcards in sub_topic",
       "[pub]\npub_topic = \"a/b\"\n\n[sub]\nsub_topic = [\"a/#\"]\n");
   CHECK_FALSE(has_diagnostic(valid, Diagnostic::Severity::Warning,
                              "sub_topic", "invalid wildcard"));
+}
+
+TEST_CASE("ini_schema: lint warns that '*' is not a wildcard",
+          "[ini_schema]") {
+  const auto diags = lint_text(
+      "[pub]\npub_topic = \"fmu_control\"\n\n[sub]\nsub_topic = [\"fmu_*\"]\n");
+  CHECK(has_diagnostic(diags, Diagnostic::Severity::Warning, "sub_topic",
+                       "'*' is not a wildcard"));
+  const auto prefix = lint_text(
+      "[pub]\npub_topic = \"fmu_control\"\n\n[sub]\nsub_topic = [\"fmu_\"]\n");
+  CHECK_FALSE(has_diagnostic(prefix, Diagnostic::Severity::Warning,
+                             "sub_topic"));
+}
+
+TEST_CASE("ini_schema: lint warns about '+' inside a level", "[ini_schema]") {
+  const auto diags = lint_text(
+      "[pub]\npub_topic = \"fmu_control\"\n\n[sub]\nsub_topic = [\"fmu_+\"]\n");
+  CHECK(has_diagnostic(diags, Diagnostic::Severity::Warning, "sub_topic",
+                       "use 'fmu_'"));
+  const auto nested = lint_text(
+      "[pub]\npub_topic = \"a/b\"\n\n[sub]\nsub_topic = [\"a/x+\"]\n");
+  CHECK(has_diagnostic(nested, Diagnostic::Severity::Warning, "sub_topic",
+                       "use 'a/x'"));
+  // Whole-level '+' is a real wildcard.
+  const auto ok = lint_text(
+      "[pub]\npub_topic = \"fmu/control\"\n\n[sub]\nsub_topic = [\"fmu/+\"]\n");
+  CHECK_FALSE(has_diagnostic(ok, Diagnostic::Severity::Warning, "sub_topic"));
 }
 
 TEST_CASE("ini_schema: a bare string sub_topic is a one-element list",

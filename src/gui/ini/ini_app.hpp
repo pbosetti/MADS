@@ -56,6 +56,9 @@ private:
   void draw_problems();
   void draw_modals();
   void draw_footer();
+  /// Shift+Space node finder: incremental search over node names, Enter
+  /// focuses the canvas on the chosen node.
+  void draw_finder();
 
   std::optional<std::filesystem::path> _file;
   Mads::Ini::Editor _editor;
@@ -73,6 +76,9 @@ private:
   bool _open_unsaved_popup = false;
   bool _open_conflict_popup = false;
   bool _open_about_popup = false;
+  bool _open_finder = false;
+  char _finder_query[128] = {};
+  int _finder_index = 0; // highlighted match
   std::string _conflict_message;
   double _next_disk_poll = 0.0;
 };

@@ -23,6 +23,7 @@
 #include <portable-file-dialogs.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cfloat>
 #include <exception>
 #include <iostream>
@@ -37,7 +38,9 @@ constexpr const char *kWindowTitleBase = "MADS ini editor";
 constexpr const char *kUnsavedPopup = "Unsaved changes";
 constexpr const char *kConflictPopup = "File changed on disk";
 constexpr const char *kAboutPopup = "About MADS ini editor";
+constexpr const char *kFinderPopup = "##find_node";
 constexpr ImVec4 kWarningColor{0.95F, 0.75F, 0.30F, 1.0F};
+constexpr int kFinderMaxResults = 12;
 
 #ifdef __APPLE__
 constexpr const char *kModifier = "Cmd+";
@@ -47,6 +50,36 @@ constexpr const char *kModifier = "Ctrl+";
 
 std::vector<std::string> ini_filters() {
   return {"MADS settings", "*.ini *.toml", "All files", "*"};
+}
+
+// How well `name` matches the finder `query`, case-insensitively: 0 for a
+// prefix, 1 for a substring, 2 for the query's letters in order (fuzzy, e.g.
+// "fla" in "fmu_linear_axis"), nullopt for no match. An empty query matches
+// everything as a prefix.
+std::optional<int> match_rank(const std::string &name, const std::string &query) {
+  const auto lower = [](std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return s;
+  };
+  const std::string n = lower(name);
+  const std::string q = lower(query);
+  const size_t pos = n.find(q);
+  if (pos == 0) {
+    return 0;
+  }
+  if (pos != std::string::npos) {
+    return 1;
+  }
+  size_t i = 0;
+  for (char c : n) {
+    if (i < q.size() && c == q[i]) {
+      ++i;
+    }
+  }
+  if (i == q.size()) {
+    return 2;
+  }
+  return std::nullopt;
 }
 
 void print_gui_hint(const char *what) {
@@ -89,7 +122,9 @@ int IniApp::run() {
   ImGui::CreateContext();
   ImNodes::CreateContext();
   ImGuiIO &io = ImGui::GetIO();
-  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+  // No keyboard navigation: Space is the canvas pan key (Space+drag), and
+  // with navigation on it would also press whatever widget has nav focus.
+  // Tab still moves between text fields.
   io.IniFilename = nullptr;
 
   MadsGui::apply_style();
@@ -157,6 +192,7 @@ int IniApp::run() {
 
     draw_footer();
     draw_modals();
+    draw_finder();
     ImGui::End();
 
     ImGui::Render();
@@ -419,6 +455,9 @@ void IniApp::handle_shortcuts() {
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_D, route)) {
       duplicate_selected();
     }
+    if (ImGui::Shortcut(ImGuiMod_Shift | ImGuiKey_Space, route)) {
+      _open_finder = true;
+    }
   }
 }
 
@@ -477,6 +516,9 @@ void IniApp::draw_menu_bar() {
     ImGui::MenuItem("Show catch-all links", nullptr, &_ui.show_catch_all);
     ImGui::MenuItem("Minimap", nullptr, &_ui.show_minimap);
     ImGui::Separator();
+    if (ImGui::MenuItem("Find node...", "Shift+Space")) {
+      _open_finder = true;
+    }
     if (ImGui::MenuItem("Auto layout")) {
       _editor.auto_layout(true);
     }
@@ -615,11 +657,23 @@ void IniApp::draw_footer() {
                             std::to_string(_editor.edges().size()) + " links, " + std::to_string(errors) +
                             " errors, " + std::to_string(warnings) + " warnings";
 
+  // Second line: an active toast, else the first error of the document (both
+  // in red when they are errors), else a usage hint.
   std::string line2 = "Drag from an output to an input to subscribe; select a node to edit it";
+  bool error = false;
   if (!_ui.toast.empty() && ImGui::GetTime() < _ui.toast_until) {
-    line2 = (_ui.toast_error ? "Error: " : "") + _ui.toast;
+    line2 = _ui.toast;
+    error = _ui.toast_error;
+  } else if (errors > 0) {
+    for (const auto &diagnostic : _editor.diagnostics()) {
+      if (diagnostic.severity == Mads::Ini::Diagnostic::Severity::Error) {
+        line2 = (diagnostic.section.empty() ? "" : "[" + diagnostic.section + "] ") + diagnostic.message;
+        break;
+      }
+    }
+    error = true;
   }
-  MadsGui::draw_status_footer(_logo, line1, line2);
+  MadsGui::draw_status_footer(_logo, line1, line2, error ? &MadsGui::kErrorColor : nullptr);
 }
 
 void IniApp::draw_modals() {
@@ -710,6 +764,102 @@ void IniApp::draw_modals() {
     }
     ImGui::EndPopup();
   }
+}
+
+void IniApp::draw_finder() {
+  if (_open_finder) {
+    _open_finder = false;
+    _finder_query[0] = '\0';
+    _finder_index = 0;
+    ImGui::OpenPopup(kFinderPopup);
+  }
+  // Upper middle of the window, like a launcher.
+  const ImGuiViewport *viewport = ImGui::GetMainViewport();
+  ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5F,
+                                 viewport->WorkPos.y + viewport->WorkSize.y * 0.25F),
+                          ImGuiCond_Always, ImVec2(0.5F, 0.0F));
+  ImGui::SetNextWindowSize(ImVec2(std::min(520.0F, viewport->WorkSize.x * 0.8F), 0.0F));
+  if (!ImGui::BeginPopup(kFinderPopup, ImGuiWindowFlags_NoMove)) {
+    return;
+  }
+
+  // Matches, best first: rank, then file order.
+  struct Match {
+    int rank;
+    size_t order;
+    const std::string *name;
+  };
+  std::vector<Match> matches;
+  const auto &nodes = _editor.nodes();
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    if (auto rank = match_rank(nodes[i], _finder_query)) {
+      matches.push_back({*rank, i, &nodes[i]});
+    }
+  }
+  std::stable_sort(matches.begin(), matches.end(),
+                   [](const Match &a, const Match &b) { return a.rank < b.rank; });
+  if (matches.size() > static_cast<size_t>(kFinderMaxResults)) {
+    matches.resize(kFinderMaxResults);
+  }
+  const int count = static_cast<int>(matches.size());
+
+  if (ImGui::IsWindowAppearing()) {
+    ImGui::SetKeyboardFocusHere();
+  }
+  ImGui::SetNextItemWidth(-FLT_MIN);
+  const bool entered = ImGui::InputTextWithHint("##query", "Find node...", _finder_query, sizeof(_finder_query),
+                                                ImGuiInputTextFlags_EnterReturnsTrue);
+  if (ImGui::IsItemEdited()) {
+    _finder_index = 0;
+  }
+  // The text field keeps the keyboard: arrows move the highlight, Enter
+  // picks it, Escape closes.
+  if (count > 0) {
+    if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
+      _finder_index = (_finder_index + 1) % count;
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
+      _finder_index = (_finder_index + count - 1) % count;
+    }
+    _finder_index = std::clamp(_finder_index, 0, count - 1);
+  }
+  const std::string *chosen = nullptr;
+  if (entered && count > 0) {
+    chosen = matches[static_cast<size_t>(_finder_index)].name;
+  }
+
+  if (count == 0) {
+    ImGui::TextDisabled("No matching node");
+  }
+  for (int i = 0; i < count; ++i) {
+    const std::string &name = *matches[static_cast<size_t>(i)].name;
+    ImGui::PushID(i);
+    if (ImGui::Selectable(name.c_str(), i == _finder_index)) {
+      chosen = &name;
+    }
+    // The mouse moves the highlight only when it actually moves, so that a
+    // pointer resting on the list does not fight the arrow keys.
+    const ImVec2 delta = ImGui::GetIO().MouseDelta;
+    if (ImGui::IsItemHovered() && (delta.x != 0.0F || delta.y != 0.0F)) {
+      _finder_index = i;
+    }
+    // Type, right-aligned and dimmed.
+    const Mads::Ini::NodeType *type = _editor.schema().type(_editor.type_of(name));
+    const std::string label = type ? (type->executable.empty() ? type->label : type->executable)
+                                   : _editor.type_of(name);
+    ImGui::SameLine(ImGui::GetContentRegionMax().x - ImGui::CalcTextSize(label.c_str()).x);
+    ImGui::TextDisabled("%s", label.c_str());
+    ImGui::PopID();
+  }
+
+  if (chosen != nullptr) {
+    _ui.selected = *chosen;
+    _ui.focus_request = *chosen;
+    ImGui::CloseCurrentPopup();
+  } else if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
 }
 
 } // namespace MadsIni

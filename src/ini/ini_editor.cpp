@@ -326,7 +326,17 @@ std::string Editor::add_node(const std::string &type_id, float x, float y) {
   if (!type || type->document) {
     return "";
   }
-  std::string name = unique_name(_doc, type_id);
+  // The first free alias (federate_a, then federate_b), else type_id[_N].
+  std::string name;
+  for (const auto &alias : type->aliases) {
+    if (!_doc.find(alias)) {
+      name = alias;
+      break;
+    }
+  }
+  if (name.empty()) {
+    name = unique_name(_doc, type_id);
+  }
   Section *s = _doc.add_section(name);
   if (!s) {
     return "";

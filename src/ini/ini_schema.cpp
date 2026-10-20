@@ -8,6 +8,7 @@
 #include <toml++/toml.hpp>
 
 #include <algorithm>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <utility>
@@ -113,6 +114,7 @@ NodeType parse_type(const toml::table &table, const std::string &where) {
       type.role != "any") {
     throw std::runtime_error(at + ": unknown role '" + type.role + "'");
   }
+  type.aliases = string_list_field(table, "aliases", at);
   type.custom_keys = bool_field(table, "custom_keys", at);
   type.document = bool_field(table, "document", at);
   if (const toml::node *keys = table.get("keys")) {
@@ -144,6 +146,24 @@ bool is_valid_wildcard(std::string_view entry) {
     return false;
   }
   return pos == 0 || entry[pos - 1] == '/';
+}
+
+// The part of `entry` before a '+' that shares its level with other
+// characters ("fmu_+" -> "fmu_"), or nullopt when every '+' is a whole
+// level. Such a '+' is matched literally (see topic_match.hpp), which is
+// never what the author meant.
+std::optional<std::string> partial_level_plus(std::string_view entry) {
+  size_t start = 0;
+  while (start <= entry.size()) {
+    const size_t end = std::min(entry.find('/', start), entry.size());
+    const std::string_view level = entry.substr(start, end - start);
+    const size_t plus = level.find('+');
+    if (plus != std::string_view::npos && level != "+") {
+      return std::string(entry.substr(0, start + plus));
+    }
+    start = end + 1;
+  }
+  return std::nullopt;
 }
 
 // Parses `raw` as a single TOML value. The node lives in `holder`, so it is
@@ -367,9 +387,16 @@ std::string Schema::infer_type(const Section &section) const {
   if (section.name == "agents" || section.name == "broker") {
     return section.name;
   }
-  // 3. A type named after the section, e.g. [logger].
+  // 3. A type named after the section, e.g. [logger], or by one of its
+  // aliases, e.g. [federate_a].
   if (type(section.name)) {
     return section.name;
+  }
+  for (const auto &t : _types) {
+    if (std::find(t.aliases.begin(), t.aliases.end(), section.name) !=
+        t.aliases.end()) {
+      return t.id;
+    }
   }
   // 4. A plugin loader: it has an attachment and declares its topics.
   if (section.find("attachment")) {
@@ -438,6 +465,24 @@ std::vector<Diagnostic> Schema::lint(const Document &doc) const {
                 Severity::Warning, section, &entry,
                 "invalid wildcard '" + pattern +
                     "': '#' must be the whole last level (e.g. 'a/#')"));
+          }
+          if (auto prefix = partial_level_plus(pattern)) {
+            out.push_back(make_diagnostic(
+                Severity::Warning, section, &entry,
+                "'" + pattern +
+                    "': '+' is a wildcard only as a whole level (e.g. 'a/+/"
+                    "b'); here it matches literally. For every topic "
+                    "starting with '" + *prefix + "' use '" + *prefix +
+                    "' (plain entries match by prefix)"));
+          }
+          // A glob-style '*' is a common slip: MADS wildcards are MQTT's.
+          if (pattern.find('*') != std::string::npos) {
+            out.push_back(make_diagnostic(
+                Severity::Warning, section, &entry,
+                "'" + pattern +
+                    "': '*' is not a wildcard and matches literally; use a "
+                    "prefix (e.g. 'fmu_' receives 'fmu_control') or MQTT "
+                    "'+'/'#' levels (e.g. 'fmu/#')"));
           }
         }
       }

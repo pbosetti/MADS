@@ -172,6 +172,14 @@ struct NodeCanvas::Impl {
   ImVec2 canvas_origin{0.0F, 0.0F};
   ImVec2 canvas_size{0.0F, 0.0F};
   ImVec2 view_center_grid{0.0F, 0.0F};
+  // ImNodes::IsEditorHovered() tests the *current* window, which after
+  // EndNodeEditor() is the host column rather than imnodes' own child: it is
+  // sampled inside the editor scope and used from here.
+  bool editor_hovered = false;
+  // Space+drag in progress (see handle_space_pan()).
+  bool space_panning = false;
+
+  void handle_space_pan();
   ImVec2 menu_grid_pos{0.0F, 0.0F};
 
   // Context menu / rename state.
@@ -180,6 +188,31 @@ struct NodeCanvas::Impl {
   char rename_buffer[256] = {};
   std::string rename_error;
 };
+
+// Space+drag pans the canvas from anywhere, nodes included. imnodes' own pan
+// modifier (EmulateThreeButtonMouse) only starts a pan on empty space, so
+// while Space is held over the canvas the left click is hidden from imnodes
+// (no selection, no node drag) and the pan is applied here. Shift+Space is
+// the node finder, and Space inside a text field is just a space.
+void NodeCanvas::Impl::handle_space_pan() {
+  ImGuiIO &io = ImGui::GetIO();
+  const bool space = ImGui::IsKeyDown(ImGuiKey_Space) && !io.KeyShift && !io.WantTextInput;
+  if (!space || !io.MouseDown[ImGuiMouseButton_Left]) {
+    space_panning = false;
+  }
+  if (!space || !(editor_hovered || space_panning)) {
+    return;
+  }
+  if (io.MouseClicked[ImGuiMouseButton_Left]) {
+    space_panning = true;
+  }
+  io.MouseClicked[ImGuiMouseButton_Left] = false;
+  ImGui::SetMouseCursor(space_panning ? ImGuiMouseCursor_ResizeAll : ImGuiMouseCursor_Hand);
+  if (space_panning) {
+    const ImVec2 pan = ImNodes::EditorContextGetPanning();
+    ImNodes::EditorContextResetPanning(ImVec2(pan.x + io.MouseDelta.x, pan.y + io.MouseDelta.y));
+  }
+}
 
 void NodeCanvas::Impl::setup_context() {
   if (context == nullptr) {
@@ -562,7 +595,7 @@ void NodeCanvas::Impl::remove_nodes(const std::vector<std::string> &names) {
 }
 
 void NodeCanvas::Impl::handle_delete_keys() {
-  const bool in_canvas = ImNodes::IsEditorHovered() || ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
+  const bool in_canvas = editor_hovered || ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
   if (!in_canvas || ImGui::GetIO().WantTextInput) {
     return;
   }
@@ -629,7 +662,7 @@ void NodeCanvas::Impl::handle_context_menus() {
   int hovered_link_id = 0;
   const bool node_hovered = ImNodes::IsNodeHovered(&hovered_node);
   const bool link_hovered = ImNodes::IsLinkHovered(&hovered_link_id);
-  if (ImGui::IsMouseReleased(ImGuiMouseButton_Right) && ImNodes::IsEditorHovered()) {
+  if (ImGui::IsMouseReleased(ImGuiMouseButton_Right) && editor_hovered) {
     if (node_hovered) {
       if (auto it = names_by_id.find(hovered_node); it != names_by_id.end()) {
         menu_node = it->second;
@@ -784,6 +817,7 @@ void NodeCanvas::draw() {
   s.canvas_origin = ImGui::GetCursorScreenPos();
   s.canvas_size = ImGui::GetContentRegionAvail();
 
+  s.handle_space_pan();
   ImNodes::BeginNodeEditor();
   s.sync_positions();
   for (const auto &name : s.editor.nodes()) {
@@ -814,6 +848,7 @@ void NodeCanvas::draw() {
   if (s.ui.show_minimap) {
     ImNodes::MiniMap(0.2F, ImNodesMiniMapLocation_BottomRight);
   }
+  s.editor_hovered = ImNodes::IsEditorHovered();
   ImNodes::EndNodeEditor();
 
   // Visible center in grid space, for the palette.
