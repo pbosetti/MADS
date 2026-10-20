@@ -452,6 +452,7 @@ if(MADS_BUILD_APPS)
     ${plugin_SOURCE_DIR}/src
     ${nlohmann_json_SOURCE_DIR}/include
   )
+  add_subdirectory(${SOURCE_DIR}/ini)
   add_subdirectory(${SOURCE_DIR}/main)
   add_subdirectory(${SOURCE_DIR}/plugin)
   if(MADS_ENABLE_GUI)

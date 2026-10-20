@@ -30,6 +30,7 @@ TODO.md
 *.toml
 
 !mads.ini
+!src/ini/ini_schema.toml
 !rust/**/Cargo.toml
 !share/templates/rust_Cargo.toml
 !tests/fixtures/**

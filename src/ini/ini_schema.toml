@@ -1,0 +1,1003 @@
+# Key schema of the mads.ini node types, read by the mads-ini editor (see
+# ini_schema.hpp for the meaning of each field). Keys are checked against the
+# sources: Agent::init() and fetch_settings() in src/agent.cpp, socket options in
+# src/detail/socket_options.hpp, the plugin loaders in src/main/, and each
+# built-in agent's own settings reader. Embedded at build time: keep it valid TOML.
+
+# Keys every agent node accepts (sections of agents, not of [agents]/[broker]).
+# type: string, integer, float, boolean, string_array, array, table or any.
+[[common]]
+name = "pub_topic"
+type = "string"
+widget = "topic"
+group = "Topics"
+default = '"<section name>"'
+doc = "Topic this agent publishes on; defaults to the section name"
+
+[[common]]
+name = "sub_topic"
+type = "string_array"
+widget = "topics"
+group = "Topics"
+doc = "Topics to subscribe to; [\"\"] subscribes to all, '#' and '+' are MQTT wildcards"
+
+[[common]]
+name = "attachment_ext"
+type = "string"
+group = "Plugin"
+default = '"plugin"'
+doc = "Extension of a broker-served plugin attachment, before loading"
+
+[[common]]
+name = "time_step"
+type = "integer"
+group = "Timing"
+default = '0'
+doc = "Main-loop period in milliseconds (0 = as fast as possible)"
+
+[[common]]
+name = "time_step_us"
+type = "integer"
+group = "Timing"
+doc = "Main-loop period in microseconds; overrides time_step"
+
+[[common]]
+name = "high_res_loop"
+type = "boolean"
+group = "Timing"
+default = 'false'
+doc = "Busy-spin the tail of each loop interval for microsecond pacing"
+
+[[common]]
+name = "spin_margin_us"
+type = "integer"
+group = "Timing"
+default = '200'
+doc = "Microseconds busy-spun at the end of each interval when high_res_loop is on"
+
+[[common]]
+name = "receive_timeout"
+type = "integer"
+group = "Timing"
+doc = "Receive timeout in milliseconds"
+
+[[common]]
+name = "queue_size"
+type = "integer"
+group = "Topics"
+default = '1000'
+doc = "High-water mark: messages queued before the agent stops accepting more"
+
+[[common]]
+name = "wire_format"
+type = "string"
+group = "Encoding"
+default = '"json"'
+doc = "Outgoing payload encoding: json or msgpack"
+inherits = true
+choices = ["json", "msgpack"]
+
+[[common]]
+name = "compression"
+type = "string"
+group = "Encoding"
+default = '"auto"'
+doc = "Outgoing compression: auto (frames of 256 B or more), snappy (always) or none"
+inherits = true
+choices = ["auto", "snappy", "none"]
+
+[[common]]
+name = "transport"
+type = "string"
+group = "Transport"
+default = '"auto"'
+doc = "Transport to the broker: auto (ipc on the broker's host), tcp or ipc"
+inherits = true
+choices = ["auto", "tcp", "ipc"]
+
+[[common]]
+name = "shm"
+type = "boolean"
+group = "Transport"
+default = 'false'
+doc = "Publish blobs through a shared-memory ring when the broker is on this host"
+inherits = true
+
+[[common]]
+name = "shm_slots"
+type = "integer"
+group = "Transport"
+default = '8'
+doc = "Number of shared-memory ring slots"
+inherits = true
+
+[[common]]
+name = "shm_slot_size"
+type = "integer"
+group = "Transport"
+default = '16777216'
+doc = "Size of each shared-memory slot in bytes"
+inherits = true
+
+[[common]]
+name = "clock_source"
+type = "string"
+group = "Clock"
+default = '"broker"'
+doc = "Clock-offset source: broker (NTP-style), peer (over the bus) or none"
+inherits = true
+choices = ["broker", "peer", "none"]
+
+[[common]]
+name = "clock_sync_responder"
+type = "boolean"
+group = "Clock"
+default = 'true'
+doc = "Answer other agents' clock probes and publish this agent's offset"
+inherits = true
+
+[[common]]
+name = "clock_interval_ms"
+type = "integer"
+group = "Clock"
+default = '0'
+doc = "Clock re-measurement period in ms; 0 measures once at startup"
+inherits = true
+
+[[common]]
+name = "clock_announce_ms"
+type = "integer"
+group = "Clock"
+default = '5000'
+doc = "How often this agent's clock offset is published, in ms"
+inherits = true
+
+[[common]]
+name = "clock_correction"
+type = "boolean"
+group = "Clock"
+default = 'false'
+doc = "Apply the measured clock offset to published timestamps"
+inherits = true
+
+[[common]]
+name = "tcp_keepalive"
+type = "integer"
+group = "Socket"
+doc = "TCP keepalive: 1 enables, 0 disables; unset keeps the libzmq default"
+inherits = true
+
+[[common]]
+name = "tcp_keepalive_idle"
+type = "integer"
+group = "Socket"
+doc = "Seconds of idle time before the first TCP keepalive probe"
+inherits = true
+
+[[common]]
+name = "tcp_keepalive_cnt"
+type = "integer"
+group = "Socket"
+doc = "Unanswered TCP keepalive probes before the connection is dropped"
+inherits = true
+
+[[common]]
+name = "tcp_keepalive_intvl"
+type = "integer"
+group = "Socket"
+doc = "Seconds between TCP keepalive probes"
+inherits = true
+
+[[common]]
+name = "sndbuf"
+type = "integer"
+group = "Socket"
+doc = "Kernel send buffer of tcp connections, in bytes"
+inherits = true
+
+[[common]]
+name = "rcvbuf"
+type = "integer"
+group = "Socket"
+doc = "Kernel receive buffer of tcp connections, in bytes"
+inherits = true
+
+[[common]]
+name = "ipc_sndbuf"
+type = "integer"
+group = "Socket"
+default = '1048576'
+doc = "Kernel send buffer of ipc connections, in bytes (default 1 MiB, 0 = OS default)"
+inherits = true
+
+[[common]]
+name = "ipc_rcvbuf"
+type = "integer"
+group = "Socket"
+default = '1048576'
+doc = "Kernel receive buffer of ipc connections, in bytes (default 1 MiB, 0 = OS default)"
+inherits = true
+
+[[common]]
+name = "heartbeat_ivl"
+type = "integer"
+group = "Socket"
+doc = "ZMTP heartbeat interval in ms; heartbeats are off unless set"
+inherits = true
+
+[[common]]
+name = "heartbeat_ttl"
+type = "integer"
+group = "Socket"
+doc = "ZMTP heartbeat time-to-live, in ms"
+inherits = true
+
+[[common]]
+name = "heartbeat_timeout"
+type = "integer"
+group = "Socket"
+doc = "ZMTP heartbeat timeout in ms"
+inherits = true
+
+[[common]]
+name = "reconnect_ivl"
+type = "integer"
+group = "Socket"
+doc = "Reconnect interval in ms (starting backoff)"
+inherits = true
+
+[[common]]
+name = "reconnect_ivl_max"
+type = "integer"
+group = "Socket"
+doc = "Maximum reconnect interval in ms (backoff ceiling)"
+inherits = true
+
+[[common]]
+name = "immediate"
+type = "boolean"
+group = "Socket"
+doc = "Do not queue toward peers that are not connected yet"
+inherits = true
+
+[[common]]
+name = "max_msg_size"
+type = "integer"
+group = "Socket"
+doc = "Largest accepted frame in bytes; -1 is unlimited (the peer is disconnected)"
+inherits = true
+
+
+# ----------------------------------------------------------------------
+# Document sections: fleet defaults and the broker
+# ----------------------------------------------------------------------
+# [agents]: fleet-wide defaults. Keys with inherits = true here are repeated so
+# they can be edited fleet-wide; the agent's own section still wins.
+[[types]]
+id = "agents"
+label = "Fleet defaults ([agents])"
+executable = ""
+category = "Documents"
+role = "any"
+document = true
+  [[types.keys]]
+  name = "frontend_address"
+  type = "string"
+  group = "Broker"
+  doc = "Broker frontend (publish) endpoint, as seen from the agents"
+
+  [[types.keys]]
+  name = "backend_address"
+  type = "string"
+  group = "Broker"
+  doc = "Broker backend (subscribe) endpoint, as seen from the agents"
+
+  [[types.keys]]
+  name = "timecode_fps"
+  type = "integer"
+  group = "Timing"
+  default = '25'
+  doc = "Frame rate of the timecode published by the agents"
+
+  [[types.keys]]
+  name = "dummy"
+  type = "boolean"
+  group = "Timing"
+  default = 'false'
+  doc = "Run agents without a live broker connection (testing)"
+
+  [[types.keys]]
+  name = "wire_format"
+  type = "string"
+  group = "Encoding"
+  default = '"json"'
+  doc = "Outgoing payload encoding: json or msgpack"
+  inherits = true
+  choices = ["json", "msgpack"]
+
+  [[types.keys]]
+  name = "compression"
+  type = "string"
+  group = "Encoding"
+  default = '"auto"'
+  doc = "Outgoing compression: auto (frames of 256 B or more), snappy (always) or none"
+  inherits = true
+  choices = ["auto", "snappy", "none"]
+
+  [[types.keys]]
+  name = "transport"
+  type = "string"
+  group = "Transport"
+  default = '"auto"'
+  doc = "Transport to the broker: auto (ipc on the broker's host), tcp or ipc"
+  inherits = true
+  choices = ["auto", "tcp", "ipc"]
+
+  [[types.keys]]
+  name = "shm"
+  type = "boolean"
+  group = "Transport"
+  default = 'false'
+  doc = "Publish blobs through a shared-memory ring when the broker is on this host"
+  inherits = true
+
+  [[types.keys]]
+  name = "shm_slots"
+  type = "integer"
+  group = "Transport"
+  default = '8'
+  doc = "Number of shared-memory ring slots"
+  inherits = true
+
+  [[types.keys]]
+  name = "shm_slot_size"
+  type = "integer"
+  group = "Transport"
+  default = '16777216'
+  doc = "Size of each shared-memory slot in bytes"
+  inherits = true
+
+  [[types.keys]]
+  name = "clock_source"
+  type = "string"
+  group = "Clock"
+  default = '"broker"'
+  doc = "Clock-offset source: broker (NTP-style), peer (over the bus) or none"
+  inherits = true
+  choices = ["broker", "peer", "none"]
+
+  [[types.keys]]
+  name = "clock_sync_responder"
+  type = "boolean"
+  group = "Clock"
+  default = 'true'
+  doc = "Answer other agents' clock probes and publish this agent's offset"
+  inherits = true
+
+  [[types.keys]]
+  name = "clock_interval_ms"
+  type = "integer"
+  group = "Clock"
+  default = '0'
+  doc = "Clock re-measurement period in ms; 0 measures once at startup"
+  inherits = true
+
+  [[types.keys]]
+  name = "clock_announce_ms"
+  type = "integer"
+  group = "Clock"
+  default = '5000'
+  doc = "How often this agent's clock offset is published, in ms"
+  inherits = true
+
+  [[types.keys]]
+  name = "clock_correction"
+  type = "boolean"
+  group = "Clock"
+  default = 'false'
+  doc = "Apply the measured clock offset to published timestamps"
+  inherits = true
+
+  [[types.keys]]
+  name = "tcp_keepalive"
+  type = "integer"
+  group = "Socket"
+  doc = "TCP keepalive: 1 enables, 0 disables; unset keeps the libzmq default"
+  inherits = true
+
+  [[types.keys]]
+  name = "tcp_keepalive_idle"
+  type = "integer"
+  group = "Socket"
+  doc = "Seconds of idle time before the first TCP keepalive probe"
+  inherits = true
+
+  [[types.keys]]
+  name = "tcp_keepalive_cnt"
+  type = "integer"
+  group = "Socket"
+  doc = "Unanswered TCP keepalive probes before the connection is dropped"
+  inherits = true
+
+  [[types.keys]]
+  name = "tcp_keepalive_intvl"
+  type = "integer"
+  group = "Socket"
+  doc = "Seconds between TCP keepalive probes"
+  inherits = true
+
+  [[types.keys]]
+  name = "sndbuf"
+  type = "integer"
+  group = "Socket"
+  doc = "Kernel send buffer of tcp connections, in bytes"
+  inherits = true
+
+  [[types.keys]]
+  name = "rcvbuf"
+  type = "integer"
+  group = "Socket"
+  doc = "Kernel receive buffer of tcp connections, in bytes"
+  inherits = true
+
+  [[types.keys]]
+  name = "ipc_sndbuf"
+  type = "integer"
+  group = "Socket"
+  default = '1048576'
+  doc = "Kernel send buffer of ipc connections, in bytes (default 1 MiB, 0 = OS default)"
+  inherits = true
+
+  [[types.keys]]
+  name = "ipc_rcvbuf"
+  type = "integer"
+  group = "Socket"
+  default = '1048576'
+  doc = "Kernel receive buffer of ipc connections, in bytes (default 1 MiB, 0 = OS default)"
+  inherits = true
+
+  [[types.keys]]
+  name = "heartbeat_ivl"
+  type = "integer"
+  group = "Socket"
+  doc = "ZMTP heartbeat interval in ms; heartbeats are off unless set"
+  inherits = true
+
+  [[types.keys]]
+  name = "heartbeat_ttl"
+  type = "integer"
+  group = "Socket"
+  doc = "ZMTP heartbeat time-to-live, in ms"
+  inherits = true
+
+  [[types.keys]]
+  name = "heartbeat_timeout"
+  type = "integer"
+  group = "Socket"
+  doc = "ZMTP heartbeat timeout in ms"
+  inherits = true
+
+  [[types.keys]]
+  name = "reconnect_ivl"
+  type = "integer"
+  group = "Socket"
+  doc = "Reconnect interval in ms (starting backoff)"
+  inherits = true
+
+  [[types.keys]]
+  name = "reconnect_ivl_max"
+  type = "integer"
+  group = "Socket"
+  doc = "Maximum reconnect interval in ms (backoff ceiling)"
+  inherits = true
+
+  [[types.keys]]
+  name = "immediate"
+  type = "boolean"
+  group = "Socket"
+  doc = "Do not queue toward peers that are not connected yet"
+  inherits = true
+
+  [[types.keys]]
+  name = "max_msg_size"
+  type = "integer"
+  group = "Socket"
+  doc = "Largest accepted frame in bytes; -1 is unlimited (the peer is disconnected)"
+  inherits = true
+
+[[types]]
+id = "broker"
+label = "Broker ([broker])"
+executable = "mads-broker"
+category = "Documents"
+role = "any"
+document = true
+  [[types.keys]]
+  name = "frontend_address"
+  type = "string"
+  group = "Broker"
+  default = '"tcp://*:9090"'
+  doc = "Endpoint agents publish to (ROUTER/XSUB side)"
+
+  [[types.keys]]
+  name = "backend_address"
+  type = "string"
+  group = "Broker"
+  default = '"tcp://*:9091"'
+  doc = "Endpoint agents subscribe to (PUB/XPUB side)"
+
+  [[types.keys]]
+  name = "settings_address"
+  type = "string"
+  group = "Broker"
+  default = '"tcp://*:9092"'
+  doc = "Endpoint serving the settings and attachments to agents"
+
+  [[types.keys]]
+  name = "auth_verbose"
+  type = "boolean"
+  group = "Security"
+  default = 'false'
+  doc = "Log CURVE authentication details"
+
+  [[types.keys]]
+  name = "prefer_loopback_for_local_services"
+  type = "boolean"
+  group = "Broker"
+  default = 'true'
+  doc = "Local agents reach the broker over loopback instead of the external address"
+
+  [[types.keys]]
+  name = "ip_whitelist"
+  type = "string_array"
+  group = "Security"
+  doc = "Peer addresses allowed to connect; empty allows all"
+
+  [[types.keys]]
+  name = "io_threads"
+  type = "integer"
+  group = "Broker"
+  default = '1'
+  doc = "libzmq I/O threads of the broker context (default 1)"
+
+  [[types.keys]]
+  name = "subscription_table"
+  type = "boolean"
+  group = "Broker"
+  default = 'false'
+  doc = "Publish a topic -> subscriber-count table every second (costs a copy per message)"
+
+  [[types.keys]]
+  name = "settings_workers"
+  type = "integer"
+  group = "Broker"
+  default = '2'
+  doc = "Worker threads answering settings requests"
+
+  [[types.keys]]
+  name = "max_open_files"
+  type = "integer"
+  group = "Broker"
+  doc = "File descriptors the broker may use, which bounds the fleet size; 0 = OS maximum"
+
+  [[types.keys]]
+  name = "discovery_interval_ms"
+  type = "integer"
+  group = "Broker"
+  default = '1000'
+  doc = "Interval in ms of the broker's agent discovery"
+
+  [[types.keys]]
+  name = "ipc"
+  type = "boolean"
+  group = "Local transport"
+  default = 'true'
+  doc = "Also bind the three sockets on ipc:// endpoints for agents on this host"
+
+  [[types.keys]]
+  name = "ipc_dir"
+  type = "string"
+  widget = "file"
+  group = "Local transport"
+  doc = "Directory holding the ipc socket files (owner-only)"
+
+  [[types.keys]]
+  name = "frontend_ipc"
+  type = "string"
+  group = "Local transport"
+  doc = "ipc:// endpoint for the frontend socket"
+
+  [[types.keys]]
+  name = "backend_ipc"
+  type = "string"
+  group = "Local transport"
+  doc = "ipc:// endpoint for the backend socket"
+
+  [[types.keys]]
+  name = "settings_ipc"
+  type = "string"
+  group = "Local transport"
+  doc = "ipc:// endpoint for the settings socket"
+
+  [[types.keys]]
+  name = "tcp_keepalive"
+  type = "integer"
+  group = "Socket"
+  doc = "TCP keepalive: 1 enables, 0 disables; unset keeps the libzmq default"
+  inherits = true
+
+  [[types.keys]]
+  name = "tcp_keepalive_idle"
+  type = "integer"
+  group = "Socket"
+  doc = "Seconds of idle time before the first TCP keepalive probe"
+  inherits = true
+
+  [[types.keys]]
+  name = "tcp_keepalive_cnt"
+  type = "integer"
+  group = "Socket"
+  doc = "Unanswered TCP keepalive probes before the connection is dropped"
+  inherits = true
+
+  [[types.keys]]
+  name = "tcp_keepalive_intvl"
+  type = "integer"
+  group = "Socket"
+  doc = "Seconds between TCP keepalive probes"
+  inherits = true
+
+  [[types.keys]]
+  name = "sndbuf"
+  type = "integer"
+  group = "Socket"
+  doc = "Kernel send buffer of tcp connections, in bytes"
+  inherits = true
+
+  [[types.keys]]
+  name = "rcvbuf"
+  type = "integer"
+  group = "Socket"
+  doc = "Kernel receive buffer of tcp connections, in bytes"
+  inherits = true
+
+  [[types.keys]]
+  name = "ipc_sndbuf"
+  type = "integer"
+  group = "Socket"
+  default = '1048576'
+  doc = "Kernel send buffer of ipc connections, in bytes (default 1 MiB, 0 = OS default)"
+  inherits = true
+
+  [[types.keys]]
+  name = "ipc_rcvbuf"
+  type = "integer"
+  group = "Socket"
+  default = '1048576'
+  doc = "Kernel receive buffer of ipc connections, in bytes (default 1 MiB, 0 = OS default)"
+  inherits = true
+
+  [[types.keys]]
+  name = "heartbeat_ivl"
+  type = "integer"
+  group = "Socket"
+  doc = "ZMTP heartbeat interval in ms; heartbeats are off unless set"
+  inherits = true
+
+  [[types.keys]]
+  name = "heartbeat_ttl"
+  type = "integer"
+  group = "Socket"
+  doc = "ZMTP heartbeat time-to-live, in ms"
+  inherits = true
+
+  [[types.keys]]
+  name = "heartbeat_timeout"
+  type = "integer"
+  group = "Socket"
+  doc = "ZMTP heartbeat timeout in ms"
+  inherits = true
+
+  [[types.keys]]
+  name = "reconnect_ivl"
+  type = "integer"
+  group = "Socket"
+  doc = "Reconnect interval in ms (starting backoff)"
+  inherits = true
+
+  [[types.keys]]
+  name = "reconnect_ivl_max"
+  type = "integer"
+  group = "Socket"
+  doc = "Maximum reconnect interval in ms (backoff ceiling)"
+  inherits = true
+
+  [[types.keys]]
+  name = "immediate"
+  type = "boolean"
+  group = "Socket"
+  doc = "Do not queue toward peers that are not connected yet"
+  inherits = true
+
+  [[types.keys]]
+  name = "max_msg_size"
+  type = "integer"
+  group = "Socket"
+  doc = "Largest accepted frame in bytes; -1 is unlimited (the peer is disconnected)"
+  inherits = true
+
+
+# ----------------------------------------------------------------------
+# Plugin loaders (mads-source, mads-filter, mads-sink and the Rust variants)
+# ----------------------------------------------------------------------
+[[types]]
+id = "source"
+label = "Source plugin"
+executable = "mads-source"
+category = "Plugin loaders"
+role = "source"
+custom_keys = true
+  [[types.keys]]
+  name = "attachment"
+  type = "string"
+  widget = "file"
+  group = "Plugin"
+  doc = "Plugin file (.plugin) to load; served by the broker when set there"
+  [[types.keys]]
+  name = "driver"
+  type = "string"
+  group = "Plugin"
+  doc = "Driver to instantiate from the plugin file; defaults to the file stem"
+  [[types.keys]]
+  name = "period"
+  type = "integer"
+  group = "Timing"
+  doc = "Sampling period in ms; free run when unset"
+
+[[types]]
+id = "filter"
+label = "Filter plugin"
+executable = "mads-filter"
+category = "Plugin loaders"
+role = "filter"
+custom_keys = true
+  [[types.keys]]
+  name = "attachment"
+  type = "string"
+  widget = "file"
+  group = "Plugin"
+  doc = "Plugin file (.plugin) to load; served by the broker when set there"
+  [[types.keys]]
+  name = "driver"
+  type = "string"
+  group = "Plugin"
+  doc = "Driver to instantiate from the plugin file; defaults to the file stem"
+  [[types.keys]]
+  name = "period"
+  type = "integer"
+  group = "Timing"
+  doc = "Sampling period in ms; free run when unset"
+  [[types.keys]]
+  name = "dont_block"
+  type = "boolean"
+  group = "Timing"
+  default = 'false'
+  doc = "Process whatever arrives without waiting (non-blocking receive)"
+
+[[types]]
+id = "sink"
+label = "Sink plugin"
+executable = "mads-sink"
+category = "Plugin loaders"
+role = "sink"
+custom_keys = true
+  [[types.keys]]
+  name = "attachment"
+  type = "string"
+  widget = "file"
+  group = "Plugin"
+  doc = "Plugin file (.plugin) to load; served by the broker when set there"
+  [[types.keys]]
+  name = "driver"
+  type = "string"
+  group = "Plugin"
+  doc = "Driver to instantiate from the plugin file; defaults to the file stem"
+  [[types.keys]]
+  name = "dont_block"
+  type = "boolean"
+  group = "Timing"
+  default = 'false'
+  doc = "Process whatever arrives without waiting (non-blocking receive)"
+
+[[types]]
+id = "rsource"
+label = "Rust source plugin"
+executable = "mads-rsource"
+category = "Plugin loaders"
+role = "source"
+custom_keys = true
+  [[types.keys]]
+  name = "period"
+  type = "integer"
+  group = "Timing"
+  doc = "Sampling period in ms; free run when unset"
+
+[[types]]
+id = "rfilter"
+label = "Rust filter plugin"
+executable = "mads-rfilter"
+category = "Plugin loaders"
+role = "filter"
+custom_keys = true
+  [[types.keys]]
+  name = "period"
+  type = "integer"
+  group = "Timing"
+  doc = "Sampling period in ms; free run when unset"
+  [[types.keys]]
+  name = "dont_block"
+  type = "boolean"
+  group = "Timing"
+  default = 'false'
+  doc = "Process whatever arrives without waiting (non-blocking receive)"
+
+[[types]]
+id = "rsink"
+label = "Rust sink plugin"
+executable = "mads-rsink"
+category = "Plugin loaders"
+role = "sink"
+custom_keys = true
+  [[types.keys]]
+  name = "dont_block"
+  type = "boolean"
+  group = "Timing"
+  default = 'false'
+  doc = "Process whatever arrives without waiting (non-blocking receive)"
+
+
+# ----------------------------------------------------------------------
+# Built-in agents
+# ----------------------------------------------------------------------
+[[types]]
+id = "logger"
+label = "Logger"
+executable = "mads-logger"
+category = "Agents"
+role = "sink"
+custom_keys = false
+  [[types.keys]]
+  name = "mongo_uri"
+  type = "string"
+  group = "Database"
+  default = '"mongodb://localhost:27017"'
+  doc = "MongoDB connection URI"
+  [[types.keys]]
+  name = "mongo_db"
+  type = "string"
+  group = "Database"
+  default = '"mads"'
+  doc = "MongoDB database name"
+  [[types.keys]]
+  name = "max_length"
+  type = "integer"
+  group = "Database"
+  default = '75'
+  doc = "Maximum length of a logged message"
+  [[types.keys]]
+  name = "initially_paused"
+  type = "boolean"
+  group = "Database"
+  default = 'false'
+  doc = "Start with logging paused"
+
+[[types]]
+id = "feedback"
+label = "Feedback"
+executable = "mads-feedback"
+category = "Agents"
+role = "sink"
+custom_keys = false
+  [[types.keys]]
+  name = "dont_block"
+  type = "boolean"
+  group = "Display"
+  default = 'false'
+  doc = "Print whatever arrives without waiting"
+  [[types.keys]]
+  name = "print_width"
+  type = "integer"
+  group = "Display"
+  default = '0'
+  doc = "Width of the printed messages; 0 = no limit"
+  [[types.keys]]
+  name = "indent_width"
+  type = "integer"
+  group = "Display"
+  default = '2'
+  doc = "Indentation of the printed messages"
+
+[[types]]
+id = "bridge"
+label = "Bridge"
+executable = "mads-bridge"
+category = "Agents"
+role = "filter"
+custom_keys = false
+
+[[types]]
+id = "dealer"
+label = "Dealer"
+executable = "mads-dealer"
+category = "Agents"
+role = "filter"
+custom_keys = false
+  [[types.keys]]
+  name = "dealer_address"
+  type = "string"
+  group = "Dealer"
+  default = '"tcp://*:9093"'
+  doc = "Endpoint the workers connect to"
+
+[[types]]
+id = "worker"
+label = "Worker"
+executable = "mads-worker"
+category = "Agents"
+role = "source"
+custom_keys = true
+  [[types.keys]]
+  name = "dealer_address"
+  type = "string"
+  group = "Dealer"
+  default = '"tcp://localhost:9093"'
+  doc = "Dealer endpoint the worker pulls jobs from"
+
+[[types]]
+id = "image"
+label = "Image watcher"
+executable = "mads-image"
+category = "Agents"
+role = "source"
+custom_keys = false
+  [[types.keys]]
+  name = "watch_list"
+  type = "table"
+  group = "Watch"
+  doc = "Topic = file path pairs: each file is published on its topic when it changes"
+
+[[types]]
+id = "echo"
+label = "Echo"
+executable = "mads-echo"
+category = "Agents"
+role = "sink"
+custom_keys = false
+
+[[types]]
+id = "top"
+label = "Top"
+executable = "mads-top"
+category = "Agents"
+role = "sink"
+custom_keys = false
+
+
+# ----------------------------------------------------------------------
+# Other
+# ----------------------------------------------------------------------
+[[types]]
+id = "python"
+label = "Python agent"
+executable = "python"
+category = "Other"
+role = "any"
+custom_keys = true
+
+[[types]]
+id = "custom"
+label = "Custom agent"
+executable = ""
+category = "Other"
+role = "any"
+custom_keys = true
