@@ -153,15 +153,25 @@ private:
     }
     bool modified = false;
     bool replaced = false;
+    bool removed = false; // the kernel already dropped the watch
     for (ssize_t i = 0; i < rc;) {
       const auto *event = reinterpret_cast<const struct inotify_event *>(_buffer + i);
+      i += static_cast<ssize_t>(sizeof(struct inotify_event) + event->len);
+      // Late events of a watch already replaced (typically its IN_IGNORED
+      // arriving in a later read) must not tear down the current one, or
+      // each re-arm would trigger the next.
+      if (event->wd != _watch) {
+        continue;
+      }
       modified = modified || (event->mask & IN_MODIFY);
       replaced = replaced ||
                  (event->mask & (IN_DELETE_SELF | IN_MOVE_SELF | IN_IGNORED));
-      i += static_cast<ssize_t>(sizeof(struct inotify_event) + event->len);
+      removed = removed || (event->mask & IN_IGNORED);
     }
     if (replaced) {
-      inotify_rm_watch(_inotify_fd, _watch); // harmless if already gone
+      if (!removed) {
+        inotify_rm_watch(_inotify_fd, _watch);
+      }
       arm();
       return _watch >= 0 ? 1 : 0;
     }
