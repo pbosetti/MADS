@@ -27,7 +27,7 @@
 
 #if defined(LIB_VERSION_NUM) && defined(VERSION_ENCODE) && LIB_VERSION_NUM >= VERSION_ENCODE(2, 1, 0)
 #define MADS_CHAT_HAS_SERVICE_DISCOVERY 1
-#include <service_discovery.hpp>
+#include "room_discovery.hpp"
 #else
 #define MADS_CHAT_HAS_SERVICE_DISCOVERY 0
 #endif
@@ -57,6 +57,10 @@
 #include <vector>
 
 namespace fs = std::filesystem;
+#if MADS_CHAT_HAS_SERVICE_DISCOVERY
+using MadsGui::DiscoveredRoom;
+using MadsGui::RoomDiscovery;
+#endif
 using json = nlohmann::json;
 
 namespace {
@@ -95,17 +99,6 @@ struct TopicTimingStats {
   std::size_t sample_count = 0;
 };
 
-#if MADS_CHAT_HAS_SERVICE_DISCOVERY
-struct DiscoveredRoom {
-  std::string name;
-  std::string host;
-  int pub_port = -1;
-  int sub_port = -1;
-  bool encrypted = false;
-  std::string hostname;
-  std::string version;
-};
-#endif
 
 struct JsonSpan {
   std::string text;
@@ -191,55 +184,6 @@ std::string trim_copy(std::string value) {
   return value.substr(first, last - first + 1);
 }
 
-#if MADS_CHAT_HAS_SERVICE_DISCOVERY
-std::string lower_copy(std::string_view value) {
-  std::string result;
-  result.reserve(value.size());
-  for (const char ch : value) {
-    result.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
-  }
-  return result;
-}
-
-std::optional<int> find_port(const std::map<std::string, uint16_t> &ports,
-                             std::initializer_list<std::string_view> names) {
-  for (const std::string_view name : names) {
-    const auto exact = ports.find(std::string(name));
-    if (exact != ports.end()) {
-      return static_cast<int>(exact->second);
-    }
-  }
-
-  for (const auto &[key, port] : ports) {
-    const std::string normalized_key = lower_copy(key);
-    for (const std::string_view name : names) {
-      if (normalized_key == lower_copy(name)) {
-        return static_cast<int>(port);
-      }
-    }
-  }
-
-  return std::nullopt;
-}
-
-DiscoveredRoom make_discovered_room(const Mads::ServiceDiscovery::ServiceInfo &service) {
-  DiscoveredRoom room;
-  room.name = service.room.empty() ? "(unnamed)" : service.room;
-  room.host = service.ip;
-  room.encrypted = service.encrypted;
-  room.hostname = service.hostname;
-  room.version = service.version;
-
-  if (const auto port = find_port(service.ports, {"frontend", "pub", "publish", "publisher"})) {
-    room.pub_port = *port;
-  }
-  if (const auto port = find_port(service.ports, {"backend", "sub", "subscribe", "subscriber"})) {
-    room.sub_port = *port;
-  }
-
-  return room;
-}
-#endif
 
 std::vector<std::string> parse_subscribe_topics(const std::string &raw_topics) {
   std::vector<std::string> topics;
@@ -770,96 +714,6 @@ private:
   bool _initialized = false;
 };
 
-#if MADS_CHAT_HAS_SERVICE_DISCOVERY
-class RoomDiscovery {
-public:
-  RoomDiscovery() = default;
-
-  ~RoomDiscovery() {
-    stop();
-  }
-
-  RoomDiscovery(const RoomDiscovery &) = delete;
-  RoomDiscovery &operator=(const RoomDiscovery &) = delete;
-
-  void start() {
-    if (_thread.joinable()) {
-      return;
-    }
-    _stop_requested.store(false);
-    _thread = std::thread(&RoomDiscovery::discovery_loop, this);
-  }
-
-  void stop() {
-    _stop_requested.store(true);
-    if (_thread.joinable()) {
-      _thread.join();
-    }
-  }
-
-  std::vector<DiscoveredRoom> snapshot_rooms() const {
-    std::scoped_lock lock(_mutex);
-    return _rooms;
-  }
-
-  std::string last_error() const {
-    std::scoped_lock lock(_mutex);
-    return _last_error;
-  }
-
-private:
-  void discovery_loop() {
-    try {
-      Mads::ServiceDiscovery discovery(MADS_SERVICE_PORT);
-      while (!_stop_requested.load()) {
-        try {
-          std::vector<DiscoveredRoom> rooms;
-          const auto services = discovery.list_rooms(std::chrono::milliseconds{1000});
-          rooms.reserve(services.size());
-          for (const auto &[name, service] : services) {
-            DiscoveredRoom room = make_discovered_room(service);
-            if (room.name.empty() || room.name == "(unnamed)") {
-              room.name = name.empty() ? "(unnamed)" : name;
-            }
-            rooms.push_back(std::move(room));
-          }
-
-          {
-            std::scoped_lock lock(_mutex);
-            _rooms = std::move(rooms);
-            _last_error.clear();
-          }
-        } catch (const std::exception &error) {
-          set_error(error.what());
-          sleep_in_slices(std::chrono::milliseconds{500});
-        }
-      }
-    } catch (const std::exception &error) {
-      set_error(error.what());
-    }
-  }
-
-  void sleep_in_slices(std::chrono::milliseconds duration) const {
-    constexpr auto kSlice = std::chrono::milliseconds{50};
-    auto slept = std::chrono::milliseconds{0};
-    while (!_stop_requested.load() && slept < duration) {
-      std::this_thread::sleep_for(kSlice);
-      slept += kSlice;
-    }
-  }
-
-  void set_error(std::string message) {
-    std::scoped_lock lock(_mutex);
-    _last_error = std::move(message);
-  }
-
-  std::thread _thread;
-  mutable std::mutex _mutex;
-  std::vector<DiscoveredRoom> _rooms;
-  std::string _last_error;
-  std::atomic<bool> _stop_requested{false};
-};
-#endif
 
 struct UiState {
   AppSettings connection_settings;

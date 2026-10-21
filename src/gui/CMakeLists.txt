@@ -113,12 +113,14 @@ if(NOT DEFINED MADS_EXECUTABLE_PREFIX)
 endif()
 
 # Shared look & feel of the GUI apps (style, fonts, logo texture, status footer).
-add_library(mads_gui_common STATIC common/gui_style.cpp)
+add_library(mads_gui_common STATIC common/gui_style.cpp common/room_discovery.cpp)
 target_include_directories(mads_gui_common PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/common
   ${PROJECT_SOURCE_DIR}/src   # stb_image.h, shipped by MADS
 )
-target_link_libraries(mads_gui_common PUBLIC mads_imgui)
+target_link_libraries(mads_gui_common PUBLIC mads_imgui MadsCore)
+find_package(Threads REQUIRED)
+target_link_libraries(mads_gui_common PUBLIC Threads::Threads)
 # Fallback for running the GUI apps from the build tree (load_logo in gui_style.cpp).
 target_compile_definitions(mads_gui_common PRIVATE MADS_GUI_SOURCE_IMAGES_DIR="${PROJECT_SOURCE_DIR}/share/images")
 

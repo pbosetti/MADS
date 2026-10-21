@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cfloat>
 #include <exception>
 #include <iostream>
@@ -91,6 +92,9 @@ void print_gui_hint(const char *what) {
 
 IniApp::IniApp(std::optional<std::filesystem::path> file)
     : _file(std::move(file)), _canvas(_editor, _ui), _inspector(_editor, _ui) {
+  std::snprintf(_address, sizeof(_address), "%s", _prefs.data.manual_address.c_str());
+  _use_keys = _prefs.data.use_keys;
+  _local_port = _prefs.data.local_port > 0 ? _prefs.data.local_port : Mads::Ini::Remote::kDefaultPort;
   for (const auto &type : _editor.schema().types()) {
     if (type.document) {
       continue;
@@ -134,6 +138,8 @@ int IniApp::run() {
 
   _logo = MadsGui::load_logo(std::filesystem::path(Mads::exec_dir("../share/images")));
   load_startup_document();
+  show_prefs_notice();
+  _rooms.start();
 
   while (!glfwWindowShouldClose(_window)) {
     glfwPollEvents();
@@ -146,7 +152,9 @@ int IniApp::run() {
       }
     }
 
+    poll_connect();
     poll_external_changes();
+    show_prefs_notice();
     update_title();
     sanitize_selection();
 
@@ -206,6 +214,8 @@ int IniApp::run() {
     glfwSwapBuffers(_window);
   }
 
+  _poller.stop();
+  _rooms.stop();
   MadsGui::free_texture(_logo);
   ImGui_ImplOpenGL3_Shutdown();
   ImGui_ImplGlfw_Shutdown();
@@ -225,6 +235,8 @@ void IniApp::load_startup_document() {
     if (!_editor.open(*_file, &error)) {
       _ui.notify("Cannot open " + _file->string() + ": " + error, true);
       new_default_document();
+    } else {
+      _prefs.add_recent(std::filesystem::absolute(*_file));
     }
   } else {
     new_default_document();
@@ -257,6 +269,7 @@ void IniApp::perform(Action action) {
   case Action::New:
     new_default_document();
     _editor.auto_layout();
+    forget_remote();
     _ui.selected.clear();
     _external_change = false;
     _banner_dismissed = false;
@@ -271,6 +284,17 @@ void IniApp::perform(Action action) {
     }
     break;
   }
+  case Action::OpenRecent:
+    open_path(_queued_path);
+    break;
+  case Action::OpenRemote:
+    if (_connect.valid()) {
+      _ui.notify("Already connecting", true);
+    } else {
+      begin_connect(_queued_target, std::nullopt, false, AuthPurpose::Open);
+      _connect_kind = _queued_kind;
+    }
+    break;
   case Action::Reload:
     if (reload_document()) {
       _ui.notify("Reloaded " + _editor.location());
@@ -296,7 +320,12 @@ bool IniApp::save_as_dialog() {
   if (chosen.empty()) {
     return false;
   }
-  return handle_save(_editor.save_as(chosen));
+  const bool saved = handle_save(_editor.save_as(chosen));
+  if (saved) {
+    forget_remote();
+    _prefs.add_recent(std::filesystem::absolute(chosen));
+  }
+  return saved;
 }
 
 bool IniApp::handle_save(const Mads::Ini::SaveResult &result) {
@@ -311,6 +340,11 @@ bool IniApp::handle_save(const Mads::Ini::SaveResult &result) {
     _open_conflict_popup = true;
     return false;
   case Mads::Ini::SaveResult::Status::Error:
+    if (result.auth_required && _remote_target) {
+      drop_remembered(_remote_target->endpoint);
+      ask_password(*_remote_target, AuthPurpose::Save);
+      return false;
+    }
     _ui.notify(result.message.empty() ? std::string("Save failed") : result.message, true);
     return false;
   }
@@ -320,6 +354,8 @@ bool IniApp::handle_save(const Mads::Ini::SaveResult &result) {
 void IniApp::open_path(const std::filesystem::path &path) {
   std::string error;
   if (_editor.open(path, &error)) {
+    forget_remote();
+    _prefs.add_recent(std::filesystem::absolute(path));
     _ui.selected.clear();
     _external_change = false;
     _banner_dismissed = false;
@@ -336,8 +372,16 @@ bool IniApp::reload_document() {
     return false;
   }
   std::string error;
-  if (!_editor.reload(&error)) {
-    _ui.notify("Reload failed: " + error, true);
+  try {
+    if (!_editor.reload(&error)) {
+      _ui.notify("Reload failed: " + error, true);
+      return false;
+    }
+  } catch (const Mads::Ini::Remote::AuthError &) {
+    if (_remote_target) {
+      drop_remembered(_remote_target->endpoint);
+      ask_password(*_remote_target, AuthPurpose::Reload);
+    }
     return false;
   }
   _external_change = false;
@@ -352,7 +396,10 @@ void IniApp::poll_external_changes() {
     return;
   }
   _next_disk_poll = now + 1.0;
-  if (!_editor.changed_on_disk()) {
+  // A remote document is never polled from here: a dead broker would stall
+  // the UI for the whole timeout. The worker in _poller does it.
+  const bool changed = _remote_target ? remote_changed() : _editor.changed_on_disk();
+  if (!changed) {
     return;
   }
   if (!_editor.dirty()) {
@@ -475,6 +522,11 @@ void IniApp::draw_menu_bar() {
     if (ImGui::MenuItem("Open...", (mod + "O").c_str())) {
       request(Action::Open);
     }
+    draw_recent_menu();
+    if (ImGui::MenuItem("Open broker settings...")) {
+      _expand_open_panel = true;
+    }
+    ImGui::Separator();
     if (ImGui::MenuItem("Save", (mod + "S").c_str())) {
       save_document();
     }
@@ -558,6 +610,8 @@ void IniApp::draw_banner() {
 }
 
 void IniApp::draw_palette() {
+  draw_open_panel();
+  ImGui::Spacing();
   if (ImGui::Button("Document settings", ImVec2(-FLT_MIN, 0.0F))) {
     _ui.selected.clear();
   }
@@ -692,7 +746,7 @@ void IniApp::draw_modals() {
         _pending = Action::None;
         ImGui::CloseCurrentPopup();
         perform(action);
-      } else if (_open_conflict_popup) {
+      } else if (_open_conflict_popup || _open_auth_popup) {
         ImGui::CloseCurrentPopup();
       }
     }
@@ -748,6 +802,8 @@ void IniApp::draw_modals() {
     }
     ImGui::EndPopup();
   }
+
+  draw_auth_modal();
 
   if (_open_about_popup) {
     ImGui::OpenPopup(kAboutPopup);
