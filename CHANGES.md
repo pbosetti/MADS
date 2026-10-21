@@ -11,20 +11,6 @@
   `Mads-<version>-Android-<abi>.tar.gz` with `lib/`, `include/` and the zmq
   license at its root. It used to go through the Linux branch, building a `.deb`
   (with a bogus architecture, as the host has no dpkg) under `usr/local`.
-
-# Release v2.5.1
-
-> **NOTE**: although technically this should be marked as a minor release (eg v2.6.0), the ABI of MadsCore has not changed nor have the wire protocol and the plugin loading protocol. Consequently, this release is fully compatible with previous 2.5.x releases, downstream C++ agents do not need to be recompiled, and it has consequently been marked as a patch release v2.5.1.
-
-## Improvements
-
-- **mads-director and mads-chat are merged into the source tree** (`src/gui`),
-  sharing one GLFW/DearImGui (v1.92.6) build. There is no more FetchContent of
-  `mads_director`, nor the users have to manually install `mads-chat`.
-- **mads-director now uses MadsCore's `director.toml` parser** (the same one
-  `mads up` uses): the process list is shown in dependency order, non-table
-  top-level entries are warnings, and invalid `ready` values are errors.
-- **mads-director is restyled to match mads-chat** (colors, fonts, status footer).
 - **New `mads-ini` node editor for mads.ini.** `mads ini` opens a graphical
   editor of the settings file: one node per agent section, colored by role,
   and one link per topic, computed with the same matching rules the agents
@@ -62,7 +48,6 @@
   and checks them for outside changes. Saves are validated, written
   atomically, backed up (`edit_backups`) and logged on the broker's console.
   Setup: **mads-broker**(1), **mads-ini**(1) and CRYPTO.md.
-
 - **Beta pre-releases and `mads beta`.** Tags of the form `vX.Y.Z-betaN`
   are published as GitHub pre-releases (never marked as "latest"), so a new
   version can be tested before the final release. `mads beta` now lists the
@@ -107,6 +92,26 @@
   `2d0c280b07b2f62b120034811cc6e41251673961`.
 - **`MadsGui::draw_status_footer` takes an optional `line2_color`** argument
   (e.g. `kErrorColor`) to color the second line of the status footer.
+- **Library-only builds (`MADS_BUILD_APPS=OFF`) no longer install app data**:
+  templates, skills, plugin migrations, Python and shell scripts, the Rust crate
+  and `share/images`.
+
+# Release v2.5.1
+
+> **NOTE**: although technically this should be marked as a minor release (eg v2.6.0), the ABI of MadsCore has not changed nor have the wire protocol and the plugin loading protocol. Consequently, this release is fully compatible with previous 2.5.x releases, downstream C++ agents do not need to be recompiled, and it has consequently been marked as a patch release v2.5.1.
+
+## Improvements
+
+- **mads-director and mads-chat are merged into the source tree** (`src/gui`),
+  sharing one GLFW/DearImGui (v1.92.6) build. There is no more FetchContent of
+  `mads_director`, nor the users have to manually install `mads-chat`.
+- **mads-director now uses MadsCore's `director.toml` parser** (the same one
+  `mads up` uses): the process list is shown in dependency order, non-table
+  top-level entries are warnings, and invalid `ready` values are errors.
+- **mads-director is restyled to match mads-chat** (colors, fonts, status footer).
+
+## For developers
+
 - **New option `MADS_ENABLE_GUI` replaces `MADS_DIRECTOR`.** An old cache value
   is migrated automatically, with a deprecation warning.
 - **Packages no longer ship GLFW headers, static library or CMake config.**
@@ -126,9 +131,6 @@
   the latter two optional and selected by default. Previously `MadsCore.dll`,
   the bundled plugins and libzmq ended up in stray `Unspecified`/`SDK`/`Runtime`
   components.
-- **Library-only builds (`MADS_BUILD_APPS=OFF`) no longer install app data**:
-  templates, skills, plugin migrations, Python and shell scripts, the Rust crate
-  and `share/images`.
 
 # Release 2.5.0
 
