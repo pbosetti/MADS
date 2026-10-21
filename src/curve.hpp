@@ -124,6 +124,27 @@ public:
   }
 
   /**
+   * @brief The Z85 public keys the bus accepts: the first line of every
+   * `*.pub` found by fetch_public_keys().
+   *
+   * @throws runtime_error if a key file cannot be opened.
+  */
+  set<string> client_public_keys() const {
+    set<string> keys;
+    for (const auto &client_key_name : _client_keys) {
+      string name = (_key_dir / (client_key_name + ".pub")).string();
+      ifstream f(name);
+      if (!f.is_open()) {
+        throw runtime_error("cannot open client public key file " + name);
+      }
+      string key;
+      getline(f, key);
+      keys.insert(key);
+    }
+    return keys;
+  }
+
+  /**
    * @brief Gives a ZAP domain its own exclusive set of allowed client keys
    * (pass-through to ZapAuth::configure_domain_curve()). Safe after
    * setup_auth(); must be called before binding a socket that uses the domain.

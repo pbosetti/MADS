@@ -1015,12 +1015,40 @@ int main(int argc, char **argv) {
       }
     }
 
-    // tcp: CURVE only.
+    // tcp: CURVE and/or the editing password (see remote_edit.hpp for the
+    // access-control table). A password file that exists but cannot be used
+    // counts as "no password": the tcp listener is never weakened by it.
+    optional<Remote::PasswordVerifier> verifier;
     if (edit_port > 0) {
-      if (!crypto) {
+      filesystem::path password_file =
+          config[name]["edit_password_file"].value<string>()
+              ? filesystem::path(*config[name]["edit_password_file"].value<string>())
+              : Remote::password_file_for(settings_path);
+      try {
+        vector<string> password_warnings;
+        verifier = Remote::read_password_file(password_file, &password_warnings);
+        for (auto const &w : password_warnings)
+          cerr << fg::yellow << "remote_edit: " << w << fg::reset << endl;
+      } catch (const exception &e) {
+        cerr << fg::red << "remote_edit: unusable password file "
+             << password_file.string() << ": " << e.what()
+             << " -- treating it as no password" << fg::reset << endl;
+      }
+    }
+    if (edit_port > 0) {
+      const bool password = verifier.has_value();
+      if (!crypto && !password) {
         cerr << fg::yellow
-             << "remote_edit over tcp needs --crypto: serving the ipc "
-                "endpoint only"
+             << "remote_edit over tcp needs --crypto or an editing password "
+                "(mads ini --set-password): serving the ipc endpoint only"
+             << fg::reset << endl;
+      } else if (!crypto) {
+        // Development mode: no CURVE, the password alone gates the listener.
+        edit_listeners.push_back({edit_address, std::nullopt, true});
+        service_info.ports[Remote::kDiscoveryPortName] = edit_port;
+        cerr << fg::yellow << "Settings editing on " << style::bold
+             << edit_address << style::reset << fg::yellow
+             << " (password, NOT encrypted: development/trusted networks only)"
              << fg::reset << endl;
       } else {
         try {
@@ -1028,24 +1056,31 @@ int main(int argc, char **argv) {
               config[name]["editors_dir"].value<string>()
                   ? filesystem::path(*config[name]["editors_dir"].value<string>())
                   : keys_dir / "editors";
-          auto editor_keys = load_editor_keys(editors_dir);
-          if (editor_keys.empty()) {
+          auto allowed = load_editor_keys(editors_dir);
+          const char *kind = "editor";
+          if (allowed.empty() && password) {
+            // The password is the second factor: bus keys may then connect.
+            allowed = curve_auth_ptr->client_public_keys();
+            kind = "bus";
+          }
+          if (allowed.empty()) {
             cerr << fg::yellow << "remote_edit: no editor keys (*.pub) in "
                  << editors_dir.string() << "; no tcp listener" << fg::reset
                  << endl;
           } else {
             auto kp = curve_auth_ptr->load_server_keypair(key_name);
             // Before binding: the domain exists in the ZAP handler first.
-            curve_auth_ptr->configure_domain_curve(Remote::kZapDomain,
-                                                   editor_keys);
+            curve_auth_ptr->configure_domain_curve(Remote::kZapDomain, allowed);
             edit_listeners.push_back(
-                {edit_address, Remote::ServerKeys{kp.public_key, kp.secret_key}});
+                {edit_address, Remote::ServerKeys{kp.public_key, kp.secret_key},
+                 password});
             service_info.ports[Remote::kDiscoveryPortName] = edit_port;
             cout << "Settings editing on " << style::bold << edit_address
                  << style::reset << style::italic << " (CURVE, "
-                 << editor_keys.size() << " editor key"
-                 << (editor_keys.size() == 1 ? "" : "s") << ")"
-                 << style::reset << endl;
+                 << allowed.size() << " " << kind << " key"
+                 << (allowed.size() == 1 ? "" : "s")
+                 << (password ? ", password" : "") << ")" << style::reset
+                 << endl;
           }
         } catch (const exception &e) {
           cerr << fg::yellow << "remote_edit: no tcp listener: " << e.what()
@@ -1061,7 +1096,8 @@ int main(int argc, char **argv) {
       edit_service = make_unique<Remote::EditService>(
           settings_path,
           static_cast<size_t>(
-              std::max<int64_t>(0, config[name]["edit_backups"].value_or(10))));
+              std::max<int64_t>(0, config[name]["edit_backups"].value_or(10))),
+          verifier);
       edit_service->log = [&](string const &line) {
         cout << goback(1, !daemon) << fg::yellow << timestamp()
              << "Settings editing: " << line << fg::reset << endl;

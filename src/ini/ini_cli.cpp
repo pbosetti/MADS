@@ -13,6 +13,7 @@ Author(s): Paolo Bosetti
 
 #include "ini_document.hpp"
 #include "ini_schema.hpp"
+#include "remote_edit.hpp"
 #include "../exec_path.hpp"
 #include "../mads.hpp"
 
@@ -20,6 +21,7 @@ Author(s): Paolo Bosetti
 #include <inja/inja.hpp>
 #include <nlohmann/json.hpp>
 #include <rang.hpp>
+#include <sodium.h>
 
 #include <cstdio>
 #include <exception>
@@ -29,6 +31,20 @@ Author(s): Paolo Bosetti
 #include <string>
 #include <string_view>
 #include <vector>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <io.h>
+#else
+#include <termios.h>
+#include <unistd.h>
+#endif
 
 namespace Mads::Ini {
 
@@ -91,6 +107,96 @@ std::string quote_toml_string(std::string_view text) {
   }
   out += '"';
   return out;
+}
+
+// Removes a trailing CR and LF (a line read with getline keeps the CR of CRLF).
+void strip_eol(std::string &text) {
+  while (!text.empty() && (text.back() == '\r' || text.back() == '\n')) {
+    text.pop_back();
+  }
+}
+
+// Wipes a secret string on scope exit (also on error paths).
+class SecretGuard {
+public:
+  explicit SecretGuard(std::string &secret) : _secret(secret) {}
+  ~SecretGuard() {
+    if (!_secret.empty()) {
+      sodium_memzero(_secret.data(), _secret.size());
+    }
+  }
+  SecretGuard(const SecretGuard &) = delete;
+  SecretGuard &operator=(const SecretGuard &) = delete;
+
+private:
+  std::string &_secret;
+};
+
+bool stdin_is_terminal() {
+#ifdef _WIN32
+  return _isatty(_fileno(stdin)) != 0;
+#else
+  return isatty(STDIN_FILENO) != 0;
+#endif
+}
+
+// Turns terminal echo off for the lifetime of the object; the previous mode is
+// restored on destruction, also when reading throws.
+class EchoOff {
+public:
+  EchoOff() {
+#ifdef _WIN32
+    _handle = GetStdHandle(STD_INPUT_HANDLE);
+    if (GetConsoleMode(_handle, &_mode) != 0) {
+      _changed = SetConsoleMode(_handle, _mode & ~ENABLE_ECHO_INPUT) != 0;
+    }
+#else
+    if (tcgetattr(STDIN_FILENO, &_saved) == 0) {
+      termios quiet = _saved;
+      quiet.c_lflag &= ~static_cast<tcflag_t>(ECHO);
+      _changed = tcsetattr(STDIN_FILENO, TCSANOW, &quiet) == 0;
+    }
+#endif
+  }
+  ~EchoOff() {
+    if (_changed) {
+#ifdef _WIN32
+      SetConsoleMode(_handle, _mode);
+#else
+      tcsetattr(STDIN_FILENO, TCSANOW, &_saved);
+#endif
+    }
+  }
+  EchoOff(const EchoOff &) = delete;
+  EchoOff &operator=(const EchoOff &) = delete;
+
+private:
+  bool _changed = false;
+#ifdef _WIN32
+  HANDLE _handle = nullptr;
+  DWORD _mode = 0;
+#else
+  termios _saved{};
+#endif
+};
+
+constexpr std::size_t kPasswordReserve = 1024;
+
+// Prompts on stderr and reads one line from the terminal without echo.
+std::string read_typed_line(const char *prompt) {
+  std::cerr << prompt << std::flush;
+  std::string text;
+  // Room for any sensible password up front: getline then never reallocates,
+  // so no stray copy is left in freed memory (only this buffer is wiped).
+  text.reserve(kPasswordReserve);
+  {
+    EchoOff echo;
+    std::getline(std::cin, text);
+  }
+  // Echo was off, so the newline the user typed is not on screen.
+  std::cerr << std::endl;
+  strip_eol(text);
+  return text;
 }
 
 fs::path settings_path(const cxxopts::ParseResult &parsed) {
@@ -362,7 +468,93 @@ int set_command(const std::vector<std::string> &items,
   return 0;
 }
 
+// Derives and writes the verifier of `settings` from `password`, which is
+// wiped before returning. Shared by the terminal and the stdin paths.
+int store_password(const fs::path &settings, std::string &password,
+                   std::ostream &out, std::ostream &err) {
+  SecretGuard guard(password);
+  if (password.empty()) {
+    err << fg::red << "The editing password cannot be empty, nothing written"
+        << fg::reset << std::endl;
+    return 1;
+  }
+  if (password.size() < 8) {
+    err << fg::yellow
+        << "Warning: the password is shorter than 8 characters" << fg::reset
+        << std::endl;
+  }
+  const fs::path file = Remote::password_file_for(settings);
+  std::error_code ec;
+  const bool existed = fs::exists(file, ec);
+  err << "Deriving key..." << std::endl;
+  try {
+    Remote::PasswordVerifier verifier = Remote::PasswordVerifier::create(password);
+    std::string error;
+    if (!Remote::write_password_file(file, verifier, &error)) {
+      err << fg::red << "Cannot write " << file.string() << ": " << error
+          << fg::reset << std::endl;
+      return 1;
+    }
+  } catch (const std::exception &e) {
+    err << fg::red << "Cannot create the editing password: " << e.what()
+        << fg::reset << std::endl;
+    return 1;
+  }
+  out << fg::green
+      << (existed ? "Editing password replaced, written to "
+                  : "Editing password written to ")
+      << file.string() << fg::reset << std::endl;
+  out << "Restart the broker to apply it (see mads-broker(1))." << std::endl;
+  return 0;
+}
+
+int set_password_command(const fs::path &settings) {
+  if (!stdin_is_terminal()) {
+    return set_password(settings, std::cin, std::cout, std::cerr);
+  }
+  std::string first = read_typed_line("New editing password: ");
+  SecretGuard first_guard(first);
+  std::string second = read_typed_line("Repeat it: ");
+  SecretGuard second_guard(second);
+  if (first != second) {
+    std::cerr << fg::red << "The passwords do not match, nothing written"
+              << fg::reset << std::endl;
+    return 1;
+  }
+  return store_password(settings, first, std::cout, std::cerr);
+}
+
+int remove_password_command(const fs::path &settings) {
+  const fs::path file = Remote::password_file_for(settings);
+  std::error_code ec;
+  const bool removed = fs::remove(file, ec);
+  if (ec) {
+    std::cerr << fg::red << "Cannot remove " << file.string() << ": "
+              << ec.message() << fg::reset << std::endl;
+    return 1;
+  }
+  if (!removed) {
+    std::cout << fg::yellow << "no editing password file at " << file.string()
+              << fg::reset << std::endl;
+    return 0;
+  }
+  std::cout << fg::green << "Editing password removed: " << file.string()
+            << fg::reset << std::endl;
+  std::cout << "Restart the broker to apply it (see mads-broker(1))."
+            << std::endl;
+  return 0;
+}
+
 } // namespace
+
+int set_password(const fs::path &settings, std::istream &in, std::ostream &out,
+                 std::ostream &err) {
+  std::string password;
+  password.reserve(kPasswordReserve); // see read_typed_line()
+  std::getline(in, password);
+  strip_eol(password);
+  return store_password(settings, password, out, err);
+}
 
 json default_template_data() {
   json data;
@@ -407,6 +599,8 @@ int run_cli(int argc, char **argv, const LaunchGui &launch_gui) {
     ("get", "Print the raw value of SECTION.KEY", cxxopts::value<std::string>())
     ("set", "Set SECTION.KEY=VALUE (repeatable)", cxxopts::value<std::vector<std::string>>())
     ("comment", "Inline comment for the --set keys", cxxopts::value<std::string>())
+    ("set-password", "Set the broker's editing password (FILE: settings file)")
+    ("remove-password", "Remove the broker's editing password file")
     ("file", "Settings file (positional)", cxxopts::value<std::string>())
     ("h,help", "Print help");
   // clang-format on
@@ -435,7 +629,9 @@ int run_cli(int argc, char **argv, const LaunchGui &launch_gui) {
 #endif
   const int modes = static_cast<int>(parsed.count("check") > 0) +
                     static_cast<int>(parsed.count("get") > 0) +
-                    static_cast<int>(parsed.count("set") > 0);
+                    static_cast<int>(parsed.count("set") > 0) +
+                    static_cast<int>(parsed.count("set-password") > 0) +
+                    static_cast<int>(parsed.count("remove-password") > 0);
   const bool has_file = parsed.count("file") > 0;
 
   if (parsed.count("comment") && !parsed.count("set")) {
@@ -444,14 +640,17 @@ int run_cli(int argc, char **argv, const LaunchGui &launch_gui) {
     return 1;
   }
   if (modes > 1) {
-    std::cerr << fg::red << "Use only one of --check, --get and --set"
+    std::cerr << fg::red
+              << "Use only one of --check, --get, --set, --set-password and "
+                 "--remove-password"
               << fg::reset << std::endl;
     return 1;
   }
   if (modes > 0 && template_opts) {
     std::cerr << fg::red
-              << "--check, --get and --set cannot be mixed with template "
-                 "options (-o, -i, -b, -F, -B, -s, -f, -m, -p)"
+              << "--check, --get, --set, --set-password and --remove-password "
+                 "cannot be mixed with template options (-o, -i, -b, -F, -B, "
+                 "-s, -f, -m, -p)"
               << fg::reset << std::endl;
     return 1;
   }
@@ -463,6 +662,12 @@ int run_cli(int argc, char **argv, const LaunchGui &launch_gui) {
 
   if (template_opts) {
     return template_command(parsed, data, etc_dir);
+  }
+  if (parsed.count("set-password")) {
+    return set_password_command(settings_path(parsed));
+  }
+  if (parsed.count("remove-password")) {
+    return remove_password_command(settings_path(parsed));
   }
   if (parsed.count("check")) {
     return check_command(settings_path(parsed));

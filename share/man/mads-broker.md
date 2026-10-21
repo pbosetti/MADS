@@ -259,6 +259,10 @@ instead.
 :  How many timestamped backups (`<file>.<YYYYmmdd-HHMMSS>.bak`) are kept next
    to the settings file; every save first copies the previous content.
 
+**edit_password_file** (`[broker]`, string, default `<settings file>.edit_password`)
+:  The editing password verifier, created with `mads ini --set-password`. See
+   below.
+
 ## Security model
 
 Over the **ipc** endpoint (offered when the broker's `ipc` setting is on and
@@ -268,10 +272,11 @@ only processes of the broker's OS user can use it. Over **tcp** the service
 runs only with **\-\-crypto**, as a CURVE server with the broker's own keypair, and
 only clients whose public key is in *editors_dir* are admitted. This list is
 separate from the bus's: the keys of agents in the keys directory give no
-editing right, and an editor key gives no access to the bus. Plaintext tcp is
-never accepted. The broker fails closed:
+editing right, and an editor key gives no access to the bus (the exception: with a password set and
+no editor keys, the bus keys are admitted, see below). Plaintext tcp is
+only accepted in password mode (see "Editing password" below). The broker fails closed:
 
-* without **\-\-crypto** a warning is printed and only the ipc endpoint is served;
+* without **\-\-crypto** and without a password a warning is printed and only the ipc endpoint is served;
 * with no *editors_dir*, or no valid key in it, there is no tcp listener;
 * if an endpoint cannot be bound (port in use, a live broker owning the ipc
   socket) a warning is printed and the broker carries on without the service.
@@ -279,6 +284,32 @@ never accepted. The broker fails closed:
 The editor keys are read at startup: restart the broker (key **X**) after
 adding or removing one. When the tcp listener is active its port is announced
 in service discovery under the name `edit`.
+
+## Editing password
+
+A password can be set with `mads ini --set-password`. The broker never stores
+or receives it: only a salted Argon2id/SCRAM-style verifier is kept, in the
+file `<settings file>.edit_password` (or *edit_password_file*), created
+owner-only (mode 0600). The file is read at startup, so restart the broker to
+change or remove the password; a file readable by group or others is reported
+with a warning, and a malformed one with an error, in which case it is treated
+as if there were no password (the tcp listener is never weakened). The ipc
+endpoint never asks for the password. After 5 consecutive failed attempts the
+service refuses every password request for 30 seconds (lockout); failures
+and lockouts are logged.
+
+The tcp listener depends on **\-\-crypto** and on the password:
+
+| | no password | password |
+|---|---|---|
+| no **\-\-crypto** | no tcp listener (ipc only) | plaintext tcp with password |
+| **\-\-crypto** | CURVE, editor keys only; none, no tcp listener | CURVE and password; editor keys, or the bus keys when *editors_dir* has none |
+
+Without **\-\-crypto** the password is never sent and requests cannot be
+altered in transit, but the settings text itself travels **in clear**: this
+"development mode" is for trusted networks only, and the broker prints a
+warning at startup. Service discovery announces only the `edit` port; an
+editor learns whether a password is needed from the service itself.
 
 ## Creating an editor key pair
 

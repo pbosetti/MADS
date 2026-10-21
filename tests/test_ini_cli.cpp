@@ -1,6 +1,8 @@
 // Unit tests for the `mads ini` command line in src/ini/ini_cli.hpp: exit
 // codes of --check, --get and --set on temporary files, comment preservation
-// on save, and the GUI dispatch (FILE / bare) through a fake launch_gui.
+// on save, the editing password commands (--set-password through the stdin
+// path, --remove-password), and the GUI dispatch (FILE / bare) through a fake
+// launch_gui.
 // The template-rendering paths need an installed prefix and are not tested.
 #include <catch2/catch_test_macros.hpp>
 
@@ -19,9 +21,12 @@
 
 #include "ini_cli.hpp"
 #include "ini_document.hpp"
+#include "remote_edit.hpp"
 
 using Mads::Ini::Document;
 using Mads::Ini::run_cli;
+using Mads::Ini::set_password;
+namespace Remote = Mads::Ini::Remote;
 
 namespace fs = std::filesystem;
 
@@ -45,7 +50,8 @@ private:
   std::vector<char *> _ptrs;
 };
 
-// A unique temporary mads.ini, removed (with its .bak) on destruction.
+// A unique temporary mads.ini, removed (with its .bak and .edit_password)
+// on destruction.
 class TempIni {
 public:
   explicit TempIni(const std::string &text) {
@@ -61,6 +67,7 @@ public:
     std::error_code ec;
     fs::remove(_path, ec);
     fs::remove(fs::path(_path.string() + ".bak"), ec);
+    fs::remove(Remote::password_file_for(_path), ec);
   }
   TempIni(const TempIni &) = delete;
   TempIni &operator=(const TempIni &) = delete;
@@ -277,4 +284,114 @@ TEST_CASE("mads ini dispatch to the GUI", "[ini][cli]") {
     Args args{"--check", "-o", "/tmp/x.ini", ini.path().string()};
     CHECK(run_cli(args.argc(), args.argv()) != 0);
   }
+}
+
+TEST_CASE("mads ini --set-password writes a verifier from stdin", "[ini][cli]") {
+  // One Argon2id derivation (about a second): keep this the only one.
+  TempIni ini("");
+  std::istringstream in("secret123\r\n");
+  std::ostringstream out;
+  std::ostringstream err;
+  CHECK(set_password(ini.path(), in, out, err) == 0);
+  const fs::path file = Remote::password_file_for(ini.path());
+  REQUIRE(fs::exists(file));
+  auto verifier = Remote::read_password_file(file);
+  REQUIRE(verifier.has_value());
+  CHECK(verifier->salt.size() == 16);
+  CHECK(verifier->stored_key.size() == 32);
+  CHECK(out.str().find("Editing password written to") != std::string::npos);
+  CHECK(out.str().find("Restart the broker") != std::string::npos);
+  CHECK(err.str().find("shorter") == std::string::npos);
+#ifndef _WIN32
+  auto perms = fs::status(file).permissions();
+  CHECK((perms & (fs::perms::group_all | fs::perms::others_all)) ==
+        fs::perms::none);
+  CHECK((perms & fs::perms::owner_read) != fs::perms::none);
+  CHECK((perms & fs::perms::owner_write) != fs::perms::none);
+#endif
+}
+
+TEST_CASE("mads ini --set-password warns on a short password", "[ini][cli]") {
+  // Second and last Argon2id derivation of this suite.
+  TempIni ini("");
+  const fs::path file = Remote::password_file_for(ini.path());
+  {
+    std::ofstream old(file, std::ios::binary);
+    old << "previous\n";
+  }
+  std::istringstream in("abc\n");
+  std::ostringstream out;
+  std::ostringstream err;
+  CHECK(set_password(ini.path(), in, out, err) == 0);
+  CHECK(err.str().find("shorter than 8 characters") != std::string::npos);
+  CHECK(out.str().find("Editing password replaced") != std::string::npos);
+  CHECK(Remote::read_password_file(file).has_value());
+}
+
+TEST_CASE("mads ini --set-password rejects an empty password", "[ini][cli]") {
+  // No derivation: the empty check comes first.
+  TempIni ini("");
+  const fs::path file = Remote::password_file_for(ini.path());
+  SECTION("empty line") {
+    std::istringstream in("\n");
+    std::ostringstream out;
+    std::ostringstream err;
+    CHECK(set_password(ini.path(), in, out, err) == 1);
+    CHECK(err.str().find("cannot be empty") != std::string::npos);
+    CHECK_FALSE(fs::exists(file));
+  }
+  SECTION("empty input") {
+    std::istringstream in("");
+    std::ostringstream out;
+    std::ostringstream err;
+    CHECK(set_password(ini.path(), in, out, err) == 1);
+    CHECK_FALSE(fs::exists(file));
+  }
+}
+
+TEST_CASE("mads ini --remove-password removes the verifier file", "[ini][cli]") {
+  TempIni ini("");
+  const fs::path file = Remote::password_file_for(ini.path());
+  {
+    std::ofstream old(file, std::ios::binary);
+    old << "stand-in\n";
+  }
+  SECTION("present file is removed") {
+    CaptureOut out;
+    Args args{"--remove-password", ini.path().string()};
+    CHECK(run_cli(args.argc(), args.argv()) == 0);
+    CHECK_FALSE(fs::exists(file));
+    CHECK(out.str().find("removed") != std::string::npos);
+  }
+  SECTION("absent file is reported, exit 0") {
+    fs::remove(file);
+    CaptureOut out;
+    Args args{"--remove-password", ini.path().string()};
+    CHECK(run_cli(args.argc(), args.argv()) == 0);
+    CHECK(out.str().find("no editing password file at") != std::string::npos);
+  }
+}
+
+TEST_CASE("mads ini password options exclude other modes", "[ini][cli]") {
+  Quiet quiet;
+  TempIni ini(kClean);
+  const std::string file = ini.path().string();
+  SECTION("--set-password with --check") {
+    Args args{"--set-password", "--check", file};
+    CHECK(run_cli(args.argc(), args.argv()) != 0);
+  }
+  SECTION("--remove-password with --set") {
+    Args args{"--remove-password", "--set", "logger.x=1", file};
+    CHECK(run_cli(args.argc(), args.argv()) != 0);
+  }
+  SECTION("--set-password with a template option") {
+    Args args{"--set-password", "-b", "example.org", file};
+    CHECK(run_cli(args.argc(), args.argv()) != 0);
+  }
+  SECTION("--remove-password with --get") {
+    Args args{"--remove-password", "--get", "logger.mongo_uri", file};
+    CHECK(run_cli(args.argc(), args.argv()) != 0);
+  }
+  CHECK(ini.str() == kClean);
+  CHECK_FALSE(fs::exists(Remote::password_file_for(ini.path())));
 }

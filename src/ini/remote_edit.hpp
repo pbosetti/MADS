@@ -6,35 +6,71 @@
 |_| \_\___|_| |_| |_|\___/ \__\___| |_____\__,_|_|\__|
 
 Remote editing of the broker's settings file: an opt-in service the broker
-runs on its own socket (`[broker] remote_edit = true`), and the client side
-used by `mads ini --remote` and by the editor's File > Open remote.
+runs on its own sockets (`[broker] remote_edit = true`), and the client side
+used by the editor's Open panel.
 
-Security model: over tcp the service only runs on a CURVE server socket
-(the broker refuses to offer it without --crypto), in the ZAP domain
-kZapDomain, whose client allowlist holds ONLY the editor keys (`*.pub` in
-the broker's editors_dir, by default <keys_dir>/editors) -- not the agent
-keys that may use the bus. On the broker's host it is also offered on an
-ipc:// endpoint without CURVE: like the bus's ipc endpoints, its access
-control is the owner-only runtime directory holding the socket file, so
-only processes of the broker's OS user can reach it. Plaintext is never
-accepted on anything but ipc://. The service can read and replace exactly
-one file, the broker's own settings file: requests carry no paths.
+Access control, per listener:
+
+  ipc://, on the broker's host  plaintext; the owner-only runtime directory
+                                holding the socket file is the access control
+                                (only the broker's OS user gets in), as for
+                                the bus's ipc endpoints. Never a password.
+  tcp://, broker with --crypto  CURVE, ZAP domain kZapDomain. The client key
+                                must be an editor key (editors_dir) or, when
+                                editors_dir is empty and a password is set, a
+                                bus key. Plus the password, if one is set.
+  tcp://, broker without crypto only with a password ("development mode"):
+                                the password is never sent and requests
+                                cannot be altered in transit, but the file
+                                contents travel in clear.
+
+The password is never stored nor sent: the broker keeps a SCRAM-style
+verifier (see PasswordVerifier) in a separate, owner-only file next to the
+settings file, never served by anything. The service can read and replace
+exactly one file, the broker's own settings file: requests carry no paths.
 
 Protocol: multipart messages, a REQ client talking to a ROUTER server.
-Every request starts with the client's LIB_VERSION; every reply starts with
-the server's LIB_VERSION and a status ("ok", "conflict" or "error"):
+Requests are [LIB_VERSION, command, auth, args...]; replies are
+[LIB_VERSION, status, results...] where status is "ok", "conflict", "auth"
+or "error":
 
+  hello                  -> ok, json {auth: "none"|"password", and with a
+                            password: salt, opslimit, memlimit (the verifier's
+                            KDF parameters) and nonce (a fresh server nonce)}
   get                    -> ok, etag, text
-  put, base_etag, text   -> ok, etag                    (written)
+  put  base_etag, text   -> ok, etag                    (written)
                          -> conflict, etag, text        (file changed since
                                                          base_etag; nothing
-                                                         written; current
-                                                         content returned)
+                                                         written)
                          -> error, message              (invalid TOML, too
                                                          large, I/O error)
-  info                   -> ok, json {path, size, mtime, etag, version}
+  info                   -> ok, json {path, size, mtime, etag, version, auth}
+  any of get/put/info on a password listener without a valid auth frame
+                         -> auth, message
   anything else, or a version Mads::check_version() rejects
                          -> error, message
+
+The auth frame is empty when no password is involved. Otherwise it is the
+96 bytes server_nonce (32, from a hello) || client_nonce (32, random) ||
+client_proof (32). The server looks the server nonce up and consumes it
+whatever the outcome (unknown or expired -> auth). The proof is computed over
+
+  auth_message = "mads-edit-v1" || server_nonce || client_nonce
+                 || command || 0x00 || SHA-256(L(arg_1) || ... || L(arg_n))
+
+where L(x) = 8-byte big-endian length of x || x, and server_nonce is the one
+from a hello (single use, valid 60 s). With
+ClientKey/StoredKey/ServerKey as in PasswordVerifier:
+
+  client_signature = HMAC-SHA-256(StoredKey, auth_message)
+  client_proof     = ClientKey XOR client_signature
+
+The server recovers ClientKey and accepts iff SHA-256(ClientKey) equals
+StoredKey (constant-time). Every reply to an authenticated request gets a
+final frame HMAC-SHA-256(ServerKey, auth_message || SHA-256(L(reply_1) ||
+... || L(reply_m))) over the other reply frames; the client rejects replies
+without a valid one. After 5 consecutive failed proofs the service answers
+"auth" to every password request for 30 s.
 
 etags are Mads::Ini::content_etag() of the file content.
 
@@ -50,6 +86,8 @@ Author(s): Paolo Bosetti
 #include <filesystem>
 #include <functional>
 #include <optional>
+#include <stdexcept>
+#include <string_view>
 #include <string>
 #include <vector>
 
@@ -67,27 +105,104 @@ inline constexpr const char *kDiscoveryPortName = "edit";
 /// Largest settings file accepted by put.
 inline constexpr std::size_t kMaxFileSize = 4 * 1024 * 1024;
 
+/// SCRAM-style password verifier (RFC 5802 roles, libsodium primitives):
+///
+///   SaltedPassword = Argon2id13(password, salt[16], opslimit, memlimit), 32 B
+///   ClientKey      = HMAC-SHA-256(SaltedPassword, "Client Key")
+///   StoredKey      = SHA-256(ClientKey)
+///   ServerKey      = HMAC-SHA-256(SaltedPassword, "Server Key")
+///
+/// The broker keeps salt, KDF parameters, StoredKey and ServerKey: enough to
+/// check a proof, not to produce one, so a leaked verifier allows at most an
+/// (Argon2-slowed) offline guessing attack.
+struct PasswordVerifier {
+  unsigned long long opslimit = 0;
+  std::size_t memlimit = 0;
+  std::string salt;       ///< 16 raw bytes
+  std::string stored_key; ///< 32 raw bytes
+  std::string server_key; ///< 32 raw bytes
+
+  /// Derives a verifier with a fresh random salt and libsodium's MODERATE
+  /// Argon2id limits (about a second and 256 MiB on a desktop).
+  static PasswordVerifier create(std::string_view password);
+  /// One line: `mads-edit-password v1 argon2id13 <opslimit> <memlimit>
+  /// <salt> <stored_key> <server_key>` (standard base64).
+  std::string to_string() const;
+  /// Parses to_string()'s format; nullopt (and `error`) when malformed or
+  /// with KDF parameters outside libsodium's valid range.
+  static std::optional<PasswordVerifier> parse(std::string_view line,
+                                               std::string *error = nullptr);
+};
+
+/// `<settings_path>.edit_password`.
+std::filesystem::path password_file_for(const std::filesystem::path &settings);
+/// Writes `verifier` atomically with owner-only permissions (POSIX: 0600).
+/// Returns false and sets `error` on failure.
+bool write_password_file(const std::filesystem::path &file,
+                         const PasswordVerifier &verifier,
+                         std::string *error = nullptr);
+/// Reads a verifier file: nullopt when absent; throws std::runtime_error when
+/// present but unreadable or malformed. Appends a warning when the file is
+/// readable or writable by group or others (POSIX).
+std::optional<PasswordVerifier>
+read_password_file(const std::filesystem::path &file,
+                   std::vector<std::string> *warnings = nullptr);
+
+/// Client-side key material derived from a password and a verifier's KDF
+/// parameters (the expensive Argon2id step, done once and cached).
+struct ClientSecret {
+  std::string salt;
+  unsigned long long opslimit = 0;
+  std::size_t memlimit = 0;
+  std::string client_key; ///< 32 raw bytes
+  std::string server_key; ///< 32 raw bytes
+  /// Throws std::invalid_argument for KDF parameters a client must not
+  /// accept from an unauthenticated hello: outside libsodium's range, or
+  /// memlimit > 1 GiB, or opslimit > crypto_pwhash_OPSLIMIT_SENSITIVE.
+  static ClientSecret derive(std::string_view password, std::string salt,
+                             unsigned long long opslimit,
+                             std::size_t memlimit);
+};
+
 /// Server-side logic, independent of sockets (unit-testable).
 class EditService {
 public:
   /// Serves `settings_path`, keeping the newest `max_backups` backups
   /// `<file>.<YYYYmmdd-HHMMSS>.bak` (plus a counter on clashes) next to it.
+  /// With a `password`, listeners that require it check the auth frame.
   explicit EditService(std::filesystem::path settings_path,
-                       std::size_t max_backups = 10);
+                       std::size_t max_backups = 10,
+                       std::optional<PasswordVerifier> password = {});
 
   /// Handles one request (frames after the routing envelope) and returns the
   /// reply frames. `user` identifies the client in log lines (the Z85 public
-  /// key from ZAP's User-Id, or "" when unknown). Never throws.
+  /// key from ZAP's User-Id, "ipc", or "" when unknown). With
+  /// `require_password`, get/put/info need a valid auth frame (and a
+  /// password must have been configured, else every such request is
+  /// refused). Never throws.
   std::vector<std::string> handle(const std::vector<std::string> &request,
-                                  const std::string &user = "");
+                                  const std::string &user = "",
+                                  bool require_password = false);
 
-  /// Called with one human-readable line per put (who, outcome, size) and
-  /// per error. Default: none.
+  bool has_password() const { return _password.has_value(); }
+
+  /// Called with one human-readable line per put (who, outcome, size), per
+  /// failed authentication and per error. Default: none.
   std::function<void(const std::string &)> log;
 
 private:
   std::filesystem::path _path;
   std::size_t _max_backups;
+  std::optional<PasswordVerifier> _password;
+  // Outstanding server nonces with their expiry (single use, 60 s, at most
+  // 256 kept), failed-proof counter and lockout deadline.
+  struct Nonce {
+    std::string value;
+    std::chrono::steady_clock::time_point expires;
+  };
+  std::vector<Nonce> _nonces;
+  int _failures = 0;
+  std::chrono::steady_clock::time_point _locked_until{};
 };
 
 /// CURVE material of the server socket.
@@ -100,8 +215,10 @@ struct ServerKeys {
 struct Listener {
   std::string endpoint;
   /// CURVE keys; without them the listener is plaintext, which serve()
-  /// accepts only for an ipc:// endpoint.
+  /// accepts only for an ipc:// endpoint or with `require_password`.
   std::optional<ServerKeys> curve;
+  /// get/put/info need the password (never on ipc:// listeners).
+  bool require_password = false;
 };
 
 /// Binds one ROUTER socket per listener in `context` and serves `service`
@@ -111,9 +228,10 @@ struct Listener {
 /// refuses requests without a ZAP User-Id; a plaintext ipc listener reports
 /// its requests as user "ipc". An ipc listener does not bind over a socket
 /// file another process still listens on, and removes its socket file on
-/// return. Throws std::invalid_argument for a plaintext non-ipc listener and
-/// zmq::error_t / std::runtime_error when an endpoint cannot be bound,
-/// before serving anything.
+/// return. Throws std::invalid_argument for a plaintext tcp listener without
+/// require_password, for require_password on an ipc listener or on a
+/// service without a password, and zmq::error_t / std::runtime_error when an
+/// endpoint cannot be bound -- all before serving anything.
 void serve(zmq::context_t &context, const std::vector<Listener> &listeners,
            EditService &service, const std::atomic<bool> &running);
 
@@ -138,15 +256,27 @@ ClientKeys load_client_keys(const std::filesystem::path &dir,
                             const std::string &client = "editor",
                             const std::string &server = "broker");
 
+/// Thrown by RemoteSource when the service wants a password and none, or a
+/// wrong one, was given (status "auth"): the caller may ask for one and retry.
+class AuthError : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
+};
+
 /// The broker's settings file seen through the edit service. One REQ socket
-/// per request (no stuck state after a timeout). load() throws
-/// std::runtime_error on timeout, refused authentication (reported as a
-/// timeout by ZMQ: the message says so) or an "error" reply.
+/// per request (no stuck state after a timeout), starting with a hello: the
+/// server says whether it wants the password and hands out the nonce. load()
+/// throws AuthError on an "auth" reply and std::runtime_error on timeout,
+/// CURVE refusal (reported as a timeout by ZMQ: the message says so), an
+/// unauthenticated reply to an authenticated request, or an "error" reply.
 class RemoteSource : public Source {
 public:
-  /// `endpoint` like "tcp://host:9094" (needs `keys`) or the ipc:// one of
-  /// local_endpoint() (plaintext: `keys` must be empty).
+  /// `endpoint` like "tcp://host:9094" or the ipc:// one of local_endpoint().
+  /// `keys` select CURVE: required for tcp:// to a broker with --crypto,
+  /// refused for ipc://. `password` is used when the server asks for it
+  /// (ClientSecret derived on first use and cached).
   RemoteSource(std::string endpoint, std::optional<ClientKeys> keys,
+               std::optional<std::string> password = {},
                std::chrono::milliseconds timeout = std::chrono::seconds(5));
   ~RemoteSource() override;
   Loaded load() override;
@@ -162,6 +292,8 @@ private:
 
   std::string _endpoint;
   std::optional<ClientKeys> _keys;
+  std::optional<std::string> _password; // wiped (sodium_memzero) on destruction
+  std::optional<ClientSecret> _secret;
   std::chrono::milliseconds _timeout;
   zmq::context_t *_context; // owned
 };

@@ -654,6 +654,13 @@ document = true
   doc = "Number of timestamped backups of the settings file kept next to it"
 
   [[types.keys]]
+  name = "edit_password_file"
+  type = "string"
+  widget = "file"
+  group = "Remote editing"
+  doc = "File with the editing password verifier (mads ini --set-password); default <settings file>.edit_password"
+
+  [[types.keys]]
   name = "tcp_keepalive"
   type = "integer"
   group = "Socket"

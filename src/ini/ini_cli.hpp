@@ -20,8 +20,15 @@ dispatcher (builds without GUI) and the mads-ini editor executable.
   mads ini --set S.K=V [FILE]  set key K of section S (repeatable), keeping
            [--comment TEXT]    every comment; V is TOML text, or a plain word
                                that is stored as a string
+  mads ini --set-password [FILE]
+                               set the broker's editing password: prompts
+                               without echo on a terminal, else reads one
+                               line from stdin
+  mads ini --remove-password [FILE]
+                               remove the broker's editing password file
 
-FILE defaults to <prefix>/etc/mads.ini for --check/--get/--set.
+FILE defaults to <prefix>/etc/mads.ini for --check/--get/--set and the
+password options.
 
 Author(s): Paolo Bosetti
 */
@@ -31,6 +38,7 @@ Author(s): Paolo Bosetti
 
 #include <filesystem>
 #include <functional>
+#include <iosfwd>
 #include <optional>
 #include <string>
 
@@ -45,6 +53,14 @@ using LaunchGui = std::function<int(std::optional<std::filesystem::path>)>;
 /// when no GUI is available: a bare invocation then prints the template, and
 /// a FILE argument alone is an error.
 int run_cli(int argc, char **argv, const LaunchGui &launch_gui = {});
+
+/// Creates the editing password verifier of the settings file `settings`
+/// (see Remote::password_file_for) from one line read from `in` (trailing
+/// \r\n stripped). Progress and errors go to `err`, the result to `out`.
+/// Returns 0 when written, 1 on an empty password or a failure. Warns when
+/// the password is shorter than 8 characters, but still writes it.
+int set_password(const std::filesystem::path &settings, std::istream &in,
+                 std::ostream &out, std::ostream &err);
 
 /// Template parameters with their defaults (broker, port_frontend,
 /// port_backend, port_settings, mongo_uri).

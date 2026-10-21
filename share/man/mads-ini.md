@@ -22,6 +22,10 @@
 
 **mads ini** **\-\-set** *section.key=value* [**\-\-set** *section.key=value*]... [**\-\-comment** *text*] [*FILE*]
 
+**mads ini** **\-\-set-password** [*FILE*]
+
+**mads ini** **\-\-remove-password** [*FILE*]
+
 **mads ini** [**\-h**, **\-\-help**]
 
 **mads-ini** accepts the same options. The **mads** dispatcher runs it for **mads ini** when it is installed.
@@ -29,7 +33,7 @@
 # DESCRIPTION
 
 **mads-ini** edits a MADS settings file, **mads.ini**, in two ways. Without options it opens a
-graphical node editor. With **\-\-check**, **\-\-get**, **\-\-set** or the template options it works
+graphical node editor. With **\-\-check**, **\-\-get**, **\-\-set**, the password options or the template options it works
 headless, so it can be used in scripts and over SSH.
 
 In the editor each agent section of the file is a node, and each topic that one agent publishes and
@@ -57,8 +61,8 @@ template options set values in the rendered text:
 - **\-f**, **\-\-fps** sets the frames per second;
 - **\-m**, **\-\-mongo** sets the MongoDB URI.
 
-The template options cannot be combined with **\-\-check**, **\-\-get** or **\-\-set**, nor with a FILE
-argument. **\-o** and **\-i** cannot be used together.
+The template options cannot be combined with **\-\-check**, **\-\-get**, **\-\-set** or the password
+options, nor with a FILE argument. **\-o** and **\-i** cannot be used together.
 
 ## Checking a file
 
@@ -135,9 +139,18 @@ each key given with the same **\-\-set**; line breaks in *text* become spaces. *
 **\-\-comment** *text*
 :  Inline comment for the keys given with **\-\-set**.
 
+**\-\-set-password** [*FILE*]
+:  Create the editing password of the broker for *FILE*, as described in BROKER. The password is read
+   without echo from a terminal, twice, to confirm it. When standard input is not a terminal, one
+   line is read from it instead, for scripts. Passwords shorter than 8 characters are accepted with a
+   warning. An existing password file is replaced.
+
+**\-\-remove-password** [*FILE*]
+:  Remove the editing password file of *FILE*. Without one, a message says so and the status is 0.
+
 *FILE*
-:  The settings file. For the GUI it is opened for editing. For **\-\-check**, **\-\-get** and **\-\-set**
-   it defaults to `<prefix>/etc/mads.ini`.
+:  The settings file. For the GUI it is opened for editing. For **\-\-check**, **\-\-get**, **\-\-set**
+   and the password options it defaults to `<prefix>/etc/mads.ini`.
 
 **\-h**, **\-\-help**
 :  Show a summary of the options.
@@ -307,6 +320,13 @@ when they start, so a running agent keeps its settings until it is restarted.
 One exception: a changed **attachment** path is only picked up when the broker restarts (press
 **X** in the broker's console, or restart it).
 
+The broker's remote editing service (**remote_edit**) can require a password. **mads ini
+\-\-set-password** creates the verifier of that password next to the settings file, in
+*FILE.edit_password*, and **mads ini \-\-remove-password** deletes it. The broker reads the file at
+startup only, so restart the broker after either command. The password itself is never stored, and
+the file is readable by its owner only. See **mads-broker**(1), section *Editing password*, for the
+access rules.
+
 The editor and **mads ini \-\-set** change the file only; they do not contact the broker.
 
 # EXIT STATUS
@@ -321,9 +341,15 @@ cannot be parsed, or the key is missing or commented out.
 an invalid value, a save that fails, or a file that changed on disk before the save (the change is
 not overwritten).
 
+**\-\-set-password**: **0** when the password file is written. **1** when the password is empty, the
+two entries differ, or the file cannot be written.
+
+**\-\-remove-password**: **0** when the file is removed or was already absent. **1** when it cannot be
+removed.
+
 Template output: **0** on success. **1** when the template cannot be rendered, when **\-\-check**,
-**\-\-get** or **\-\-set** is mixed with other modes or template options, or when **\-\-comment** is
-used without **\-\-set**. **255** for an unknown option, for **\-o** combined with **\-i**, or when the
+**\-\-get**, **\-\-set** or a password option is mixed with other modes or template options, or when
+**\-\-comment** is used without **\-\-set**. **255** for an unknown option, for **\-o** combined with **\-i**, or when the
 output file cannot be written or its directory does not exist.
 
 Without a GUI, **mads ini** *FILE* exits **1** with a message.
@@ -335,6 +361,10 @@ Without a GUI, **mads ini** *FILE* exits **1** with a message.
 
 `<prefix>/share/templates/mads.ini`
 :  Template rendered by the template options and by a new document.
+
+*FILE.edit_password*
+:  Editing password verifier of the broker, written by **\-\-set-password** and removed by
+   **\-\-remove-password**. Owner-only.
 
 *FILE.bak*
 :  The content of *FILE* before the last save. Overwritten at each save.
