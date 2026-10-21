@@ -943,10 +943,10 @@ bool Document::set_raw_value(std::string_view section, std::string_view key,
     d->raw_value = std::string(raw);
     d->disabled = false;
   } else {
-    Entry e;
-    e.key = std::string(key);
-    e.raw_value = std::string(raw);
-    s->entries.push_back(std::move(e));
+    Entry entry;
+    entry.key = std::string(key);
+    entry.raw_value = std::string(raw);
+    s->entries.push_back(std::move(entry));
   }
   return true;
 }

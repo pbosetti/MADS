@@ -208,7 +208,7 @@ fs::path settings_path(const cxxopts::ParseResult &parsed) {
 
 // Legacy template output: -o, -i, -p and the template parameters.
 int template_command(const cxxopts::ParseResult &parsed, json &data,
-                     const std::string &etc_dir) {
+                     [[maybe_unused]] const std::string &etc_dir) { // -i: POSIX only
   std::string template_dir = Mads::exec_dir("../share/templates/");
   std::string output = "";
   if (parsed.count("output")) {
