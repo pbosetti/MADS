@@ -136,6 +136,10 @@ int IniApp::run() {
   ImGui_ImplGlfw_InitForOpenGL(_window, true);
   ImGui_ImplOpenGL3_Init(glsl_version);
 
+  // Same font as mads-chat and mads-director: as the first font added it
+  // becomes ImGui's default, for the whole UI (canvas included).
+  MadsGui::load_monospace_font(15.0F);
+
   _logo = MadsGui::load_logo(std::filesystem::path(Mads::exec_dir("../share/images")));
   load_startup_document();
   show_prefs_notice();

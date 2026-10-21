@@ -324,8 +324,8 @@ TEST_CASE("auto_layout orders sources, filters and sinks left to right",
   const auto x = [&](const char *n) { return *ed.doc().find(n)->meta.x; };
   const auto y = [&](const char *n) { return *ed.doc().find(n)->meta.y; };
   CHECK(x("src") == 0.0f);
-  CHECK(x("flt") == 260.0f);
-  CHECK(x("snk") == 520.0f);
+  CHECK(x("flt") == 320.0f);
+  CHECK(x("snk") == 640.0f);
   CHECK(x("all") > x("src")); // catch-all sink is not a source
   CHECK(y("src") == 0.0f);
   CHECK_FALSE(ed.dirty());
@@ -358,11 +358,11 @@ TEST_CASE("auto_layout wraps tall layers into extra columns",
   const auto y = [&](const std::string &n) { return *ed.doc().find(n)->meta.y; };
   // Layer 0 holds s0..s7: six rows, then a second column.
   CHECK(x("s5") == 0.0f);
-  CHECK(y("s5") == 5 * 140.0f);
-  CHECK(x("s6") == 260.0f);
+  CHECK(y("s5") == 5 * 170.0f);
+  CHECK(x("s6") == 320.0f);
   CHECK(y("s6") == 0.0f);
   // The next layer starts after both columns.
-  CHECK(x("sink") == 520.0f);
+  CHECK(x("sink") == 640.0f);
 }
 
 TEST_CASE("auto_layout only places unplaced nodes and survives cycles",
@@ -671,7 +671,7 @@ TEST_CASE("auto_layout puts a sink with no edges in the last layer",
                   "[idle]\n#@ type=custom role=source\n");
   const auto x = [&](const char *n) { return *ed.doc().find(n)->meta.x; };
   CHECK(x("src") == 0.0f);
-  CHECK(x("snk") == 260.0f);
+  CHECK(x("snk") == 320.0f);
   CHECK(x("lonely") == x("snk"));
   // A source without edges stays in the first layer.
   CHECK(x("idle") == 0.0f);

@@ -19,8 +19,8 @@ namespace {
 // Undo steps kept; the oldest are dropped beyond this.
 constexpr size_t kMaxHistory = 200;
 // Canvas spacing of auto_layout(), in pixels.
-constexpr float kLayerSpacing = 260.0f;
-constexpr float kRowSpacing = 140.0f;
+constexpr float kLayerSpacing = 320.0f; // fits a node in the 15 px GUI font
+constexpr float kRowSpacing = 170.0f;
 constexpr int kMaxRows = 6; // nodes per column before a layer wraps
 
 bool is_document_section(const std::string &name) {
