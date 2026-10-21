@@ -37,8 +37,10 @@ if(IS_GIT_REPO STREQUAL "true")
   # On an exact release tag this is just "v1.2.3". On commits past a tag (i.e.
   # manually dispatched, unofficial builds) git describe appends "-<n>-g<hash>";
   # mark these as pre-releases by turning that into "-p<n>-g<hash>", e.g.
-  # v1.2.3-p3-gabc1234.
-  string(REGEX REPLACE "^(v[0-9]+\\.[0-9]+\\.[0-9]+)-([0-9]+)-g" "\\1-p\\2-g"
+  # v1.2.3-p3-gabc1234. Beta tags (v1.2.3-beta1) are anchors too, so the
+  # optional "-beta<N>" is kept: v1.2.3-beta1-3-gabc -> v1.2.3-beta1-p3-gabc.
+  # (Keep in sync with the "Compute pre-release tag" step of ci.yml.)
+  string(REGEX REPLACE "^(v[0-9]+\\.[0-9]+\\.[0-9]+(-beta[0-9]+)?)-([0-9]+)-g" "\\1-p\\3-g"
          GIT_TAG "${GIT_TAG}")
   if(GIT_TAG MATCHES "^v([0-9]+)\\.([0-9]+)\\.([0-9]+)(.*)?$")
     string(REGEX REPLACE "^v([0-9]+)\\.([0-9]+)\\.([0-9]+)(.*)?$" "\\1" CPACK_PACKAGE_VERSION_MAJOR "${GIT_TAG}")
@@ -680,6 +682,29 @@ else()
     set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_FILE_NAME}_headless")
   endif()
   set(CPACK_DEBIAN_PACKAGE_NAME MADS)
+  # Debian version derived from GIT_TAG, so that apt orders packages correctly:
+  #   v2.6.0                    -> 2.6.0
+  #   v2.6.0-beta1              -> 2.6.0~beta1          (before 2.6.0)
+  #   v2.6.0-p3-gabc1234        -> 2.6.0+p3.gabc1234    (after 2.6.0)
+  #   v2.6.0-beta1-p3-gabc1234  -> 2.6.0~beta1+p3.gabc1234 (after beta1, before 2.6.0)
+  # A trailing "-dirty" becomes "+dirty". Anything else falls back to X.Y.Z.
+  set(CPACK_DEBIAN_PACKAGE_VERSION "${LIB_VERSION}")
+  if(GIT_TAG MATCHES "^v[0-9]+\\.[0-9]+\\.[0-9]+(-beta([0-9]+))?(-p([0-9]+)-g([0-9a-f]+))?(-dirty)?$")
+    set(_deb_beta "${CMAKE_MATCH_2}")
+    set(_deb_n "${CMAKE_MATCH_4}")
+    set(_deb_hash "${CMAKE_MATCH_5}")
+    set(_deb_dirty "${CMAKE_MATCH_6}")
+    if(NOT _deb_beta STREQUAL "")
+      string(APPEND CPACK_DEBIAN_PACKAGE_VERSION "~beta${_deb_beta}")
+    endif()
+    if(NOT _deb_n STREQUAL "")
+      string(APPEND CPACK_DEBIAN_PACKAGE_VERSION "+p${_deb_n}.g${_deb_hash}")
+    endif()
+    if(NOT _deb_dirty STREQUAL "")
+      string(APPEND CPACK_DEBIAN_PACKAGE_VERSION "+dirty")
+    endif()
+  endif()
+  message(STATUS "Debian package version: ${CPACK_DEBIAN_PACKAGE_VERSION}")
   set(CPACK_GENERATOR "DEB;TGZ")
 endif()
 include(CPack)

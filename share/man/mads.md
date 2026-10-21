@@ -76,6 +76,12 @@ In addition, the **mads** command allows to create systemd services for running 
 **ini**
 :  Open the **mads.ini** node editor, or check, read or change the file from the command line. See **mads-ini**(1).
 
+**update**
+:  Show the latest stable release on GitHub with the download links for this platform (matching ones highlighted), plus the latest pre-release if it is newer than that release.
+
+**beta**
+:  List the beta releases (`vX.Y.Z-betaN`) of the next version, i.e. the pre-releases whose X.Y.Z is greater than that of the latest stable release, newest first. For each one it prints the tag, the publication date and the download links for this platform. If there are none it says so and shows the latest stable release.
+
 ## SERVICE SUBCOMMAND (LINUX ONLY)
 
 The **service** subcommand has the following syntax:

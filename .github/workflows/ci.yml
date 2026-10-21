@@ -204,8 +204,9 @@ jobs:
           path: packages/Mads-*
 
   # ── GitHub Release ────────────────────────────────────────────────────────
-  # Runs on pushed release tags (v*.*.*) -> full release, and on manual dispatch
-  # -> pre-release. Never runs on a normal branch push.
+  # Runs on pushed release tags (v*.*.*) -> full release, on pushed beta tags
+  # (v*.*.*-betaN) and on manual dispatch -> pre-release. Never runs on a
+  # normal branch push.
   release:
     name: GitHub Release
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
@@ -229,8 +230,24 @@ jobs:
         id: version
         run: |
           raw=$(git describe --tags --exclude='*-g*')
-          tag=$(echo "$raw" | sed -E 's/^(v[0-9]+\.[0-9]+\.[0-9]+)-([0-9]+)-g/\1-p\2-g/')
+          tag=$(echo "$raw" | sed -E 's/^(v[0-9]+\.[0-9]+\.[0-9]+(-beta[0-9]+)?)-([0-9]+)-g/\1-p\3-g/')
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      # Beta tags (vX.Y.Z-betaN) are published as pre-releases, never "latest".
+      # The "v*.*.*" trigger glob already matches them ("*" spans "-beta1").
+      # (Through env, not ${{ }} in the script: no shell injection from a ref.)
+      - name: Detect pre-release
+        id: prerelease
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ||
+                "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta[0-9]+$ ]]; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Download all package artifacts
         uses: actions/download-artifact@v8
@@ -246,7 +263,8 @@ jobs:
           # softprops creates at the current commit (non-compounding, since
           # CMake's git describe excludes *-g* tags).
           tag_name: ${{ steps.version.outputs.tag }}
-          prerelease: ${{ github.event_name == 'workflow_dispatch' }}
+          prerelease: ${{ steps.prerelease.outputs.value }}
+          make_latest: ${{ steps.prerelease.outputs.value == 'true' && 'false' || 'legacy' }}
           files: packages/**
           generate_release_notes: true
           fail_on_unmatched_files: false

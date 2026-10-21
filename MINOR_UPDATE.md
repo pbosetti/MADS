@@ -21,6 +21,21 @@ the annotated tag `vX.Y.Z`.
 - A commit *past* a tag becomes `vX.Y.Z-p<n>-g<hash>` and is treated as a
   pre-release; only exact tags are official.
 
+### Beta releases
+
+To test a version before releasing it, tag `vX.Y.Z-betaN` (N >= 1, e.g.
+`v2.6.0-beta1`, `v2.6.0-beta2`, ...) and push the tag; CI publishes it as a
+GitHub **pre-release** (never "latest") and `mads beta` lists it. Then tag the
+final `vX.Y.Z`. Notes:
+
+- The beta tag must be on the commit you want to test; the final tag is a new
+  tag (betas are not renamed). Version numbers are `X.Y.Z` in both cases.
+- A commit past a beta becomes `vX.Y.Z-betaN-p<n>-g<hash>`.
+- Debian versions: `X.Y.Z~betaN` < `X.Y.Z~betaN+p<n>.g<hash>` < `X.Y.Z`, so
+  apt upgrades a beta to the final release.
+- The CMake rewrite of `git describe` and the one in the `release` job of
+  [`ci.yml`](.github/workflows/ci.yml) must stay identical.
+
 ## 2. `LIB_VERSION_CHECK`: a minor bump is a compatibility break
 
 This is the one thing that makes a minor release different from a patch.
@@ -171,4 +186,5 @@ Agent executables are migrating to `AgentAppFor<T>` (see
 - [ ] Scaffold a plugin (`mads plugin -t filter demo`) **and** migrate an old one
       (`mads plugin --update`); confirm both end on identical dependency pins.
 - [ ] `CHANGES.md` reflects the actual diff.
+- [ ] (Optional) tag and push `vX.Y.Z-betaN` first and test the pre-release.
 - [ ] Tag `vX.Y.Z`, push the tag, watch the CI release job.

@@ -63,6 +63,13 @@
   atomically, backed up (`edit_backups`) and logged on the broker's console.
   Setup: **mads-broker**(1), **mads-ini**(1) and CRYPTO.md.
 
+- **Beta pre-releases and `mads beta`.** Tags of the form `vX.Y.Z-betaN`
+  are published as GitHub pre-releases (never marked as "latest"), so a new
+  version can be tested before the final release. `mads beta` now lists the
+  beta releases of the next version (those newer than the latest stable
+  release), newest first, with their publication date and the download links
+  for this platform. `mads update` is unchanged.
+
 ## Fixes
 
 - **The broker kept reloading its settings file only until the first
@@ -80,6 +87,15 @@
 
 ## For developers
 
+- **Beta tagging convention and Debian versions.** Tag `vX.Y.Z-betaN`
+  (N >= 1, e.g. `v2.6.0-beta1`): CI builds it and creates a pre-release. The
+  version numbers stay `X.Y.Z`, `GIT_TAG` is the beta tag, and commits past it
+  become `vX.Y.Z-betaN-p<n>-g<hash>`. The Debian package version is
+  `X.Y.Z` for a release, `X.Y.Z~betaN` for a beta (sorts before the final
+  release, so apt upgrades beta to final), `X.Y.Z+p<n>.g<hash>` for a dev build
+  past a release and `X.Y.Z~betaN+p<n>.g<hash>` past a beta. Package file names
+  still use `GIT_TAG`. The tag parsing used by `mads beta` lives in
+  `src/detail/release_tag.hpp` (tests: `test_release_tag`).
 - **Two attachment tests had colliding test ports.** `test_agent_broker`
   used ports 42208 and 42209 twice each, so under `ctest -j` the tests could
   fail at random. The attachment tests now use 42212 and 42213.

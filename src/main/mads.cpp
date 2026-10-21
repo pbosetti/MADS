@@ -14,6 +14,7 @@ Author: Paolo Bosetti, July 2024
 #include "../mads.hpp"
 #include "../agent.hpp"
 #include "../exec_path.hpp"
+#include "../detail/release_tag.hpp"
 #include "../https_client.hpp"
 #include "../TerminalLogoRenderer.hpp"
 #include "../service_discovery.hpp"
@@ -226,7 +227,8 @@ bool save_keypair(pair<string, string> &key_files, const string &path, const str
        |_|                        
 */
 
-void describe_release(const json &release, bool show_running = true) {
+// "Darwin-arm64", "Linux-x86_64", ...: the platform part of the package names.
+static std::string platform_string() {
   std::string plat, arch;
 #ifdef _WIN32
   plat = "Windows-";
@@ -253,6 +255,32 @@ void describe_release(const json &release, bool show_running = true) {
 #else
   arch = "unknown";
 #endif
+  return plat + arch;
+}
+
+// Lists the assets of a release, marking in green those matching this device.
+static void print_assets(const json &release) {
+  const std::string plat_arch = platform_string();
+  const std::string plat = plat_arch.substr(0, plat_arch.find('-') + 1);
+  for (json const &a : release["assets"]) {
+    if (regex_match(a.value("name", ""), regex(".*" + plat_arch + ".*")) ||
+        regex_match(a.value("name", ""), regex(".*" + plat + "universal.*")))
+      cout << fg::green << style::bold << "=> ";
+    else
+      cout << " - ";
+    cout << a.value("browser_download_url", "unnamed") << ", "
+         << style::reset << style::italic << a.value("size", 0) / 1024 << " kbytes" 
+         << fg::reset << style::reset << endl;
+  }
+}
+
+static void print_platform_legend() {
+  cout << style::italic << "URLs in green match current device (" 
+       << fg::green << platform_string() << fg::reset << ")" << style::reset
+       << endl;
+}
+
+void describe_release(const json &release, bool show_running = true) {
   if (show_running)
     cout << "You are running MADS " << style::bold << LIB_GIT_TAG
          << style::reset << endl;
@@ -264,19 +292,22 @@ void describe_release(const json &release, bool show_running = true) {
   cout << style::bold
        << release.value("tag_name", "no tag") << style::reset << fg::reset 
        << " has " << release["assets"].size() << " assets:" << endl;
-  for (json const &a : release["assets"]) {
-    if (regex_match(a.value("name", ""), regex(".*" + plat + arch + ".*")) ||
-        regex_match(a.value("name", ""), regex(".*" + plat + "universal.*")))
-      cout << fg::green << style::bold << "=> ";
-    else
-      cout << " - ";
-    cout << a.value("browser_download_url", "unnamed") << ", "
-         << style::reset << style::italic << a.value("size", 0) / 1024 << " kbytes" 
-         << fg::reset << style::reset << endl;
-  }
+  print_assets(release);
   cout << "Release URL: " << release.value("html_url", "unknown") << endl;
-  cout << style::italic << "URLs in green match current device (" 
-       << fg::green << plat + arch << fg::reset << ")" << style::reset << endl;
+  print_platform_legend();
+}
+
+// Compact description of one release, as listed by `mads beta`: tag and
+// publication date, then the assets and the release URL.
+static void describe_release_compact(const json &release) {
+  const std::string published = release.value("published_at", "");
+  cout << style::bold << fg::yellow << release.value("tag_name", "no tag")
+       << fg::reset << style::reset;
+  if (!published.empty())
+    cout << " (published " << published.substr(0, 10) << ")";
+  cout << ", " << release["assets"].size() << " assets:" << endl;
+  print_assets(release);
+  cout << "  " << release.value("html_url", "unknown") << endl;
 }
 
 // Fetch and parse a GitHub API endpoint as JSON, retrying up to n times on
@@ -306,12 +337,33 @@ static std::optional<json> github_get_json(
 }
 
 void check_update(bool beta = false, size_t n = 3) {
-  // `mads beta`: report the single most recent release, prerelease or not.
+  // `mads beta`: list the beta pre-releases of the next version, i.e. the
+  // vX.Y.Z-betaN releases with X.Y.Z newer than the latest stable release.
   if (beta) {
-    auto releases =
-        github_get_json("/repos/pbosetti/mads/releases", {{"per_page", "1"}}, n);
-    if (releases && releases->is_array() && !releases->empty())
-      describe_release((*releases)[0]);
+    auto latest =
+        github_get_json("/repos/pbosetti/mads/releases/latest", {}, n);
+    if (!latest)
+      return;
+    const std::string latest_tag = latest->value("tag_name", "");
+    auto releases = github_get_json("/repos/pbosetti/mads/releases",
+                                    {{"per_page", "100"}}, n);
+    if (!releases || !releases->is_array())
+      return;
+    auto betas = Mads::detail::select_next_betas(*releases, latest_tag);
+    if (betas.empty()) {
+      cout << "No beta releases for the next version (latest stable release: "
+           << latest_tag << ")." << endl;
+      return;
+    }
+    cout << "You are running MADS " << style::bold << LIB_GIT_TAG
+         << style::reset << endl;
+    cout << "Beta releases newer than " << latest_tag << ", newest first:"
+         << endl << endl;
+    for (json const &rel : betas) {
+      describe_release_compact(rel);
+      cout << endl;
+    }
+    print_platform_legend();
     return;
   }
 
