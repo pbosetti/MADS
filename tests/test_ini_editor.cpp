@@ -553,3 +553,126 @@ TEST_CASE("save_as adopts the new source", "[ini][editor]") {
   write_file(dir.path / "other.ini", "[x]\n");
   CHECK(ed.save_as(dir.path / "other.ini").status == SaveResult::Status::Ok);
 }
+
+TEST_CASE("role_of infers the role of an any-role node from its active keys",
+          "[ini][editor]") {
+  Editor ed;
+  ed.new_document("[src]\npub_topic = \"x\"\n\n"
+                  "[snk]\nsub_topic = [\"x\"]\n\n"
+                  "[flt]\nsub_topic = [\"x\"]\npub_topic = \"y\"\n\n"
+                  "[none]\n\n"
+                  "[dis]\n# pub_topic = \"z\"\n\n"
+                  "[emptysub]\npub_topic = \"w\"\nsub_topic = [ ]\n\n"
+                  "[emptypub]\npub_topic = \"\"\nsub_topic = [\"x\"]\n");
+  CHECK(ed.role_of("src") == "source");
+  // Empty values declare nothing (removing a node's last link leaves []).
+  CHECK(ed.role_of("emptysub") == "source");
+  CHECK(ed.role_of("emptypub") == "sink");
+  CHECK(ed.role_of("snk") == "sink");
+  CHECK(ed.role_of("flt") == "filter");
+  CHECK(ed.role_of("none") == "filter");
+  // A disabled key is not an active one.
+  CHECK(ed.role_of("dis") == "filter");
+  CHECK(ed.role_is_inferred("src"));
+  CHECK(ed.automatic_role("snk") == "sink");
+  CHECK(ed.role_of("agents") == "");
+  CHECK(ed.role_of("no_such") == "");
+}
+
+TEST_CASE("role_of: the schema type role and an explicit role", "[ini][editor]") {
+  Editor ed;
+  ed.new_document("[flt]\n#@ type=filter role=source\n"
+                  "attachment = \"x.so\"\nsub_topic = [\"x\"]\n\n"
+                  "[mine]\n#@ type=custom role=sink\npub_topic = \"x\"\n\n"
+                  "[bad]\n#@ type=custom role=bogus\npub_topic = \"x\"\n");
+  // The schema role of a plugin loader wins over its meta.
+  CHECK(ed.role_of("flt") == "filter");
+  CHECK_FALSE(ed.role_is_inferred("flt"));
+  // An explicit role wins over the keys.
+  CHECK(ed.role_of("mine") == "sink");
+  CHECK_FALSE(ed.role_is_inferred("mine"));
+  // An invalid value in the file is ignored: back to inference.
+  CHECK(ed.role_of("bad") == "source");
+  CHECK(ed.role_is_inferred("bad"));
+}
+
+TEST_CASE("set_role writes, removes and undoes the explicit role",
+          "[ini][editor]") {
+  Editor ed;
+  ed.new_document("[src]\n#@ type=custom\npub_topic = \"x\"\n");
+  const std::string original = ed.doc().serialize();
+
+  CHECK(ed.set_role("src", "sink"));
+  CHECK(ed.role_of("src") == "sink");
+  CHECK_FALSE(ed.role_is_inferred("src"));
+  CHECK(ed.undo_label() == "Set role of src");
+  // Loading placed the node at 0,0, so the meta line carries the position.
+  CHECK(ed.doc().serialize().find("#@ type=custom pos=0,0 role=sink\n") !=
+        std::string::npos);
+
+  // Setting the same role again changes nothing and records no step.
+  CHECK(ed.set_role("src", "sink"));
+  CHECK(ed.undo_label() == "Set role of src");
+
+  CHECK(ed.set_role("src", ""));
+  CHECK(ed.role_of("src") == "source");
+  CHECK(ed.role_is_inferred("src"));
+  CHECK(ed.doc().serialize() == original);
+
+  ed.undo(); // back to the explicit sink
+  CHECK(ed.role_of("src") == "sink");
+  ed.undo();
+  CHECK(ed.doc().serialize() == original);
+  CHECK(ed.role_of("src") == "source");
+  ed.redo();
+  CHECK(ed.role_of("src") == "sink");
+}
+
+TEST_CASE("set_role refuses other roles, sections and node types",
+          "[ini][editor]") {
+  Editor ed;
+  ed.new_document("[agents]\nx = 1\n\n[flt]\n#@ type=filter\n"
+                  "attachment = \"x.so\"\n\n[src]\npub_topic = \"x\"\n");
+  const std::string before = ed.doc().serialize();
+  CHECK_FALSE(ed.set_role("src", "bogus"));
+  CHECK_FALSE(ed.set_role("src", "Source"));
+  CHECK_FALSE(ed.set_role("no_such", "sink"));
+  CHECK_FALSE(ed.set_role("agents", "sink"));
+  CHECK_FALSE(ed.set_role("flt", "sink")); // a plugin loader has its role
+  CHECK(ed.role_of("flt") == "filter");
+  CHECK(ed.doc().serialize() == before);
+  CHECK_FALSE(ed.dirty());
+  CHECK_FALSE(ed.can_undo());
+}
+
+TEST_CASE("role round-trips through the #@ line", "[ini][editor]") {
+  const std::string text = "[node]\n#@ type=custom pos=1,2 role=sink\n"
+                           "sub_topic = [\"x\"]\n";
+  Editor ed;
+  ed.new_document(text);
+  CHECK(ed.role_of("node") == "sink");
+  CHECK_FALSE(ed.role_is_inferred("node"));
+  CHECK(ed.doc().serialize().find("#@ type=custom pos=1,2 role=sink\n") !=
+        std::string::npos);
+  CHECK_FALSE(ed.dirty());
+
+  Editor again;
+  again.new_document(ed.doc().serialize());
+  CHECK(again.role_of("node") == "sink");
+  CHECK(again.doc().serialize() == ed.doc().serialize());
+}
+
+TEST_CASE("auto_layout puts a sink with no edges in the last layer",
+          "[ini][editor]") {
+  Editor ed;
+  ed.new_document("[src]\npub_topic = \"raw\"\n\n"
+                  "[lonely]\n#@ type=custom role=sink\n\n"
+                  "[snk]\nsub_topic = [\"raw\"]\n\n"
+                  "[idle]\n#@ type=custom role=source\n");
+  const auto x = [&](const char *n) { return *ed.doc().find(n)->meta.x; };
+  CHECK(x("src") == 0.0f);
+  CHECK(x("snk") == 260.0f);
+  CHECK(x("lonely") == x("snk"));
+  // A source without edges stays in the first layer.
+  CHECK(x("idle") == 0.0f);
+}

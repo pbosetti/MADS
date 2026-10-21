@@ -391,6 +391,38 @@ bool Inspector::draw_node_header(const std::string &name) {
     ImGui::TextDisabled("%s", type->executable.c_str());
   }
 
+  if (type != nullptr && type->role == "any" && !type->document) {
+    ImGui::TextDisabled("Role");
+    const bool inferred = _editor.role_is_inferred(name);
+    const std::string current = inferred ? "" : _editor.role_of(name);
+    const std::pair<std::string, std::string> items[] = {
+        {"", "Automatic (" + _editor.automatic_role(name) + ")"},
+        {"source", "Source"},
+        {"filter", "Filter"},
+        {"sink", "Sink"}};
+    std::string role_preview;
+    for (const auto &[value, label] : items) {
+      if (value == current) {
+        role_preview = label;
+      }
+    }
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    if (ImGui::BeginCombo("##role", role_preview.c_str())) {
+      for (const auto &[value, label] : items) {
+        if (ImGui::Selectable(label.c_str(), value == current) &&
+            value != current && !_editor.set_role(name, value)) {
+          _ui.notify("Cannot set the role of " + name, true);
+        }
+      }
+      ImGui::EndCombo();
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) {
+      ImGui::SetTooltip("%s", "How this agent uses topics: decides the node's "
+                              "pins and color. Saved in the editor-only #@ "
+                              "line, agents ignore it.");
+    }
+  }
+
   for (const auto &diagnostic : _editor.diagnostics()) {
     if (diagnostic.section != name) {
       continue;

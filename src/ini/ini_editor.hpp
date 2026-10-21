@@ -103,6 +103,21 @@ public:
   const std::vector<std::string> &nodes() const { return _nodes; }
   /// Type id of a section (Schema::infer_type), cached per commit.
   std::string type_of(const std::string &section) const;
+  /// Role of a node section: which pins it shows and where auto_layout()
+  /// puts it. The schema type's role if that is not "any"; else the
+  /// `role=` of its `#@` meta if it is source, filter or sink; else
+  /// automatic_role(). "" for a section that is not a node. Cached per commit.
+  std::string role_of(const std::string &section) const;
+  /// The role from the section's active keys alone: pub_topic only is
+  /// "source", sub_topic only is "sink", both or neither is "filter".
+  std::string automatic_role(const std::string &section) const;
+  /// True when role_of() comes from automatic_role() (no explicit role).
+  bool role_is_inferred(const std::string &section) const;
+  /// Sets the explicit role of a node whose schema type role is "any":
+  /// source, filter or sink, or "" to remove it (back to automatic).
+  /// Returns false, changing nothing, for other sections and other values.
+  /// Commits "Set role of <section>" when the meta changed.
+  bool set_role(const std::string &section, const std::string &role);
   const std::map<std::string, AgentTopicInfo> &topics() const {
     return _topics;
   }
@@ -137,7 +152,9 @@ public:
   /// layered left-to-right by longest path from publishers to subscribers
   /// (ignoring catch-all edges), sources left, sinks right, nodes in a layer
   /// stacked top-down in file order, wrapping into extra columns past a few
-  /// rows. Commits if anything moved.
+  /// rows. A sink role (see role_of()) with no edges other than catch-all
+  /// ones goes to the last layer, as catch-all-only subscribers do.
+  /// Commits if anything moved.
   /// Loading a document (new_document, open, reload) already places the
   /// nodes that have no position, as part of the clean state: a freshly
   /// opened file is not dirty, and the positions reach the file with the
@@ -197,6 +214,12 @@ private:
   std::vector<TopologyEdge> _edges;
   DanglingTopics _dangling;
   std::vector<Diagnostic> _diagnostics;
+  struct RoleInfo {
+    std::string role;      // effective role
+    std::string automatic; // automatic_role()
+    bool inferred = false; // role == automatic
+  };
+  std::map<std::string, RoleInfo> _roles;
 };
 
 } // namespace Mads::Ini

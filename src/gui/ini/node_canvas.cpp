@@ -56,8 +56,8 @@ struct TitleColors {
   ImU32 normal, hovered, selected;
 };
 
-/// Header colors by node role ("source", "filter", "sink", "any", or
-/// "custom" for sections without a known type).
+/// Header colors by effective node role (Editor::role_of()); "custom" for
+/// sections without one.
 TitleColors title_colors(const std::string &role) {
   if (role == "source") {
     return {IM_COL32(40, 120, 90, 255), IM_COL32(52, 145, 110, 255), IM_COL32(64, 170, 130, 255)};
@@ -305,7 +305,10 @@ void NodeCanvas::Impl::sync_positions() {
 void NodeCanvas::Impl::draw_node(const std::string &name, int id) {
   const Mads::Ini::NodeType *type = editor.schema().type(editor.type_of(name));
   const std::string type_id = editor.type_of(name);
-  const std::string role = type != nullptr ? type->role : "custom";
+  std::string role = editor.role_of(name);
+  if (role.empty()) {
+    role = "custom";
+  }
   const std::string exec_line = (type != nullptr && !type->executable.empty()) ? type->executable : type_id;
 
   Mads::AgentTopicInfo info;
@@ -424,8 +427,7 @@ void NodeCanvas::Impl::draw_links() {
       continue;
     }
     // The publisher must show an output pin.
-    const Mads::Ini::NodeType *from_type = editor.schema().type(editor.type_of(edge.from));
-    if (from_type != nullptr && from_type->role == "sink" && from_info->second.pub_implicit) {
+    if (editor.role_of(edge.from) == "sink" && from_info->second.pub_implicit) {
       continue;
     }
     // Target: the first input pin whose entry matches the topic.

@@ -181,6 +181,14 @@ Nodes can be renamed, duplicated (the copy is offset by 40 pixels on both axes) 
 Renaming a node does not rewrite the **sub_topic** entries of other nodes that matched its old name
 as an implicit **pub_topic**.
 
+Custom and Python agents have no fixed role, so the editor decides it: a role given by **role** in
+the metadata line wins, else a node that sets only **pub_topic** is a source, one that sets only
+**sub_topic** is a sink, and any other node (both keys, or neither) is a filter; an empty value
+(`sub_topic = []`, `pub_topic = ""`) counts as not set. The inspector's
+**Role** combo shows this as *Automatic (...)* and lets you choose source, filter or sink instead;
+choosing Automatic again removes the explicit role. The role only decides the pins, colors and
+layout in the editor: agents ignore it.
+
 ## Links
 
 A link says that the subscriber receives what the publisher publishes. The publisher's topic is its
@@ -293,7 +301,9 @@ Node positions and other editor-only data are stored in a line of the form:
 ```
 
 The line is a TOML comment, so agents never read it. **type** is the node type, and **pos** is the
-canvas position in whole units. Unknown *key=value* pairs on the line are kept. When the line is
+canvas position in whole units. **role** is **source**, **filter** or **sink** and is set for custom
+and Python agents only, from the inspector's Role combo; it is ignored for other types and for
+values other than these three. Unknown *key=value* pairs on the line are kept. When the line is
 missing, the type is inferred from the section name and its keys.
 
 # SAVING

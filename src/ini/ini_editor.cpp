@@ -27,6 +27,39 @@ bool is_document_section(const std::string &name) {
   return name == "agents" || name == "broker";
 }
 
+bool is_role_name(const std::string &role) {
+  return role == "source" || role == "filter" || role == "sink";
+}
+
+// True if `key` is active and not empty: `sub_topic = []` (what removing a
+// node's last link leaves) or `pub_topic = ""` declare nothing.
+bool declares(const Section &section, const char *key) {
+  const Entry *e = section.find(key);
+  if (!e) {
+    return false;
+  }
+  std::string v;
+  for (char c : e->raw_value) {
+    if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+      v += c;
+    }
+  }
+  return v != "[]" && v != "\"\"" && v != "''";
+}
+
+// The role from the active keys alone (see Editor::automatic_role()).
+std::string automatic_role_of(const Section &section) {
+  const bool pub = declares(section, "pub_topic");
+  const bool sub = declares(section, "sub_topic");
+  if (pub && !sub) {
+    return "source";
+  }
+  if (sub && !pub) {
+    return "sink";
+  }
+  return "filter";
+}
+
 // A TOML basic string literal for `s`, with quotes.
 std::string toml_quote(const std::string &s) {
   std::string out = "\"";
@@ -285,15 +318,72 @@ std::string Editor::type_of(const std::string &section) const {
   return it == _types.end() ? "" : it->second;
 }
 
+std::string Editor::role_of(const std::string &section) const {
+  auto it = _roles.find(section);
+  return it == _roles.end() ? "" : it->second.role;
+}
+
+std::string Editor::automatic_role(const std::string &section) const {
+  auto it = _roles.find(section);
+  return it == _roles.end() ? "" : it->second.automatic;
+}
+
+bool Editor::role_is_inferred(const std::string &section) const {
+  auto it = _roles.find(section);
+  return it != _roles.end() && it->second.inferred;
+}
+
+bool Editor::set_role(const std::string &section, const std::string &role) {
+  if (!role.empty() && !is_role_name(role)) {
+    return false;
+  }
+  Section *s = _doc.find(section);
+  if (!s) {
+    return false;
+  }
+  const NodeType *type = _schema.type(_schema.infer_type(*s));
+  if (!type || type->document || type->role != "any") {
+    return false;
+  }
+  auto it = s->meta.extra.find("role");
+  const std::string current = it == s->meta.extra.end() ? "" : it->second;
+  if (current == role) {
+    return true;
+  }
+  if (role.empty()) {
+    s->meta.extra.erase("role");
+  } else {
+    s->meta.extra["role"] = role;
+  }
+  commit("Set role of " + section);
+  return true;
+}
+
 void Editor::recompute() {
   _nodes.clear();
   _types.clear();
+  _roles.clear();
   for (const auto &s : _doc.sections()) {
     if (is_document_section(s.name)) {
       continue;
     }
     _nodes.push_back(s.name);
     _types[s.name] = _schema.infer_type(s);
+
+    // Schema role first, then the explicit `role=` meta, then the keys.
+    RoleInfo info;
+    info.automatic = automatic_role_of(s);
+    const NodeType *type = _schema.type(_types[s.name]);
+    auto extra = s.meta.extra.find("role");
+    if (type && type->role != "any") {
+      info.role = type->role;
+    } else if (extra != s.meta.extra.end() && is_role_name(extra->second)) {
+      info.role = extra->second;
+    } else {
+      info.role = info.automatic;
+      info.inferred = true;
+    }
+    _roles[s.name] = std::move(info);
   }
 
   // Topology comes from toml++'s view of the serialized text, so it is
@@ -465,19 +555,27 @@ bool Editor::layout_nodes(bool all) {
 
   // A node that only receives through a subscribe-all entry has no layer of
   // its own (catch-all edges are ignored); it is a sink, so put it right.
+  // The same goes for a sink by role with no edges besides catch-all ones.
   int last = 0;
   for (const auto &kv : layer) {
     last = std::max(last, kv.second);
   }
-  std::set<std::string> catch_all_sinks;
+  std::set<std::string> sinks;
   std::set<std::string> wired;
-  for (const auto &e : _edges) {
-    (e.catch_all ? catch_all_sinks : wired).insert(e.to);
-    if (!e.catch_all) {
-      wired.insert(e.from);
+  for (const auto &n : _nodes) {
+    if (role_of(n) == "sink") {
+      sinks.insert(n);
     }
   }
-  for (const auto &n : catch_all_sinks) {
+  for (const auto &e : _edges) {
+    if (e.catch_all) {
+      sinks.insert(e.to);
+    } else {
+      wired.insert(e.from);
+      wired.insert(e.to);
+    }
+  }
+  for (const auto &n : sinks) {
     if (!wired.count(n) && layer.count(n)) {
       layer[n] = last + (last > 0 ? 0 : 1);
     }
