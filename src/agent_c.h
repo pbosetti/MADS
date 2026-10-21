@@ -463,6 +463,24 @@ MADS_EXPORT int discover_broker_settings(const char *room, char **url,
                                          size_t url_size);
 
 /**
+ * @brief Discovers the broker JSON advertised in a service room.
+ *
+ * If room is NULL or empty, the compiled default MADS service room is used.
+ * The discovered JSON is written as a null-terminated string.
+ *
+ * @param room Service discovery room name, or NULL for the default room.
+ * @param json Output pointer receiving the settings payload string, containing 
+ *             a JSON object.
+ * @return `0` on success, `-1` on error.
+ * 
+ * The returned pointer refer to internal storage that is overwritten by the
+ * next call to this function.
+ *
+ * On failure, call agent_last_error() for details.
+ */
+MADS_EXPORT int discover_broker(const char *room, char **json);
+
+/**
  * @brief Reads a boolean setting.
  *
  * @param agent Agent handle.

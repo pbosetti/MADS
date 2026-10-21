@@ -333,6 +333,34 @@ int discover_broker_settings(const char *room, char **url, size_t url_size) {
   return 0;
 }
 
+int discover_broker(const char *room, char **json) {
+  const string room_name =
+      room == nullptr || room[0] == '\0' ? string(MADS_SERVICE_ROOM)
+                                         : string(room);
+  static thread_local string s;
+  try {
+    ServiceDiscovery discovery(MADS_SERVICE_PORT);
+    const auto service =
+        discovery.discover(room_name, chrono::milliseconds(5000));
+    s = service.to_json().dump();
+    *json = const_cast<char *>(s.c_str());
+    if (*json == nullptr) {
+      snprintf(_err_msg, ERR_MSG_SIZE,
+               "Error discovering broker: Unable to allocate output buffer");
+      return -1;
+    }
+  } catch (const std::exception &e) {
+    snprintf(_err_msg, ERR_MSG_SIZE, "Error discovering broker settings: %s",
+             e.what());
+    return -1;
+  } catch (...) {
+    snprintf(_err_msg, ERR_MSG_SIZE,
+             "Error discovering broker settings: Unexpected");
+    return -1;
+  }
+  return 0;
+}
+
 bool agent_setting_bool(agent_t agent, const char *key) {
   Agent *ag = reinterpret_cast<Agent *>(agent);
   return ag->get_settings().value(string(key), false);

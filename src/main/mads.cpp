@@ -922,20 +922,14 @@ int main(int argc, char **argv) {
           max(field_widths["version"], room.second.version.size());
     }
     if (options_parsed.count("json")) {
-      json j_rooms = json::array();
       for (auto const &room : rooms) {
-        json j_room;
-        j_room["name"] = room.first;
-        j_room["host"] = room.second.hostname;
-        j_room["ip"] = room.second.ip;
-        j_room["ports"] = room.second.ports;
-        j_room["version"] = room.second.version;
-        j_rooms.push_back(j_room);
+        cout << room.second.to_json().dump(2) << endl;
       }
-      cout << j_rooms.dump(2) << endl;
       return 0;
     }
-    cout << "Rooms advertised on the network:" << endl << style::bold;
+    cout << "Rooms advertised on the network (" << 
+         fg::green << "encrypted" << fg::reset << "|" <<
+         fg::yellow << "unencrypted" << fg::reset << "):" << endl << style::bold;
     cout << setw(field_widths["name"]) << left
          << "Room name:" << setw(field_widths["host"]) << left
          << "Host:" << setw(field_widths["url"]) << left
@@ -943,6 +937,11 @@ int main(int argc, char **argv) {
          << "Version:" << endl
          << style::reset;
     for (auto const &room : rooms) {
+      if (room.second.encrypted) {
+        cout << fg::green;
+      } else {
+        cout << fg::yellow;
+      }
       cout << setw(field_widths["name"]) << left << room.first
            << setw(field_widths["host"]) << left << room.second.hostname
            << setw(field_widths["url"]) << left
@@ -950,6 +949,7 @@ int main(int argc, char **argv) {
                   std::to_string(room.second.ports.at("settings"))
            << setw(field_widths["version"]) << left << room.second.version
            << endl;
+      cout << fg::reset;
     }
     return 0;
   }

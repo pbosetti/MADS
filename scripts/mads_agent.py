@@ -193,6 +193,9 @@ lib.discover_broker_settings.argtypes = [
 ]
 lib.discover_broker_settings.restype = c_int
 
+lib.discover_broker.argtypes = [c_void_p, ctypes.POINTER(ctypes.POINTER(c_char_p))]
+lib.discover_broker.restype = c_int
+
 lib.agent_set_high_watermark.argtypes = [c_void_p, c_int]
 lib.agent_set_high_watermark.restype = c_int
 
@@ -455,6 +458,28 @@ class Agent:
             url_ptr = ctypes.cast(url, c_void_p)
             if url_ptr.value:
                 lib.mads_free(url_ptr)
+
+    @classmethod
+    def discover_broker(cls, room: str = None) -> str:
+        """
+        Discover the broker settings URI using an existing agent.
+
+        Args:
+            room: Optional discovery room. If None or empty, the C wrapper uses
+                the compiled MADS default room.
+
+        Returns:
+            The whole discovered settings JSON object. None if discovery fails.
+        """
+        obj_ptr = ctypes.POINTER(c_char_p)()
+        result = lib.discover_broker(room, ctypes.byref(obj_ptr))
+
+        if result != 0:
+            return None
+        else:
+            obj_str = ctypes.string_at(obj_ptr).decode('utf-8') if obj_ptr else None
+            return json.loads(obj_str) if obj_str else None
+            
 
     @staticmethod
     def _last_error() -> str:
