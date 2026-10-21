@@ -43,4 +43,14 @@ or simply:
 mads chat
 ```
 
-At startup the application reads and writes `mads_multitool_settings.json` in the working directory to persist the connection settings.
+The connection settings are persisted in a per-user configuration directory, so they are the same whatever the working directory is:
+
+| Platform | Settings file |
+|----------|---------------|
+| macOS    | `~/Library/Application Support/MADS/mads-chat.json` |
+| Linux    | `$XDG_CONFIG_HOME/mads/mads-chat.json`, or `~/.config/mads/mads-chat.json` if `XDG_CONFIG_HOME` is unset |
+| Windows  | `%APPDATA%\MADS\mads-chat.json` (or `%USERPROFILE%\AppData\Roaming\MADS\mads-chat.json`) |
+
+Setting the `MADS_CONFIG_DIR` environment variable to a directory overrides all of the above, which is useful for portable setups and tests. The directory is created on first use with owner-only permissions.
+
+Older versions stored the settings in `mads_chat_settings.json` in the working directory. On startup, if the new file does not exist and that old file does, its contents are copied to the new location and a message is printed. The old file is never deleted, so it can be removed by hand once you have checked the migration. If the configuration directory cannot be determined, the application warns on stderr and falls back to `./mads_chat_settings.json`.

@@ -17,6 +17,7 @@
 #include <TextEditor.h>
 
 #include "gui_style.hpp"
+#include "detail/config_dir.hpp"
 
 #include <agent.hpp>
 
@@ -37,6 +38,7 @@
 #include <chrono>
 #include <cctype>
 #include <cstdio>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -61,7 +63,11 @@ namespace {
 
 constexpr const char *kWindowTitle = "MADS Chat";
 constexpr const char *kAppAgentName = "mads_chat";
-constexpr const char *kSettingsFileName = "mads_chat_settings.json";
+// Settings live in the per-user config directory (detail::config_dir()). The
+// file this app used to write in the working directory is only read once, to
+// migrate it, and is never deleted.
+constexpr const char *kSettingsFileName = "mads-chat.json";
+constexpr const char *kLegacySettingsFileName = "mads_chat_settings.json";
 
 struct AppSettings {
   std::string host = "localhost";
@@ -293,7 +299,7 @@ std::optional<AppSettings> load_settings(const fs::path &path) {
   }
 }
 
-void save_settings(const fs::path &path, const AppSettings &settings) {
+bool save_settings(const fs::path &path, const AppSettings &settings) {
   const json serialized = {
       {"host", settings.host},
       {"sub_port", settings.sub_port},
@@ -303,7 +309,36 @@ void save_settings(const fs::path &path, const AppSettings &settings) {
       {"client_private_key_path", settings.client_private_key_path},
       {"broker_public_key_path", settings.broker_public_key_path},
   };
-  write_file(path, serialized.dump(2));
+  return write_file(path, serialized.dump(2));
+}
+
+// Where the settings file lives. If the config directory cannot be used, fall
+// back to the legacy file in the working directory.
+fs::path resolve_settings_path() {
+  try {
+    return Mads::detail::config_dir() / kSettingsFileName;
+  } catch (const std::exception &error) {
+    std::fprintf(stderr, "mads-chat: no config directory (%s); using ./%s\n", error.what(),
+                 kLegacySettingsFileName);
+    return fs::current_path() / kLegacySettingsFileName;
+  }
+}
+
+// One-time move of the settings written by older versions from the working
+// directory to the config directory. The legacy file is left in place.
+void migrate_legacy_settings(const fs::path &settings_path) {
+  const fs::path legacy_path = fs::current_path() / kLegacySettingsFileName;
+  std::error_code ec;
+  if (legacy_path == settings_path || fs::exists(settings_path, ec) || !fs::exists(legacy_path, ec)) {
+    return;
+  }
+  const auto legacy = load_settings(legacy_path);
+  if (!legacy.has_value() || !save_settings(settings_path, *legacy)) {
+    return;
+  }
+  std::printf("Settings moved to %s; ./%s is no longer used and can be deleted\n",
+              settings_path.string().c_str(), kLegacySettingsFileName);
+  std::fflush(stdout); // the GUI may run for hours, or be killed, before exit
 }
 
 std::string format_json(const std::string &raw, bool *valid = nullptr, json *parsed_out = nullptr) {
@@ -832,7 +867,7 @@ struct UiState {
 #if MADS_CHAT_HAS_SERVICE_DISCOVERY
   RoomDiscovery room_discovery;
 #endif
-  fs::path settings_path = fs::current_path() / kSettingsFileName;
+  fs::path settings_path = resolve_settings_path();
   std::string publish_topic;
   std::string publish_buffer = "{\n  \"message\": \"hello\"\n}";
   std::string status_message;
@@ -1352,6 +1387,7 @@ int main() {
   ImGui_ImplOpenGL3_Init(glsl_version);
 
   UiState ui_state;
+  migrate_legacy_settings(ui_state.settings_path);
   if (const auto stored = load_settings(ui_state.settings_path); stored.has_value()) {
     ui_state.connection_settings = *stored;
   }

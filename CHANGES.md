@@ -43,6 +43,12 @@
   `<prefix>/etc/mads.ini` (or a new document from the template if that file
   does not exist) instead of printing the template. `mads ini --print` prints
   the template as before, and builds without the GUI keep printing it.
+- **mads-chat keeps its settings in a per-user folder** instead of the
+  directory it was started from: `~/Library/Application Support/MADS` on
+  macOS, `$XDG_CONFIG_HOME/mads` (default `~/.config/mads`) on Linux,
+  `%APPDATA%\MADS` on Windows (`MADS_CONFIG_DIR` overrides it). An old
+  `./mads_chat_settings.json` is copied there on first start and can then
+  be deleted.
 
 ## Fixes
 
