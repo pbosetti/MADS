@@ -4,10 +4,12 @@ on:
   push:
     branches:
       - v2
+      - v3
       - code_coverage
   pull_request:
     branches:
       - v2
+      - v3
   workflow_dispatch:
 
 jobs:
