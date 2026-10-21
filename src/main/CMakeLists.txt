@@ -69,8 +69,9 @@ foreach(main_source IN LISTS MADS_MAIN_SOURCES)
   endif()
   message(STATUS "Preparing executable ${main_name} (from ${main_source})")
   set(_main_libs)
-  if(main_name STREQUAL "mads")
-    # `mads ini` runs in-process (see src/ini/ini_cli.hpp).
+  if(main_name STREQUAL "mads" OR main_name STREQUAL "broker")
+    # `mads ini` runs in-process (see src/ini/ini_cli.hpp); the broker serves
+    # the remote settings-edit service (src/ini/remote_edit.hpp).
     set(_main_libs LIBS mads_ini_core)
   endif()
   create_mads_target("${main_name}" "${main_source}" ${_main_libs})

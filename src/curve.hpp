@@ -23,6 +23,7 @@ Copyright (C) 2025 Paolo Bosetti
 #include <vector>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <zmq.hpp>
 
 #include "zap_auth.hpp"
@@ -92,6 +93,49 @@ public:
   }
 
   /**
+   * @brief Reads the server keypair `<key_name>.pub` / `<key_name>.key` (first
+   * line of each) from the key directory.
+   *
+   * Used by setup_curve_server() and by sockets that need the same CURVE
+   * identity without joining the bus allowlist (e.g. the remote-edit service).
+   *
+   * @param key_name The base name of the server key files.
+   * @throws runtime_error if the key directory is unset or a file cannot be
+   * opened.
+  */
+  CurveKeypair load_server_keypair(string const &key_name) const {
+    if (_key_dir.empty()) {
+      throw runtime_error("Key directory not set. Call fetch_public_keys() first.");
+    }
+    CurveKeypair server_keypair;
+    string name = (_key_dir / (key_name + ".pub")).string();
+    ifstream server_pub_file(name);
+    if (!server_pub_file.is_open()) {
+      throw runtime_error(string("cannot open server public key file ") + name + " from " + _key_dir.string());
+    }
+    getline(server_pub_file, server_keypair.public_key);
+    name = (_key_dir / (key_name + ".key")).string();
+    ifstream server_key_file(name);
+    if (!server_key_file.is_open()) {
+      throw runtime_error(string("cannot open server secret key file ") + name + " from " + _key_dir.string());
+    }
+    getline(server_key_file, server_keypair.secret_key);
+    return server_keypair;
+  }
+
+  /**
+   * @brief Gives a ZAP domain its own exclusive set of allowed client keys
+   * (pass-through to ZapAuth::configure_domain_curve()). Safe after
+   * setup_auth(); must be called before binding a socket that uses the domain.
+   *
+   * @param domain The ZAP domain (ZMQ_ZAP_DOMAIN of the server socket).
+   * @param z85_keys Allowed client public keys, Z85-encoded.
+  */
+  void configure_domain_curve(string const &domain, set<string> const &z85_keys) {
+    _authenticator.configure_domain_curve(domain, z85_keys);
+  }
+
+  /**
    * @brief Sets up CURVE security for a server socket.
    *
    * Reads the server's keypair from files and configures
@@ -102,33 +146,9 @@ public:
    * @throws runtime_error if key files cannot be opened or read.
   */
   void setup_curve_server(zmq::socket_t &socket, string const &key_name) {
-    if (_key_dir.empty()) {
-      throw runtime_error("Key directory not set. Call fetch_public_keys() first.");
-    }
-    // We read the server certificates from files generated previously
-    CurveKeypair server_keypair;
-    string name = "";
-    try {
-      name = (_key_dir / (key_name + ".pub")).string();
-      ifstream server_pub_file(name);
-      if (!server_pub_file.is_open()) {
-        throw runtime_error(string("cannot open server public key file ") + name + " from " + _key_dir.string());
-      }
-      getline(server_pub_file, server_keypair.public_key);
-      server_pub_file.close();
-
-      name = (_key_dir / (key_name + ".key")).string();
-      ifstream server_key_file(name);
-      if (!server_key_file.is_open()) {
-        throw runtime_error(string("cannot open server secret key file ") + name + " from " + _key_dir.string());
-      }
-      getline(server_key_file, server_keypair.secret_key);
-      server_key_file.close();
-    } catch (const std::exception &e) {
-      throw runtime_error(e.what());
-    }
+    CurveKeypair server_keypair = load_server_keypair(key_name);
     for (const auto &client_key_name : _client_keys) {
-      name = (_key_dir / (client_key_name + ".pub")).string();
+      string name = (_key_dir / (client_key_name + ".pub")).string();
       ifstream client_pub_file(name);
       if (!client_pub_file.is_open()) {
         throw runtime_error("cannot open client public key file " + name + " from " + _key_dir.string());

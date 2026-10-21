@@ -620,6 +620,40 @@ document = true
   doc = "ipc:// endpoint for the settings socket"
 
   [[types.keys]]
+  name = "remote_edit"
+  type = "boolean"
+  group = "Remote editing"
+  default = 'false'
+  doc = "Let editors read and replace this settings file over the network (tcp needs --crypto; ipc is owner-only)"
+
+  [[types.keys]]
+  name = "edit_address"
+  type = "string"
+  group = "Remote editing"
+  default = '"tcp://*:9094"'
+  doc = "tcp endpoint of the editing service (CURVE only); its port also names the ipc endpoint"
+
+  [[types.keys]]
+  name = "editors_dir"
+  type = "string"
+  widget = "file"
+  group = "Remote editing"
+  doc = "Directory of editor public keys (*.pub); default <keys_dir>/editors. No keys, no tcp service"
+
+  [[types.keys]]
+  name = "edit_ipc"
+  type = "string"
+  group = "Remote editing"
+  doc = "ipc:// endpoint of the editing service, instead of the one derived from the edit port"
+
+  [[types.keys]]
+  name = "edit_backups"
+  type = "integer"
+  group = "Remote editing"
+  default = '10'
+  doc = "Number of timestamped backups of the settings file kept next to it"
+
+  [[types.keys]]
   name = "tcp_keepalive"
   type = "integer"
   group = "Socket"

@@ -26,6 +26,7 @@ Author(s): Paolo Bosetti
 #include "../detail/socket_options.hpp"
 #include "../detail/wire_format.hpp"
 #include "../exec_path.hpp"
+#include "../ini/remote_edit.hpp"
 #include "../mads.hpp"
 #include "../watcher.hpp"
 #include "../curve.hpp"
@@ -39,6 +40,9 @@ Author(s): Paolo Bosetti
 #include <cxxopts.hpp>
 #include <filesystem>
 #include <iomanip>
+#include <fstream>
+#include <memory>
+#include <set>
 #include <iostream>
 #include <vector>
 #include <map>
@@ -535,6 +539,32 @@ std::string &read_settings_file(std::string const &settings_path) {
   return ini_table_content;
 }
 
+// Reads the editor public keys of the remote-edit service: the first line of
+// every `*.pub` file in `dir`. Malformed files (not a 40 character Z85 key)
+// are reported and skipped, so a stray file can never widen the allowlist.
+std::set<std::string> load_editor_keys(filesystem::path const &dir) {
+  std::set<std::string> keys;
+  error_code ec;
+  if (!filesystem::is_directory(dir, ec))
+    return keys;
+  for (auto const &entry : filesystem::directory_iterator(dir, ec)) {
+    if (entry.path().extension() != ".pub")
+      continue;
+    ifstream f(entry.path());
+    string line;
+    getline(f, line);
+    while (!line.empty() && isspace(static_cast<unsigned char>(line.back())))
+      line.pop_back();
+    if (line.size() != 40) {
+      cerr << fg::yellow << "Ignoring editor key " << entry.path().string()
+           << " (not a Z85 public key)" << fg::reset << endl;
+      continue;
+    }
+    keys.insert(line);
+  }
+  return keys;
+}
+
 /*
   __  __       _
  |  \/  | __ _(_)_ __
@@ -933,7 +963,125 @@ int main(int argc, char **argv) {
   thread settings_proxy_thread(proxy, ref(settings_router), ref(settings_dealer),
                                ref(settings_proxy_controlled), zmq::socket_ref());
 
+  // Remote settings editing (src/ini/remote_edit.hpp), opt-in. The ipc
+  // listener is plaintext and guarded by the owner-only ipc directory; the
+  // tcp one only exists with --crypto, is a CURVE server with the broker's
+  // own keypair, and admits ONLY the editor keys of editors_dir (a separate
+  // ZAP domain: a bus key cannot edit). Any doubt means no listener.
+  namespace Remote = Mads::Ini::Remote;
+  unique_ptr<Remote::EditService> edit_service;
+  vector<Remote::Listener> edit_listeners;
+  std::atomic<bool> edit_running{false};
+  thread edit_thread;
+  if (config[name]["remote_edit"].value_or(false)) {
+    const string edit_address =
+        config[name]["edit_address"].value_or("tcp://*:9094"s);
+    auto edit_ep = Mads::detail::parse_endpoint(edit_address);
+    int edit_port = 0;
+    if (edit_ep && edit_ep->is_tcp() && edit_ep->port_number())
+      edit_port = *edit_ep->port_number();
+    else
+      cerr << fg::yellow << "remote_edit: edit_address " << edit_address
+           << " is not a tcp address with a numeric port; no tcp listener"
+           << fg::reset << endl;
+
+    // ipc: same on/off switch as the bus sockets' ipc.
+    if (config[name]["ipc"].value_or(Mads::detail::BROKER_IPC_DEFAULT) &&
+        Mads::detail::zmq_has_ipc()) {
+      string edit_ipc = config[name]["edit_ipc"].value_or(""s);
+      try {
+        if (!edit_ipc.empty()) {
+          auto e = Mads::detail::parse_endpoint(edit_ipc);
+          if (!e || !e->is_ipc()) {
+            cerr << fg::yellow << "remote_edit: edit_ipc = \"" << edit_ipc
+                 << "\" is not an ipc:// endpoint; ignored" << fg::reset
+                 << endl;
+            edit_ipc.clear();
+          }
+        } else if (edit_port > 0) {
+          edit_ipc = Remote::local_endpoint(
+              edit_port, filesystem::path(config[name]["ipc_dir"].value_or(""s)));
+        }
+      } catch (const exception &e) {
+        cerr << fg::yellow << "remote_edit: no ipc endpoint: " << e.what()
+             << fg::reset << endl;
+        edit_ipc.clear();
+      }
+      if (!edit_ipc.empty()) {
+        edit_listeners.push_back({edit_ipc, std::nullopt});
+        cout << "Settings editing on " << style::bold << edit_ipc
+             << style::reset << style::italic << " (ipc, this host only)"
+             << style::reset << endl;
+      }
+    }
+
+    // tcp: CURVE only.
+    if (edit_port > 0) {
+      if (!crypto) {
+        cerr << fg::yellow
+             << "remote_edit over tcp needs --crypto: serving the ipc "
+                "endpoint only"
+             << fg::reset << endl;
+      } else {
+        try {
+          filesystem::path editors_dir =
+              config[name]["editors_dir"].value<string>()
+                  ? filesystem::path(*config[name]["editors_dir"].value<string>())
+                  : keys_dir / "editors";
+          auto editor_keys = load_editor_keys(editors_dir);
+          if (editor_keys.empty()) {
+            cerr << fg::yellow << "remote_edit: no editor keys (*.pub) in "
+                 << editors_dir.string() << "; no tcp listener" << fg::reset
+                 << endl;
+          } else {
+            auto kp = curve_auth_ptr->load_server_keypair(key_name);
+            // Before binding: the domain exists in the ZAP handler first.
+            curve_auth_ptr->configure_domain_curve(Remote::kZapDomain,
+                                                   editor_keys);
+            edit_listeners.push_back(
+                {edit_address, Remote::ServerKeys{kp.public_key, kp.secret_key}});
+            service_info.ports[Remote::kDiscoveryPortName] = edit_port;
+            cout << "Settings editing on " << style::bold << edit_address
+                 << style::reset << style::italic << " (CURVE, "
+                 << editor_keys.size() << " editor key"
+                 << (editor_keys.size() == 1 ? "" : "s") << ")"
+                 << style::reset << endl;
+          }
+        } catch (const exception &e) {
+          cerr << fg::yellow << "remote_edit: no tcp listener: " << e.what()
+               << fg::reset << endl;
+        }
+      }
+    }
+
+    if (edit_listeners.empty()) {
+      cerr << fg::yellow << "remote_edit is on but no endpoint is available"
+           << fg::reset << endl;
+    } else {
+      edit_service = make_unique<Remote::EditService>(
+          settings_path,
+          static_cast<size_t>(
+              std::max<int64_t>(0, config[name]["edit_backups"].value_or(10))));
+      edit_service->log = [&](string const &line) {
+        cout << goback(1, !daemon) << fg::yellow << timestamp()
+             << "Settings editing: " << line << fg::reset << endl;
+      };
+    }
+  }
+  // Joins the service thread (which removes its ipc socket file on return).
+  // Called on every exit path, before the context is closed.
+  auto stop_edit_service = [&]() {
+    edit_running = false;
+    if (edit_thread.joinable())
+      edit_thread.join();
+  };
+
   string ini_table = read_settings_file(settings_path);
+  // The parsed settings the workers look attachments up in. Replaced as a
+  // whole under ini_table_mutex by the watcher, so a worker always sees one
+  // consistent version (and keeps it alive through its shared_ptr copy).
+  shared_ptr<const toml::table> attachment_config =
+      make_shared<const toml::table>(config);
   std::mutex ini_table_mutex;
 
   // Each worker's REP loop body is the pre-ROUTER handler verbatim: same
@@ -974,12 +1122,14 @@ int main(int argc, char **argv) {
             cout << goback(1, !daemon) << timestamp()
                  << "Sending settings to agent " << agent_name << " ("
                  << agent_version << ")" << endl;
+            shared_ptr<const toml::table> current_config;
             {
               std::lock_guard<std::mutex> lock(ini_table_mutex);
               content.addstr(ini_table);
+              current_config = attachment_config;
             }
             string attachment_path =
-                config[agent_name]["attachment"].value_or("");
+                (*current_config)[agent_name]["attachment"].value_or("");
             if (!attachment_path.empty()) {
               if (filesystem::path(attachment_path).is_relative()) {
                 attachment_path = Mads::exec_dir(attachment_path);
@@ -1139,6 +1289,20 @@ int main(int argc, char **argv) {
          << style::reset << endl;
   }
 
+  if (edit_service) {
+    edit_running = true;
+    edit_thread = thread([&]() {
+      try {
+        Remote::serve(context, edit_listeners, *edit_service, edit_running);
+      } catch (const exception &e) {
+        // Never fatal: the broker carries on without the editing service.
+        cerr << goback(1, !daemon) << fg::red << timestamp()
+             << "Settings editing unavailable: " << e.what() << fg::reset
+             << endl;
+      }
+    });
+  }
+
   Mads::Watcher settings_watcher(settings_path, 1s);
   thread settings_watcher_thread([&]() {
     string ini_tmp = "";
@@ -1147,10 +1311,11 @@ int main(int argc, char **argv) {
            << "Reloading settings " << file_name << "... ";
       ini_tmp = read_settings_file(settings_path);
       try {
-        auto i = toml::parse(ini_tmp);
+        auto parsed = make_shared<const toml::table>(toml::parse(ini_tmp));
         {
           std::lock_guard<std::mutex> lock(ini_table_mutex);
           ini_table = ini_tmp;
+          attachment_config = std::move(parsed);
         }
         cout << " done." << fg::reset << endl;
       } catch (const exception &e) {
@@ -1193,6 +1358,7 @@ int main(int argc, char **argv) {
     steer(controller, "TERMINATE");
     proxy_thread.join();
 
+    stop_edit_service();
     if (discovery_retry_thread.joinable()) {
       discovery_retry_thread.join();
     }
@@ -1209,6 +1375,10 @@ int main(int argc, char **argv) {
     controlled.close();
     settings_proxy_controller.close();
     settings_proxy_controlled.close();
+    // Stops the ZAP handler, whose socket would otherwise keep
+    // context.close() blocked forever (as in the interactive path below).
+    if (crypto)
+      curve_auth_ptr = nullptr;
     if (subscription_table) subscription_table->stop();
     // Before the sockets it monitors are closed and before the context is
     // terminated: each monitor holds an inproc PAIR socket that would
@@ -1336,6 +1506,8 @@ int main(int argc, char **argv) {
 
     discovery_service.stop_advertising();
     cout << fg::green << "Closing sockets..." << fg::reset << endl;
+    // Before the context closes, and before a possible execv() below.
+    stop_edit_service();
     running = false;
     for (auto &t : settings_worker_threads) t.join();
     steer(settings_proxy_controller, "TERMINATE");

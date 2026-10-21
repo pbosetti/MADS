@@ -226,6 +226,75 @@ libzmq built against the Windows 10 SDK (`afunix.h`). Without it the broker
 serves tcp only, and agents fall back silently. `mads doctor` reports what
 the broker advertises and what an agent on this host would use.
 
+# REMOTE EDITING
+
+With `remote_edit = true` in `[broker]` the broker lets an editor (`mads ini
+--remote`, or File > Open remote in the settings editor) read and replace the
+settings file it was started with. Nothing changes while the key is off, which
+is the default. The service can reach exactly one file, the broker's own
+settings file: requests carry no paths. A saved file is validated as TOML,
+written atomically and picked up by the broker's file watcher like any other
+change (the usual "Reloading settings" message appears), so newly connecting
+agents get the new settings at once. A request is refused when the file
+changed since the editor loaded it, and the current content is returned
+instead.
+
+**remote_edit** (`[broker]`, boolean, default `false`)
+:  Turns the service on.
+
+**edit_address** (`[broker]`, string, default `"tcp://*:9094"`)
+:  The tcp endpoint. Its port also names the ipc endpoint,
+   `<ipc_dir>/broker-<port>-edit.ipc`, so several brokers on one host do not
+   collide.
+
+**editors_dir** (`[broker]`, string, default `<keys_dir>/editors`)
+:  Directory holding the public keys (`*.pub`, Z85 key on the first line) of
+   the editors allowed over tcp. A relative path is resolved like
+   **\-\-keys_dir**, against the working directory.
+
+**edit_ipc** (`[broker]`, string)
+:  An explicit `ipc://` endpoint, instead of the derived one.
+
+**edit_backups** (`[broker]`, integer, default `10`)
+:  How many timestamped backups (`<file>.<YYYYmmdd-HHMMSS>.bak`) are kept next
+   to the settings file; every save first copies the previous content.
+
+## Security model
+
+Over the **ipc** endpoint (offered when the broker's `ipc` setting is on and
+libzmq has ipc) the service is plaintext: like the bus's ipc endpoints, the
+owner-only runtime directory holding the socket file is the access control, so
+only processes of the broker's OS user can use it. Over **tcp** the service
+runs only with **\-\-crypto**, as a CURVE server with the broker's own keypair, and
+only clients whose public key is in *editors_dir* are admitted. This list is
+separate from the bus's: the keys of agents in the keys directory give no
+editing right, and an editor key gives no access to the bus. Plaintext tcp is
+never accepted. The broker fails closed:
+
+* without **\-\-crypto** a warning is printed and only the ipc endpoint is served;
+* with no *editors_dir*, or no valid key in it, there is no tcp listener;
+* if an endpoint cannot be bound (port in use, a live broker owning the ipc
+  socket) a warning is printed and the broker carries on without the service.
+
+The editor keys are read at startup: restart the broker (key **X**) after
+adding or removing one. When the tcp listener is active its port is announced
+in service discovery under the name `edit`.
+
+## Creating an editor key pair
+
+An editor key pair is an ordinary CURVE pair (see CRYPTO.md): on the editor's
+machine generate it with `mads --keypair=NAME`, which writes `NAME.key`
+(private, stays there) and `NAME.pub`. Copy `NAME.pub` into the broker's
+*editors_dir*, and give the editor `NAME.key`, `NAME.pub` and the broker's
+`broker.pub`. Do not put the editor's `.pub` in the broker's keys directory
+itself, unless that editor should also join the bus.
+
+## Logging
+
+Every save, and every refused or failed request, is logged on the broker's
+console with a timestamp, the editor (its public key, or `ipc`), the outcome
+and the size.
+
 # CLOCK OFFSET
 
 The broker answers a `clock` command on the settings socket (the same
