@@ -315,7 +315,10 @@ bool IniApp::save_document() {
 }
 
 bool IniApp::save_as_dialog() {
-  const std::string current = _editor.has_source() ? _editor.location() : std::string("mads.ini");
+  // A remote document's location is an endpoint ("tcp://host:9094
+  // (remote)"), not a usable file name: suggest a plain mads.ini then.
+  const std::string current =
+      _editor.has_source() && !_remote_target ? _editor.location() : std::string("mads.ini");
   const auto chosen = pfd::save_file("Save mads.ini as", current, ini_filters(), pfd::opt::none).result();
   if (chosen.empty()) {
     return false;
