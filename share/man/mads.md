@@ -34,7 +34,7 @@ In addition, the **mads** command allows to create systemd services for running 
 : list te available plugins
 
 **\-\-keypair[=mads]**
-: generate a pair of public/private keys, with an optional name (defailt to `mads`). Refuses to overwrite existing files, unless `--force`
+: generate a pair of public/private keys, with an optional name (defailt to `mads`). Refuses to overwrite existing files, unless `--force`. The secret `NAME.key` is owner-only (mode 0600 on Unix); for remote editing of the broker's settings, copy only `NAME.pub` to the broker's editors folder and keep `NAME.key` on the editor's machine (see **mads-broker**(1))
 
 **\-f|\-\-force**
 : force overwrite existing files (only in conjunction with `--keypair`)

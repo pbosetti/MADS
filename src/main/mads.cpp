@@ -43,6 +43,12 @@ Author: Paolo Bosetti, July 2024
 
 #include "zap_auth.hpp"
 
+#ifndef _WIN32
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
 #ifdef _WIN32
 #include <process.h>
 #define execv(cmd, argv) _execv(cmd, argv)
@@ -153,6 +159,31 @@ static int run_windows_subcommand(const std::string &exec_dir, int argc, char **
 }
 #endif
 
+// Writes the secret key. On POSIX the file is created owner-only (0600), and
+// chmod-ed as well in case it already existed, before the secret goes in: the
+// secret never sits in a world-readable file. Windows keeps the default ACL.
+void write_secret_file(const string &file, const string &secret) {
+#ifdef _WIN32
+  ofstream out(file);
+  out << secret;
+  out.close();
+  if (!out)
+    throw runtime_error("cannot write " + file);
+#else
+  int fd = ::open(file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+  if (fd < 0)
+    throw runtime_error("cannot write " + file);
+  if (::fchmod(fd, 0600) != 0) {
+    ::close(fd);
+    throw runtime_error("cannot restrict " + file);
+  }
+  const ssize_t written = ::write(fd, secret.data(), secret.size());
+  const bool closed = ::close(fd) == 0;
+  if (written != static_cast<ssize_t>(secret.size()) || !closed)
+    throw runtime_error("cannot write " + file);
+#endif
+}
+
 bool save_keypair(pair<string, string> &key_files, const string &path, const string &name, bool force=false) {
   try {
     Mads::CurveKeypair keypair = Mads::generate_keypair();
@@ -165,11 +196,9 @@ bool save_keypair(pair<string, string> &key_files, const string &path, const str
         return false;
       }
     }
-    ofstream key_file(key_files.first);
+    write_secret_file(key_files.first, keypair.secret_key);
     ofstream pub_file(key_files.second);
-    key_file << keypair.secret_key;
     pub_file << keypair.public_key;
-    key_file.close();
     pub_file.close();
   } catch (const zmq::error_t &e) {
     cerr << fg::red << "Error: cannot generate CURVE keypair: " << e.what()
@@ -784,6 +813,15 @@ int main(int argc, char **argv) {
             "the prefix directory (here "
          << Mads::prefix() << "/etc) by default." << endl;
     cout << fg::yellow << "Keep the secret key safe!" << fg::reset << endl;
+    cout << "If this pair is for editing the broker's settings remotely (mads ini), copy only "
+         << style::bold << fs::path(key_files.second).filename().string() << style::reset
+         << " to the broker host's editors folder (" << Mads::prefix()
+         << "/etc/editors by default, or [broker] editors_dir) and restart the broker; keep "
+         << style::bold << fs::path(key_files.first).filename().string() << style::reset
+         << " on the editor's machine." << endl;
+#ifndef _WIN32
+    cout << "The secret key file is owner-only (mode 0600)." << endl;
+#endif
     return 0;
   }
   if (options_parsed.count("prefix")) {

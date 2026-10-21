@@ -121,7 +121,7 @@ private:
   bool _expand_open_panel = false;
   int _panel_had_source = -1; // -1: not drawn yet
   std::string _local_endpoint;
-  std::string _local_problem;
+  std::string _local_tip; // tooltip when the local broker is not reachable
   bool _local_found = false;
   int _local_checked_port = -1;
   double _next_local_check = 0.0;

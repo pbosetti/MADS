@@ -250,7 +250,9 @@ instead.
 **editors_dir** (`[broker]`, string, default `<keys_dir>/editors`)
 :  Directory holding the public keys (`*.pub`, Z85 key on the first line) of
    the editors allowed over tcp. A relative path is resolved like
-   **\-\-keys_dir**, against the working directory.
+   **\-\-keys_dir**, against the working directory. If the directory does not
+   exist, the broker creates it at startup (with **\-\-crypto**), world-readable
+   since it holds public keys only, and says so.
 
 **edit_ipc** (`[broker]`, string)
 :  An explicit `ipc://` endpoint, instead of the derived one.

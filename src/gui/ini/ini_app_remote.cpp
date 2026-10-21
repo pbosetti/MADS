@@ -14,7 +14,7 @@
 
 #include "ini_app.hpp"
 
-#include "detail/runtime_dir.hpp"
+#include "detail/broker_ipc.hpp"
 
 #include <imgui.h>
 
@@ -115,18 +115,38 @@ void IniApp::draw_open_panel() {
   if (_local_checked_port != _local_port || ImGui::GetTime() >= _next_local_check) {
     _local_checked_port = _local_port;
     _next_local_check = ImGui::GetTime() + 1.0;
-    _local_problem.clear();
+    const std::string no_broker =
+        "no local broker with remote_edit on port " + std::to_string(_local_port);
+    _local_tip.clear();
     try {
       _local_endpoint = Remote::local_endpoint(_local_port);
       std::string path = _local_endpoint;
       if (path.rfind("ipc://", 0) == 0) {
         path.erase(0, 6);
       }
-      _local_found = Mads::detail::socket_file_exists(path);
+      // Only a socket that still accepts connections is a running broker: a
+      // stale file left by a crash must not enable the button.
+      switch (Mads::detail::probe_ipc_socket(path)) {
+      case Mads::detail::IpcSocketState::Live:
+        _local_found = true;
+        break;
+      case Mads::detail::IpcSocketState::Stale:
+        _local_found = false;
+        _local_tip = "stale socket at " + path + ": the broker is not running";
+        break;
+      case Mads::detail::IpcSocketState::Foreign:
+        _local_found = false;
+        _local_tip = path + " is not a socket";
+        break;
+      case Mads::detail::IpcSocketState::Absent:
+        _local_found = false;
+        _local_tip = no_broker;
+        break;
+      }
     } catch (const std::exception &error) {
       _local_found = false;
       _local_endpoint.clear();
-      _local_problem = error.what();
+      _local_tip = no_broker + ": " + error.what();
     }
   }
   ImGui::BeginDisabled(!_local_found);
@@ -136,8 +156,7 @@ void IniApp::draw_open_panel() {
     if (_local_found) {
       ImGui::SetTooltip("%s", _local_endpoint.c_str());
     } else {
-      ImGui::SetTooltip("no local broker with remote_edit on port %d%s%s", _local_port,
-                        _local_problem.empty() ? "" : ": ", _local_problem.c_str());
+      ImGui::SetTooltip("%s", _local_tip.c_str());
     }
   }
   ImGui::SameLine();

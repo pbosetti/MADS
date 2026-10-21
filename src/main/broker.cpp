@@ -1056,6 +1056,29 @@ int main(int argc, char **argv) {
               config[name]["editors_dir"].value<string>()
                   ? filesystem::path(*config[name]["editors_dir"].value<string>())
                   : keys_dir / "editors";
+          // The folder holds public keys only, so it is world-readable.
+          error_code ec;
+          if (!filesystem::exists(editors_dir, ec)) {
+            if (filesystem::create_directories(editors_dir, ec)) {
+#ifndef _WIN32
+              filesystem::permissions(
+                  editors_dir,
+                  filesystem::perms::owner_all | filesystem::perms::group_read |
+                      filesystem::perms::group_exec |
+                      filesystem::perms::others_read |
+                      filesystem::perms::others_exec,
+                  filesystem::perm_options::replace, ec);
+#endif
+              cout << fg::yellow << "Created the editors folder "
+                   << editors_dir.string()
+                   << ": copy editor public keys (*.pub) there and restart the broker"
+                   << fg::reset << endl;
+            } else if (ec) {
+              cerr << fg::yellow << "Cannot create the editors folder "
+                   << editors_dir.string() << ": " << ec.message()
+                   << fg::reset << endl;
+            }
+          }
           auto allowed = load_editor_keys(editors_dir);
           const char *kind = "editor";
           if (allowed.empty() && password) {

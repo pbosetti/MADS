@@ -109,7 +109,7 @@ On the editor's machine, generate an editor key pair:
 mads --keypair NAME
 ```
 
-This writes `NAME.key` and `NAME.pub` in the current directory. Copy `NAME.pub` to the broker's editors folder, `<keys_dir>/editors` by default (`$(mads -p)/etc/editors`), or to the `editors_dir` you set, then restart the broker. The broker does not create that folder: make it first if it does not exist. Without a valid key in it there is no tcp listener. Do not copy it to the keys directory itself, unless that editor should also join the bus.
+This writes `NAME.key` and `NAME.pub` in the current directory. Copy `NAME.pub` to the broker's editors folder, `<keys_dir>/editors` by default (`$(mads -p)/etc/editors`), or to the `editors_dir` you set, then restart the broker. If that folder does not exist, the broker creates it at startup (with `--crypto`) and says so: copy the keys into it, then restart the broker. Without a valid key in it there is no tcp listener. Do not copy it to the keys directory itself, unless that editor should also join the bus.
 
 The editor needs three files: `NAME.key`, `NAME.pub` and the broker's `broker.pub`. In **mads-ini**, enter the address, check **Use CURVE keys**, pick `NAME.key` with **Secret key...** and the broker's `.pub` with **Broker public key...**. Rooms that advertise CURVE use the same two files.
 
