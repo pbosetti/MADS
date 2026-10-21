@@ -2,6 +2,8 @@
 // for the contract.
 #include "ini_editor.hpp"
 
+#include "remote_edit.hpp"
+
 #include <toml++/toml.hpp>
 
 #include <algorithm>
@@ -92,8 +94,8 @@ void rename_child_header(std::string &child, const std::string &old_name,
     size_t pos = child.find_first_not_of(" \t", line_start);
     if (pos != std::string::npos && pos < line_end && child[pos] == '[') {
       pos = child.find_first_not_of("[ \t", pos);
-      if (pos != std::string::npos && child.compare(pos, old_name.size(),
-                                                    old_name) == 0) {
+      if (pos != std::string::npos &&
+          child.compare(pos, old_name.size(), old_name) == 0) {
         size_t after = pos + old_name.size();
         if (after < line_end && (child[after] == '.' || child[after] == ']')) {
           child.replace(pos, old_name.size(), new_name);
@@ -119,10 +121,15 @@ void Editor::new_document(const std::string &text) {
 }
 
 bool Editor::open(const std::filesystem::path &path, std::string *error) {
-  auto source = std::make_unique<FileSource>(path);
+  return open_source(std::make_unique<FileSource>(path), error);
+}
+
+bool Editor::open_source(std::unique_ptr<Source> source, std::string *error) {
   Loaded loaded;
   try {
     loaded = source->load();
+  } catch (const Remote::AuthError &) {
+    throw; // the caller can ask for a password and retry
   } catch (const std::exception &err) {
     if (error) {
       *error = err.what();
@@ -146,6 +153,8 @@ bool Editor::reload(std::string *error) {
   Loaded loaded;
   try {
     loaded = _source->load();
+  } catch (const Remote::AuthError &) {
+    throw;
   } catch (const std::exception &err) {
     if (error) {
       *error = err.what();
@@ -211,7 +220,7 @@ bool Editor::changed_on_disk() {
     return false;
   }
   try {
-    return _source->load().etag != _etag;
+    return _source->current_etag() != _etag;
   } catch (...) {
     return false;
   }
@@ -512,8 +521,7 @@ bool Editor::layout_nodes(bool all) {
 // -------------------------------------------------------------- link ops
 
 Editor::ConnectResult Editor::connect(const std::string &from,
-                                      const std::string &to,
-                                      std::string *via) {
+                                      const std::string &to, std::string *via) {
   auto pub = _topics.find(from);
   auto sub = _topics.find(to);
   if (from == to || pub == _topics.end() || sub == _topics.end() ||
@@ -562,10 +570,10 @@ Editor::ConnectResult Editor::connect(const std::string &from,
 
 Editor::DisconnectResult Editor::disconnect(const std::string &from,
                                             const std::string &to) {
-  auto edge = std::find_if(_edges.begin(), _edges.end(),
-                           [&](const TopologyEdge &e) {
-                             return e.from == from && e.to == to;
-                           });
+  auto edge =
+      std::find_if(_edges.begin(), _edges.end(), [&](const TopologyEdge &e) {
+        return e.from == from && e.to == to;
+      });
   auto sub = _topics.find(to);
   if (edge == _edges.end() || sub == _topics.end()) {
     return DisconnectResult::NotFound;

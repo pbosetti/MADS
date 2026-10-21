@@ -44,17 +44,32 @@ public:
   /// Loads `path` through a FileSource. On failure returns false, sets
   /// `error` and leaves the current document untouched.
   bool open(const std::filesystem::path &path, std::string *error = nullptr);
-  /// Reloads from the current source, discarding unsaved changes.
+  /// Loads any Source (e.g. a Remote::RemoteSource) and makes it the current
+  /// one. On failure returns false, sets `error` and leaves the current
+  /// document untouched -- except that Remote::AuthError is rethrown, so the
+  /// caller can ask for a password and retry with a new source (the old one is
+  /// destroyed with the exception). `source` is consumed either way.
+  bool open_source(std::unique_ptr<Source> source,
+                   std::string *error = nullptr);
+  /// Reloads from the current source, discarding unsaved changes. Like
+  /// open_source(), rethrows Remote::AuthError.
   bool reload(std::string *error = nullptr);
   /// Saves to the current source (base etag = last loaded/saved one).
   /// Conflict when the file changed on disk meanwhile.
   SaveResult save();
-  /// Saves to `path` (no conflict check) and makes it the current source.
+  /// Saves to `path` (no conflict check) and makes that LOCAL file the
+  /// current source -- also for a document that was opened remotely.
   SaveResult save_as(const std::filesystem::path &path);
   /// Like save() but ignoring the etag (overwrite after a conflict).
   SaveResult save_overwrite();
 
   bool has_source() const { return _source != nullptr; }
+  /// Etag of the content as last loaded or saved (what changed_on_disk()
+  /// compares the source against); empty without a source.
+  const std::string &etag() const { return _etag; }
+  /// The current source (nullptr without one), e.g. to hand a
+  /// Remote::RemoteSource a new password-derived secret.
+  Source *source() { return _source.get(); }
   /// The source's path, or "untitled".
   std::string location() const;
   /// Unsaved changes since the last load/save.

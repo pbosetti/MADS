@@ -365,6 +365,46 @@ std::optional<PasswordVerifier> PasswordVerifier::parse(std::string_view line,
   return v;
 }
 
+constexpr const char *kSecretPrefix = "mads-edit-secret v1 argon2id13";
+
+std::string ClientSecret::to_string() const {
+  return std::string(kSecretPrefix) + " " + std::to_string(opslimit) + " " +
+         std::to_string(memlimit) + " " + b64_encode(salt) + " " +
+         b64_encode(client_key) + " " + b64_encode(server_key);
+}
+
+std::optional<ClientSecret> ClientSecret::parse(std::string_view line) {
+  std::istringstream in{std::string(line)};
+  std::vector<std::string> tok;
+  for (std::string t; in >> t;)
+    tok.push_back(t);
+  if (tok.size() != 8 || tok[0] != "mads-edit-secret" || tok[1] != "v1" ||
+      tok[2] != "argon2id13")
+    return std::nullopt;
+  for (const auto &n : {tok[3], tok[4]})
+    if (n.empty() || n.size() > 20 ||
+        n.find_first_not_of("0123456789") != std::string::npos)
+      return std::nullopt;
+  errno = 0;
+  const unsigned long long ops = std::strtoull(tok[3].c_str(), nullptr, 10);
+  const unsigned long long mem = std::strtoull(tok[4].c_str(), nullptr, 10);
+  if (errno || mem > std::numeric_limits<std::size_t>::max() ||
+      !kdf_params_valid(ops, static_cast<std::size_t>(mem)))
+    return std::nullopt;
+  auto salt = b64_decode(tok[5], kSaltBytes);
+  auto client = b64_decode(tok[6], kKeyBytes);
+  auto server = b64_decode(tok[7], kKeyBytes);
+  if (!salt || !client || !server)
+    return std::nullopt;
+  ClientSecret secret;
+  secret.salt = *salt;
+  secret.opslimit = ops;
+  secret.memlimit = static_cast<std::size_t>(mem);
+  secret.client_key = *client;
+  secret.server_key = *server;
+  return secret;
+}
+
 fs::path password_file_for(const fs::path &settings) {
   fs::path p = settings;
   p += ".edit_password";
@@ -998,6 +1038,18 @@ ClientKeys load_client_keys(const fs::path &dir, const std::string &client,
   return keys;
 }
 
+ClientKeys load_client_key_files(const fs::path &client_secret_key_file,
+                                 const fs::path &server_public_key_file) {
+  // `mads --keypair NAME` writes NAME.key (secret) and NAME.pub (public).
+  fs::path pub = client_secret_key_file;
+  pub.replace_extension(".pub");
+  ClientKeys keys;
+  keys.secret_key = read_key_line(client_secret_key_file);
+  keys.public_key = read_key_line(pub);
+  keys.server_public_key = read_key_line(server_public_key_file);
+  return keys;
+}
+
 // ------------------------------------------------------------ RemoteSource
 
 RemoteSource::RemoteSource(std::string endpoint, std::optional<ClientKeys> keys,
@@ -1079,8 +1131,9 @@ RemoteSource::request(const std::vector<std::string> &frames) {
     request_frames.insert(request_frames.end(), frames.begin() + 1,
                           frames.end());
     std::string message, server_key;
+    std::optional<ClientSecret> candidate;
     if (auth_mode == "password") {
-      if (!_password)
+      if (!_password && !_secret)
         throw AuthError("this broker requires a password");
       if (!h.value("salt", "").size() || !h.contains("opslimit") ||
           !h.contains("memlimit") || !h.contains("nonce") ||
@@ -1094,30 +1147,33 @@ RemoteSource::request(const std::vector<std::string> &frames) {
         throw std::runtime_error("malformed hello reply from the edit service");
       const unsigned long long ops = h["opslimit"];
       const unsigned long long mem = h["memlimit"];
-      if (!_secret || _secret->salt != *salt || _secret->opslimit != ops ||
-          _secret->memlimit != mem) {
-        if (_secret) {
-          wipe(_secret->client_key);
-          wipe(_secret->server_key);
-        }
+      const bool remembered = _secret && _secret->salt == *salt &&
+                              _secret->opslimit == ops &&
+                              _secret->memlimit == mem;
+      if (!remembered) {
+        // A remembered secret for other parameters (the broker's password
+        // was changed) is useless without the password.
+        if (!_password)
+          throw AuthError("the remembered password is no longer valid");
         try {
-          // The expensive step; its parameters are capped by derive().
-          _secret = ClientSecret::derive(*_password, *salt, ops,
-                                         static_cast<std::size_t>(mem));
+          // The expensive step; its parameters are capped by derive(). Kept
+          // as a candidate: it is remembered only once the server accepts it.
+          candidate = ClientSecret::derive(*_password, *salt, ops,
+                                           static_cast<std::size_t>(mem));
         } catch (const std::invalid_argument &err) {
-          _secret.reset();
           throw std::runtime_error(std::string("refusing the broker's ") +
                                    "password parameters: " + err.what());
         }
       }
+      const ClientSecret &use = remembered ? *_secret : *candidate;
       const std::string client_nonce = random_bytes(kNonceBytes);
       const std::vector<std::string> args(frames.begin() + 1, frames.end());
       message = auth_message(*nonce, client_nonce, frames[0], args);
-      std::string signature = hmac(sha256(_secret->client_key), message);
-      std::string proof = xor_strings(_secret->client_key, signature);
+      std::string signature = hmac(sha256(use.client_key), message);
+      std::string proof = xor_strings(use.client_key, signature);
       wipe(signature);
       request_frames[1] = *nonce + client_nonce + proof;
-      server_key = _secret->server_key;
+      server_key = use.server_key;
     } else if (auth_mode == "none") {
       // Without CURVE, plaintext tcp is only ever served with a password: a
       // "none" there is a downgrade (or a misconfigured server) and the
@@ -1132,8 +1188,11 @@ RemoteSource::request(const std::vector<std::string> &frames) {
     }
 
     std::vector<std::string> reply = exchange(request_frames);
-    if (reply[1] == "auth")
+    if (reply[1] == "auth") {
+      if (!message.empty() && !_password)
+        throw AuthError("the remembered password is no longer valid");
       throw AuthError(reply.size() > 2 ? reply[2] : "authentication failed");
+    }
     if (!message.empty()) {
       // Every reply to an authenticated request must carry a valid signature.
       const std::string signature = reply.back();
@@ -1143,6 +1202,11 @@ RemoteSource::request(const std::vector<std::string> &frames) {
         throw std::runtime_error(
             "reply from " + _endpoint +
             " is not authentic (missing or invalid signature)");
+      if (candidate) {
+        // The server accepted the proof and proved it knows the verifier:
+        // the derived secret is right, keep it.
+        set_secret(std::move(*candidate));
+      }
     }
     return reply;
   } catch (const zmq::error_t &err) {
@@ -1188,11 +1252,32 @@ SaveResult RemoteSource::save(const std::string &text,
     } else {
       result.message = "unexpected reply from the edit service";
     }
+  } catch (const AuthError &err) {
+    result.status = SaveResult::Status::Error;
+    result.message = err.what();
+    result.auth_required = true;
   } catch (const std::exception &err) {
     result.status = SaveResult::Status::Error;
     result.message = err.what();
   }
   return result;
+}
+
+std::optional<ClientSecret> RemoteSource::secret() const { return _secret; }
+
+void RemoteSource::set_secret(ClientSecret secret) {
+  if (_secret) {
+    wipe(_secret->client_key);
+    wipe(_secret->server_key);
+  }
+  _secret = std::move(secret);
+}
+
+std::string RemoteSource::current_etag() {
+  const auto j = nlohmann::json::parse(info(), nullptr, false);
+  if (!j.is_object() || !j.contains("etag") || !j["etag"].is_string())
+    throw std::runtime_error("malformed info reply from the edit service");
+  return j["etag"];
 }
 
 std::string RemoteSource::describe() const { return _endpoint + " (remote)"; }

@@ -22,6 +22,7 @@
 #include <zmq.hpp>
 #include <zmq_addon.hpp>
 
+#include "ini_editor.hpp"
 #include "mads_test_helpers.hpp"
 #include "remote_edit.hpp"
 #include "zap_auth.hpp"
@@ -976,4 +977,182 @@ TEST_CASE("the client rejects an unsigned reply to an authenticated request",
                     Catch::Matchers::ContainsSubstring("not authentic"));
   stop = true;
   fake.join();
+}
+
+// ------------------------------------------- editor plumbing, key files,
+// secrets
+
+namespace {
+
+// An in-memory Source that can be told to fail.
+struct FakeSource : Source {
+  std::string text = "[a]\nx = 1\n";
+  std::string etag_override;
+  enum class Fail { None, Generic, Auth } fail = Fail::None;
+  int loads = 0, etags = 0;
+  Loaded load() override {
+    ++loads;
+    if (fail == Fail::Generic)
+      throw std::runtime_error("boom");
+    if (fail == Fail::Auth)
+      throw AuthError("needs password");
+    return {text, content_etag(text)};
+  }
+  std::string current_etag() override {
+    ++etags;
+    return etag_override.empty() ? content_etag(text) : etag_override;
+  }
+  SaveResult save(const std::string &, const std::string &) override {
+    return {};
+  }
+  std::string describe() const override { return "fake"; }
+};
+
+} // namespace
+
+TEST_CASE("Editor::open_source loads, reports failures, propagates AuthError",
+          "[ini][remote]") {
+  Editor ed;
+  std::string error;
+  auto ok = std::make_unique<FakeSource>();
+  FakeSource *raw = ok.get();
+  REQUIRE(ed.open_source(std::move(ok), &error));
+  CHECK(ed.location() == "fake");
+  CHECK(ed.doc().find("a") != nullptr);
+
+  // changed_on_disk() polls current_etag(), not load().
+  CHECK_FALSE(ed.changed_on_disk());
+  CHECK(raw->etags == 1);
+  CHECK(raw->loads == 1);
+  raw->etag_override = "different";
+  CHECK(ed.changed_on_disk());
+
+  auto generic = std::make_unique<FakeSource>();
+  generic->fail = FakeSource::Fail::Generic;
+  CHECK_FALSE(ed.open_source(std::move(generic), &error));
+  CHECK(error == "boom");
+  CHECK(ed.location() == "fake"); // untouched
+
+  auto auth = std::make_unique<FakeSource>();
+  auth->fail = FakeSource::Fail::Auth;
+  CHECK_THROWS_AS(ed.open_source(std::move(auth), &error), AuthError);
+  CHECK(ed.location() == "fake");
+}
+
+TEST_CASE("load_client_key_files reads NAME.key and the sibling NAME.pub",
+          "[ini][remote]") {
+  TempSettings t;
+  auto client = Mads::generate_keypair();
+  auto broker = Mads::generate_keypair();
+  // As `mads --keypair` writes them: no trailing newline.
+  std::ofstream(t.dir / "me.key", std::ios::binary) << client.secret_key;
+  std::ofstream(t.dir / "me.pub", std::ios::binary) << client.public_key;
+  std::ofstream(t.dir / "broker.pub", std::ios::binary) << broker.public_key;
+
+  auto keys = load_client_key_files(t.dir / "me.key", t.dir / "broker.pub");
+  CHECK(keys.public_key == client.public_key);
+  CHECK(keys.secret_key == client.secret_key);
+  CHECK(keys.server_public_key == broker.public_key);
+
+  fs::remove(t.dir / "me.pub");
+  try {
+    load_client_key_files(t.dir / "me.key", t.dir / "broker.pub");
+    FAIL("expected an exception");
+  } catch (const std::runtime_error &e) {
+    CHECK(std::string(e.what()).find("me.pub") != std::string::npos);
+  }
+  CHECK_THROWS_AS(
+      load_client_key_files(t.dir / "nope.key", t.dir / "broker.pub"),
+      std::runtime_error);
+}
+
+TEST_CASE("ClientSecret to_string/parse round trip and rejection",
+          "[ini][remote][password]") {
+  ClientSecret s = ClientSecret::derive("pw", std::string(16, 's'),
+                                        crypto_pwhash_OPSLIMIT_MIN,
+                                        crypto_pwhash_MEMLIMIT_MIN);
+  const std::string line = s.to_string();
+  CHECK(line.rfind("mads-edit-secret v1 argon2id13 ", 0) == 0);
+  auto back = ClientSecret::parse(line);
+  REQUIRE(back);
+  CHECK(back->salt == s.salt);
+  CHECK(back->opslimit == s.opslimit);
+  CHECK(back->memlimit == s.memlimit);
+  CHECK(back->client_key == s.client_key);
+  CHECK(back->server_key == s.server_key);
+
+  CHECK_FALSE(ClientSecret::parse(""));
+  CHECK_FALSE(
+      ClientSecret::parse("mads-edit-secret v2 argon2id13 1 8192 a b c"));
+  CHECK_FALSE(ClientSecret::parse(line + " extra"));
+  CHECK_FALSE(ClientSecret::parse(line.substr(0, line.size() - 6)));
+  // Out-of-range parameters.
+  std::string bad = line;
+  bad.replace(bad.find(" 8192 "), 6, " 1 ");
+  CHECK_FALSE(ClientSecret::parse(bad));
+  // A verifier line is not a secret line.
+  CHECK_FALSE(ClientSecret::parse(make_verifier("x").to_string()));
+}
+
+TEST_CASE("RemoteSource remembers the derived secret",
+          "[ini][remote][password]") {
+  TempSettings settings;
+  const PasswordVerifier v1 = make_verifier("hunter2");
+  zmq::context_t ctx;
+  EditService service{settings.file, 5, v1};
+  std::atomic<bool> running{true};
+  const std::string endpoint = mads_test::loopback(44758);
+  auto run = [&](EditService &svc) {
+    return std::thread([&] {
+      serve(ctx, {Listener{endpoint, std::nullopt, true}}, svc, running);
+    });
+  };
+  auto thread = run(service);
+  std::this_thread::sleep_for(100ms);
+
+  std::optional<ClientSecret> remembered;
+  {
+    RemoteSource first(endpoint, std::nullopt, "wrong", 3000ms);
+    CHECK_THROWS_AS(first.load(), AuthError);
+    CHECK_FALSE(first.secret()); // a refused password is not remembered
+
+    RemoteSource source(endpoint, std::nullopt, "hunter2", 3000ms);
+    CHECK_FALSE(source.secret());
+    CHECK(source.load().text == "[broker]\nport = 1\n");
+    remembered = source.secret();
+    REQUIRE(remembered);
+    // current_etag() goes through the authenticated info command.
+    CHECK(source.current_etag() == content_etag("[broker]\nport = 1\n"));
+  }
+  // Through a stored line, with no password at all.
+  {
+    auto restored = ClientSecret::parse(remembered->to_string());
+    REQUIRE(restored);
+    RemoteSource source(endpoint, std::nullopt, std::nullopt, 3000ms);
+    source.set_secret(*restored);
+    CHECK(source.load().text == "[broker]\nport = 1\n");
+    CHECK(source.save("[broker]\nport = 2\n", "").status ==
+          SaveResult::Status::Ok);
+  }
+
+  // The broker's password changes: a new verifier, hence a new salt.
+  running.store(false);
+  thread.join();
+  running.store(true);
+  EditService changed{settings.file, 5, make_verifier("another")};
+  thread = run(changed);
+  std::this_thread::sleep_for(100ms);
+  {
+    RemoteSource source(endpoint, std::nullopt, std::nullopt, 3000ms);
+    source.set_secret(*remembered);
+    try {
+      source.load();
+      FAIL("expected AuthError");
+    } catch (const AuthError &e) {
+      CHECK(std::string(e.what()) ==
+            "the remembered password is no longer valid");
+    }
+  }
+  running.store(false);
+  thread.join();
 }

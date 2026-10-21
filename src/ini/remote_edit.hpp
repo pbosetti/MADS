@@ -87,8 +87,8 @@ Author(s): Paolo Bosetti
 #include <functional>
 #include <optional>
 #include <stdexcept>
-#include <string_view>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace zmq {
@@ -160,8 +160,20 @@ struct ClientSecret {
   /// accept from an unauthenticated hello: outside libsodium's range, or
   /// memlimit > 1 GiB, or opslimit > crypto_pwhash_OPSLIMIT_SENSITIVE.
   static ClientSecret derive(std::string_view password, std::string salt,
-                             unsigned long long opslimit,
-                             std::size_t memlimit);
+                             unsigned long long opslimit, std::size_t memlimit);
+  /// One line: `mads-edit-secret v1 argon2id13 <opslimit> <memlimit> <salt>
+  /// <client_key> <server_key>` (standard base64), for a user prefs file.
+  ///
+  /// SECURITY: the stored line is password-equivalent for that one broker:
+  /// whoever reads it can authenticate to (and be authenticated by) the
+  /// broker whose verifier it matches, until the broker's password changes.
+  /// The password itself cannot be recovered from it (Argon2id), and it is
+  /// useless for any other broker or service. Store it like a password
+  /// (owner-only file).
+  std::string to_string() const;
+  /// Parses to_string()'s format; nullopt when malformed or with KDF
+  /// parameters outside libsodium's valid range.
+  static std::optional<ClientSecret> parse(std::string_view line);
 };
 
 /// Server-side logic, independent of sockets (unit-testable).
@@ -256,6 +268,14 @@ ClientKeys load_client_keys(const std::filesystem::path &dir,
                             const std::string &client = "editor",
                             const std::string &server = "broker");
 
+/// Like load_client_keys() for explicit files: `client_secret_key_file` is
+/// the `NAME.key` written by `mads --keypair NAME` (40 Z85 characters); the
+/// client public key is its sibling `NAME.pub`. `server_public_key_file` is
+/// the broker's `.pub`. Throws std::runtime_error naming the bad file.
+ClientKeys
+load_client_key_files(const std::filesystem::path &client_secret_key_file,
+                      const std::filesystem::path &server_public_key_file);
+
 /// Thrown by RemoteSource when the service wants a password and none, or a
 /// wrong one, was given (status "auth"): the caller may ask for one and retry.
 class AuthError : public std::runtime_error {
@@ -286,6 +306,20 @@ public:
   std::string describe() const override;
   /// The info reply as JSON text; throws like load().
   std::string info();
+  /// The etag of the broker's current file, from the (authenticated) info
+  /// command; throws like load().
+  std::string current_etag() override;
+
+  /// The password-derived secret, set after the first request the server
+  /// accepted (nullopt before, and for servers that need no password).
+  /// Password-equivalent for that broker: see ClientSecret::to_string().
+  std::optional<ClientSecret> secret() const;
+  /// Preloads a remembered secret. When a hello's salt and KDF parameters
+  /// match it, it is used without deriving, so no password is needed. If
+  /// they do not match (the password was changed) and there is no password,
+  /// or a proof made with it is refused, the request throws
+  /// AuthError("the remembered password is no longer valid").
+  void set_secret(ClientSecret secret);
 
 private:
   std::vector<std::string> request(const std::vector<std::string> &frames);

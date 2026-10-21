@@ -178,6 +178,9 @@ struct SaveResult {
   Status status = Status::Error;
   std::string etag;    ///< new etag on Ok
   std::string message; ///< human-readable reason on Conflict/Error
+  /// Error only: the source wants a password (none or a wrong one was
+  /// given); the caller may ask for one and retry.
+  bool auth_required = false;
 };
 
 /// Where a document is loaded from and saved to. FileSource now; a remote
@@ -191,6 +194,10 @@ public:
   /// empty base_etag skips the check). Never throws.
   virtual SaveResult save(const std::string &text,
                           const std::string &base_etag) = 0;
+  /// The etag of the content as stored right now, for change polling.
+  /// Default: load().etag; sources override it when that can be cheaper.
+  /// Throws like load().
+  virtual std::string current_etag() { return load().etag; }
   /// Human-readable location, e.g. the file path.
   virtual std::string describe() const = 0;
 };
