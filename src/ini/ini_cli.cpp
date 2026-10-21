@@ -663,6 +663,31 @@ int run_cli(int argc, char **argv, const LaunchGui &launch_gui) {
   if (template_opts) {
     return template_command(parsed, data, etc_dir);
   }
+  // Every remaining mode works on an existing settings file: check it first,
+  // so that e.g. --set-password does not ask for a password in vain. Run from
+  // a build tree, the default <prefix>/etc/mads.ini usually does not exist.
+  const bool file_mode = parsed.count("set-password") ||
+                         parsed.count("remove-password") ||
+                         parsed.count("check") || parsed.count("get") ||
+                         parsed.count("set");
+  if (file_mode) {
+    const fs::path settings = settings_path(parsed);
+    std::error_code ec;
+    if (!fs::is_regular_file(settings, ec)) {
+      std::cerr << fg::red << "No settings file at " << settings.string()
+                << fg::reset << std::endl;
+      if (!has_file) {
+        std::cerr << "That is the installed default; pass the settings file "
+                     "explicitly, e.g. `mads ini "
+                  << (parsed.count("set-password") ? "--set-password" :
+                      parsed.count("remove-password") ? "--remove-password" :
+                      parsed.count("check") ? "--check" :
+                      parsed.count("get") ? "--get KEY" : "--set KEY=VALUE")
+                  << " path/to/mads.ini`" << std::endl;
+      }
+      return parsed.count("check") ? 2 : 1;
+    }
+  }
   if (parsed.count("set-password")) {
     return set_password_command(settings_path(parsed));
   }

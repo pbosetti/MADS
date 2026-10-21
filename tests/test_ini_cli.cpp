@@ -114,6 +114,18 @@ private:
   std::streambuf *_old;
 };
 
+// Captures std::cerr for the lifetime of the object.
+class CaptureErr {
+public:
+  CaptureErr() : _old(std::cerr.rdbuf(_sink.rdbuf())) {}
+  ~CaptureErr() { std::cerr.rdbuf(_old); }
+  std::string str() const { return _sink.str(); }
+
+private:
+  std::ostringstream _sink;
+  std::streambuf *_old;
+};
+
 // Every line starting with '#' (after blanks), in order.
 std::vector<std::string> comment_lines(const std::string &text) {
   std::vector<std::string> out;
@@ -394,4 +406,32 @@ TEST_CASE("mads ini password options exclude other modes", "[ini][cli]") {
   }
   CHECK(ini.str() == kClean);
   CHECK_FALSE(fs::exists(Remote::password_file_for(ini.path())));
+}
+
+TEST_CASE("mads ini file modes refuse a missing settings file up front",
+          "[ini][cli]") {
+  // Checked before anything else, so --set-password never asks for (nor
+  // reads) a password it cannot store.
+  const fs::path missing =
+      fs::temp_directory_path() / "mads_test_ini_cli_missing" / "mads.ini";
+  const std::string file = missing.string();
+  std::istringstream unused("never read\n");
+  std::streambuf *saved = std::cin.rdbuf(unused.rdbuf());
+  CaptureErr err;
+  {
+    Args args{"--set-password", file};
+    CHECK(run_cli(args.argc(), args.argv()) == 1);
+  }
+  std::cin.rdbuf(saved);
+  CHECK(unused.tellg() == 0);
+  CHECK(err.str().find("No settings file at") != std::string::npos);
+  CHECK_FALSE(fs::exists(Remote::password_file_for(missing)));
+  {
+    Args args{"--check", file};
+    CHECK(run_cli(args.argc(), args.argv()) == 2);
+  }
+  {
+    Args args{"--get", "logger.x", file};
+    CHECK(run_cli(args.argc(), args.argv()) == 1);
+  }
 }

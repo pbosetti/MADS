@@ -47,3 +47,8 @@ coverage_html/
 *.profraw
 
 .DS_Store
+
+# Left next to a settings file by mads ini and the broker: backups, and the
+# editing password verifier (never commit one).
+*.bak
+*.edit_password
