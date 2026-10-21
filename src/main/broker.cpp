@@ -214,6 +214,113 @@ string timestamp() {
   return ss.str();
 }
 
+// Interactive-mode footer. The bottom of the screen is a block: one
+// "Settings are provided on <url> (<kind>)" line (cycled by the N key) plus
+// the instructions of print_instructions(). Every message printed once the
+// block is up goes through log(): under one mutex it erases the block, writes
+// the message and reprints the block below it, so messages always stay above
+// the footer and N only ever rewrites the block. Assumes every block line fits
+// in one terminal row (it is the cursor-up count of goback() that is exact),
+// and that the message ends with a newline. Without show() -- daemon mode,
+// startup, shutdown -- log() just writes, as plain cout/cerr would.
+class Console {
+public:
+  // One settings URL of the footer: `url` plus the dim `kind` after it.
+  struct Entry {
+    string url, kind;
+  };
+
+  class Log {
+  public:
+    Log(Console &console, ostream &os)
+        : _console(console), _os(os), _lock(console._mutex) {
+      _console.erase(_os);
+    }
+    ~Log() {
+      _os << flush;
+      _console.draw();
+    }
+    Log(const Log &) = delete;
+    Log &operator=(const Log &) = delete;
+    template <typename T> Log &operator<<(T &&value) {
+      _os << std::forward<T>(value);
+      return *this;
+    }
+    Log &operator<<(ostream &(*manipulator)(ostream &)) {
+      _os << manipulator;
+      return *this;
+    }
+
+  private:
+    Console &_console;
+    ostream &_os;
+    std::lock_guard<std::mutex> _lock;
+  };
+
+  // A message on `os` (cout or cerr), written when the Log is destroyed at
+  // the end of the full expression: `console.log(cerr) << "text" << endl;`
+  Log log(ostream &os) { return Log(*this, os); }
+
+  // Prints the footer for the first time; `entries` must not be empty.
+  void show(vector<Entry> entries) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _entries = std::move(entries);
+    _current = 0;
+    _active = true;
+    draw();
+  }
+
+  // N key: next settings URL.
+  void next() {
+    std::lock_guard<std::mutex> lock(_mutex);
+    if (!_active)
+      return;
+    erase(cout);
+    _current = (_current + 1) % _entries.size();
+    draw();
+  }
+
+  // Stops managing the footer, leaving it on screen.
+  void hide() {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _active = false;
+  }
+
+private:
+  // Lines of the block: the settings line + print_instructions()'s four.
+  static constexpr size_t BLOCK_LINES = 5;
+
+  // Mutex held. The block always lives on cout; erasing it must come after
+  // anything pending on the other stream.
+  void erase(ostream &os) {
+    if (!_active)
+      return;
+    (&os == &cout ? cerr : cout).flush();
+    cout << goback(BLOCK_LINES) << flush;
+  }
+
+  // Mutex held.
+  void draw() {
+    if (!_active)
+      return;
+    auto const &e = _entries[_current];
+    cout << "Settings are provided on " << style::bold << e.url
+         << style::reset;
+    if (!e.kind.empty())
+      cout << style::italic << " (" << e.kind << ")" << style::reset;
+    cout << endl;
+    print_instructions();
+    cout << flush;
+  }
+
+  std::mutex _mutex;
+  bool _active = false;
+  vector<Entry> _entries;
+  size_t _current = 0;
+};
+
+Console console;
+
 // (A local htonll() used to live here, for Linux only, where the platform
 // headers do not provide one. Nothing byte-swaps the proxy statistics any
 // more -- see the STATISTICS handler below -- so it has no callers left.)
@@ -414,7 +521,7 @@ private:
   static constexpr auto SUMMARY_PERIOD = 10s;
   static constexpr auto POLL_PERIOD = 250ms;
 
-  void report_loop(uint64_t fd_soft_limit, bool daemon) {
+  void report_loop(uint64_t fd_soft_limit, bool /*daemon*/) {
     uint64_t reported = 0;
     // Latched separately per failure class. A refused connection is not always
     // descriptor exhaustion -- ECONNABORTED, for a client that hangs up mid
@@ -455,7 +562,7 @@ private:
         reported = total;
         next_summary = chrono::steady_clock::now() + SUMMARY_PERIOD;
         if (exhausted) {
-          cerr << goback(1, !daemon) << fg::red << timestamp()
+          console.log(cerr) << fg::red << timestamp()
                << "OUT OF FILE DESCRIPTORS: refused an agent connection on "
                << address << "." << fg::reset << endl
                << fg::yellow
@@ -473,7 +580,7 @@ private:
                << "  file, or LimitNOFILE= in the systemd unit, to raise it."
                << fg::reset << endl;
         } else {
-          cerr << goback(1, !daemon) << fg::red << timestamp()
+          console.log(cerr) << fg::red << timestamp()
                << "Refused an inbound connection on " << address << ": "
                << std::strerror(last_errno) << fg::reset << endl;
         }
@@ -483,7 +590,7 @@ private:
       // Already explained once. Roll the rest up rather than let a listener
       // that re-fires continuously scroll the explanation off the screen.
       if (chrono::steady_clock::now() >= next_summary) {
-        cerr << goback(1, !daemon) << fg::red << timestamp() << fresh
+        console.log(cerr) << fg::red << timestamp() << fresh
              << " more inbound connection(s) refused"
              << (exhausted ? " (out of file descriptors)" : "") << fg::reset
              << endl;
@@ -1122,7 +1229,7 @@ int main(int argc, char **argv) {
               std::max<int64_t>(0, config[name]["edit_backups"].value_or(10))),
           verifier);
       edit_service->log = [&](string const &line) {
-        cout << goback(1, !daemon) << fg::yellow << timestamp()
+        console.log(cout) << fg::yellow << timestamp()
              << "Settings editing: " << line << fg::reset << endl;
       };
     }
@@ -1160,7 +1267,7 @@ int main(int argc, char **argv) {
       content.addstr(LIB_VERSION);
       if (msg.recv(settings)) {
         if (msg.size() < 2) {
-          cerr << goback(1, !daemon) << fg::red << timestamp()
+          console.log(cerr) << fg::red << timestamp()
                << "Received malformed message from agent, "
                << "expected at least 2 parts" << fg::reset << endl;
           continue;
@@ -1173,12 +1280,12 @@ int main(int argc, char **argv) {
         }
         if (cmd == "settings") {
           if (!Mads::check_version(agent_version)) {
-            cerr << goback(1, !daemon) << fg::red << timestamp()
+            console.log(cerr) << fg::red << timestamp()
                  << "Received settings request from agent with wrong version: "
                  << agent_version << " (vs. " << LIB_VERSION << ")" << fg::reset
                  << endl;
           } else {
-            cout << goback(1, !daemon) << timestamp()
+            console.log(cout) << timestamp()
                  << "Sending settings to agent " << agent_name << " ("
                  << agent_version << ")" << endl;
             shared_ptr<const toml::table> current_config;
@@ -1194,14 +1301,14 @@ int main(int argc, char **argv) {
                 attachment_path = Mads::exec_dir(attachment_path);
               }
               if (!filesystem::exists(attachment_path)) {
-                cerr << goback(1, !daemon) << fg::red << timestamp()
+                console.log(cerr) << fg::red << timestamp()
                      << "Attachment path does not exist: " << attachment_path
                      << fg::reset << endl;
               } else {
                 ifstream attachment_file(attachment_path,
                                          ios::in | ios::binary);
                 stringstream attachment_content;
-                cout << goback(1, !daemon) << fg::yellow << timestamp()
+                console.log(cout) << fg::yellow << timestamp()
                      << "  Attaching binary object: " << style::bold
                      << attachment_path << " ("
                      << filesystem::file_size(attachment_path) << " bytes)"
@@ -1240,7 +1347,7 @@ int main(int argc, char **argv) {
           // bare [LIB_VERSION], which agents read as "no ipc offered".
           settings.send(zmq::buffer(transport_reply), zmq::send_flags::none);
         } else {
-          cerr << goback(1, !daemon) << fg::yellow << timestamp()
+          console.log(cerr) << fg::yellow << timestamp()
                << "Got unexpected command " << cmd << fg::reset << endl;
           content.send(settings);
         }
@@ -1253,7 +1360,7 @@ int main(int argc, char **argv) {
       // interleave into an unreadable braid of half-messages.
       const string report = timestamp() + "Settings worker stopped: " +
                             explain_zmq_error(e, fd_soft_limit);
-      cerr << goback(1, !daemon) << fg::red << report << fg::reset << endl;
+      console.log(cerr) << fg::red << report << fg::reset << endl;
       // A worker that cannot open its socket leaves agents unable to fetch
       // settings at all, so this is a startup failure, not a degraded mode.
       Mads::Runtime::stop_process();
@@ -1332,8 +1439,9 @@ int main(int argc, char **argv) {
     }
   }
 
-  // print settings URI for clients
-  if (auto ep = Mads::detail::parse_endpoint(settings_address);
+  // print settings URI for clients (interactive mode shows them in the footer)
+  if (!daemon) {
+  } else if (auto ep = Mads::detail::parse_endpoint(settings_address);
       ep && ep->port_number()) {
     cout << "Settings are provided on " << style::bold
          << "tcp://127.0.0.1:" << ep->port << style::reset << style::italic
@@ -1342,7 +1450,7 @@ int main(int argc, char **argv) {
     cout << "Settings are provided on " << style::bold << settings_address
          << style::reset << endl;
   }
-  if (!ipc.settings.empty()) {
+  if (daemon && !ipc.settings.empty()) {
     cout << "Settings are provided on " << style::bold << ipc.settings
          << style::reset << style::italic << " (ipc, this host only)"
          << style::reset << endl;
@@ -1355,7 +1463,7 @@ int main(int argc, char **argv) {
         Remote::serve(context, edit_listeners, *edit_service, edit_running);
       } catch (const exception &e) {
         // Never fatal: the broker carries on without the editing service.
-        cerr << goback(1, !daemon) << fg::red << timestamp()
+        console.log(cerr) << fg::red << timestamp()
              << "Settings editing unavailable: " << e.what() << fg::reset
              << endl;
       }
@@ -1366,8 +1474,10 @@ int main(int argc, char **argv) {
   thread settings_watcher_thread([&]() {
     string ini_tmp = "";
     settings_watcher.watch([&](const std::string &file_name) {
-      cout << goback(1, !daemon) << fg::yellow << timestamp()
-           << "Reloading settings " << file_name << "... ";
+      // One Log for the whole report, so the footer is redrawn once.
+      auto report = console.log(cout);
+      report << fg::yellow << timestamp() << "Reloading settings "
+             << file_name << "... ";
       ini_tmp = read_settings_file(settings_path);
       try {
         auto parsed = make_shared<const toml::table>(toml::parse(ini_tmp));
@@ -1376,11 +1486,11 @@ int main(int argc, char **argv) {
           ini_table = ini_tmp;
           attachment_config = std::move(parsed);
         }
-        cout << " done." << fg::reset << endl;
+        report << " done." << fg::reset << endl;
       } catch (const exception &e) {
-        cerr << endl
-             << fg::red << timestamp() << " INI file read error: " << e.what()
-             << " - skipping changes" << fg::reset << endl;
+        report << endl
+               << fg::red << timestamp() << " INI file read error: "
+               << e.what() << " - skipping changes" << fg::reset << endl;
       }
     });
   });
@@ -1459,12 +1569,22 @@ int main(int argc, char **argv) {
     zmq::socket_t controller(context, zmq::socket_type::req);
     controller.connect("inproc://broker-ctrl");
 
-    auto settings_url_list = settings_urls(settings_address, ipc.settings);
-    auto current_url = settings_url_list.begin();
+    // The footer starts with the loopback URL (as the startup line used to
+    // say), then cycles through every address settings_urls() knows.
+    vector<Console::Entry> footer;
+    if (auto ep = Mads::detail::parse_endpoint(settings_address);
+        ep && ep->port_number())
+      footer.push_back({"tcp://127.0.0.1:" + ep->port, "loopback"});
+    else
+      footer.push_back({settings_address, ""});
+    for (auto const &[url_name, url] : settings_urls(settings_address, ipc.settings))
+      if (url != footer.front().url)
+        footer.push_back(
+            {url, url_name == "ipc" ? "ipc, this host only" : url_name});
 
     thread(proxy, ref(frontend), ref(backend), ref(controlled), capture_ref)
         .detach();
-    print_instructions();
+    console.show(footer);
 
     while (running) {
       zmq::multipart_t msg;
@@ -1502,12 +1622,12 @@ int main(int argc, char **argv) {
       case 'r':
       case 'R':
         msg = steer(controller, "PAUSE"); // -> state = active
-        cout << "Resuming operation" << endl;
+        console.log(cout) << "Resuming operation" << endl;
         break;
       case 'p':
       case 'P':
         msg = steer(controller, "RESUME"); // -> state = paused
-        cout << "Pausing operation" << endl;
+        console.log(cout) << "Pausing operation" << endl;
         break;
       case 'i':
       case 'I': {
@@ -1528,41 +1648,36 @@ int main(int argc, char **argv) {
           stats.push_back(v);
         }
         if (stats.size() < 8) {
-          cerr << fg::red << "Broker returned " << stats.size()
+          console.log(cerr) << fg::red << "Broker returned " << stats.size()
                << " statistics counters, expected 8" << fg::reset << endl;
           break;
         }
         // Wide enough for a 20-digit uint64_t, so two large counters can
         // never run together into one unreadable number.
         constexpr int STAT_W = 22;
-        cout << setw(13) << " " << style::bold << setw(STAT_W) << "FRONTEND"
+        auto out = console.log(cout);
+        out << setw(13) << " " << style::bold << setw(STAT_W) << "FRONTEND"
              << setw(STAT_W) << "BACKEND" << style::reset << endl;
-        cout << fg::green << setw(13) << "Messages in:" << setw(STAT_W)
+        out << fg::green << setw(13) << "Messages in:" << setw(STAT_W)
              << stats[0] << setw(STAT_W) << stats[4] << fg::reset << endl;
-        cout << fg::green << setw(13) << "Bytes in:" << setw(STAT_W)
+        out << fg::green << setw(13) << "Bytes in:" << setw(STAT_W)
              << stats[1] << setw(STAT_W) << stats[5] << fg::reset << endl;
-        cout << fg::yellow << setw(13) << "Messages out:" << setw(STAT_W)
+        out << fg::yellow << setw(13) << "Messages out:" << setw(STAT_W)
              << stats[2] << setw(STAT_W) << stats[6] << fg::reset << endl;
-        cout << fg::yellow << setw(13) << "Bytes out:" << setw(STAT_W)
+        out << fg::yellow << setw(13) << "Bytes out:" << setw(STAT_W)
              << stats[3] << setw(STAT_W) << stats[7] << fg::reset << endl;
         break;
       }
       case 'n':
-      case 'N': {
-        cout << goback(5) << "Settings are provided on " << style::bold
-             << current_url->second << style::reset << style::italic << " ("
-             << current_url->first << ")" << style::reset << endl;
-        if (++current_url == settings_url_list.end()) {
-          current_url = settings_url_list.begin();
-        }
-        print_instructions();
+      case 'N':
+        console.next();
         break;
-      }
       default:
         break;
       }
     }
 
+    console.hide();
     discovery_service.stop_advertising();
     cout << fg::green << "Closing sockets..." << fg::reset << endl;
     // Before the context closes, and before a possible execv() below.
