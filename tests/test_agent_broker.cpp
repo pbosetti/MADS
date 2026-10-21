@@ -287,7 +287,7 @@ TEST_CASE("init() saves a served attachment under a custom attachment_ext",
 TEST_CASE("a served attachment keeps the section name as its file stem",
           "[agent_broker]") {
   mads_test::RunningGuard guard;
-  const uint16_t port = 42208;
+  const uint16_t port = 42212;
   FakeBroker broker(port);
   broker.settings_body = make_settings_toml("battach3");
   broker.with_attachment = true;
@@ -307,7 +307,7 @@ TEST_CASE("a served attachment keeps the section name as its file stem",
 TEST_CASE("identical attachment bytes resolve to one shared cached path",
           "[agent_broker]") {
   mads_test::RunningGuard guard;
-  const uint16_t port = 42209;
+  const uint16_t port = 42213;
   FakeBroker broker(port);
   broker.settings_body = make_settings_toml("battach4");
   broker.with_attachment = true;
