@@ -228,9 +228,9 @@ the broker advertises and what an agent on this host would use.
 
 # REMOTE EDITING
 
-With `remote_edit = true` in `[broker]` the broker lets an editor (`mads ini
---remote`, or File > Open remote in the settings editor) read and replace the
-settings file it was started with. Nothing changes while the key is off, which
+With `remote_edit = true` in `[broker]` the broker lets an editor (the *Open
+broker settings* panel of **mads ini**, see **mads-ini**(1)) read and replace
+the settings file it was started with. Nothing changes while the key is off, which
 is the default. The service can reach exactly one file, the broker's own
 settings file: requests carry no paths. A saved file is validated as TOML,
 written atomically and picked up by the broker's file watcher like any other
@@ -277,12 +277,12 @@ no editor keys, the bus keys are admitted, see below). Plaintext tcp is
 only accepted in password mode (see "Editing password" below). The broker fails closed:
 
 * without **\-\-crypto** and without a password a warning is printed and only the ipc endpoint is served;
-* with no *editors_dir*, or no valid key in it, there is no tcp listener;
+* with no valid key in *editors_dir* and no password, there is no tcp listener;
 * if an endpoint cannot be bound (port in use, a live broker owning the ipc
   socket) a warning is printed and the broker carries on without the service.
 
-The editor keys are read at startup: restart the broker (key **X**) after
-adding or removing one. When the tcp listener is active its port is announced
+The editor keys are read at startup: restart the broker after adding or
+removing one. When the tcp listener is active its port is announced
 in service discovery under the name `edit`.
 
 ## Editing password

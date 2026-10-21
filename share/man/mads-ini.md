@@ -140,7 +140,7 @@ each key given with the same **\-\-set**; line breaks in *text* become spaces. *
 :  Inline comment for the keys given with **\-\-set**.
 
 **\-\-set-password** [*FILE*]
-:  Create the editing password of the broker for *FILE*, as described in BROKER. The password is read
+:  Create the editing password of the broker for *FILE*, as described in BROKER. *FILE* must exist; the password is read
    without echo from a terminal, twice, to confirm it. When standard input is not a terminal, one
    line is read from it instead, for scripts. Passwords shorter than 8 characters are accepted with a
    warning. An existing password file is replaced.
@@ -310,6 +310,99 @@ shows a banner when it finds one.
 Opening, creating or closing a document with unsaved changes asks for **Save**, **Discard** or
 **Cancel**.
 
+# OPENING THE BROKER'S SETTINGS
+
+The editor can open the settings file of a running broker as well as a local
+file. The **Open broker settings** panel is at the top of the palette, on the
+left; **File > Open broker settings...** expands it. The panel opens by itself
+while the document has no file or broker behind it, and closes once one is
+open. The broker's side of the setup (`remote_edit`, the keys, the password)
+is in **mads-broker**(1), section *REMOTE EDITING*, and in the CRYPTO.md guide
+of the MADS sources.
+
+## Rooms
+
+Brokers that announce themselves on the network (see **mads-broker**(1),
+**\-r**) are listed by name and host name as they are discovered. Only a
+broker that announces its edit port, that is one with `remote_edit` on, can be
+selected. The tooltip shows its tcp endpoint, followed by (CURVE) for an
+encrypted broker. A CURVE room uses the key files chosen under **Keys**.
+
+## Local broker
+
+**Local broker** opens the broker on this host through its ipc endpoint, for
+the port in the field beside the button (the edit port, 9094 by default; the
+last port used is remembered). The button is enabled when the socket file of
+that port exists, which does not prove that the broker is answering. The ipc
+connection is plaintext and needs neither keys nor a password: only the user
+who runs the broker can use it.
+
+## Address
+
+Type an address in **Address** and press Enter or **Open**:
+
+- `host` or `host:port` is a tcp endpoint; the port defaults to 9094;
+- `tcp://host[:port]` is the same, written as a URL;
+- an IPv6 address works with or without brackets (`[fe80::1]:9094`), and the
+  port defaults to 9094;
+- `ipc:///path/to/socket` is a local ipc endpoint, used as written.
+
+Check **Use CURVE keys** for a broker started with `--crypto`. The box is
+disabled for ipc addresses. The last address and the state of the box are
+remembered after a successful open.
+
+## Keys
+
+The **Keys** section appears when CURVE is in use or a CURVE room is chosen.
+**Secret key...** selects the editor's `NAME.key` and **Broker public key...**
+the broker's `.pub`. The tooltips show full paths. Only the paths are kept in
+the preferences file, and the key files are read when connecting. If CURVE is
+selected and either file is missing, the editor does not connect and says
+which one to select. For generating and distributing the keys, see CRYPTO.md.
+
+## Password
+
+When the broker asks for a password, a **Password required** dialog names the
+endpoint. Enter or **OK** sends it; **Cancel** gives up. A wrong password asks
+again.
+
+**Remember on this computer** keeps, after a successful open or save made with
+a typed password, a key derived from that password for the endpoint (the
+normalized address, such as `tcp://host:9094`), so that later connections to
+it do not ask. The password itself is never stored. The derived key is kept in
+the preferences file (see FILES). If the broker's password has since changed,
+the editor drops the remembered key, shows a notice, and asks for the password
+again.
+
+## Recent files
+
+**Open Recent** lists the last ten local files opened or saved as, most recent
+first. A file that no longer exists is greyed out. **Clear** empties the list.
+Remote brokers are not listed there.
+
+## Remote documents
+
+The footer and the window title show the endpoint of a remote document, for
+example `tcp://192.0.2.10:9094 (remote)`. The footer adds *(modified)* when
+there are unsaved changes.
+
+* **Save** sends the text to the broker, with the etag of the version that was
+  loaded. The broker checks that the text is valid TOML, writes it atomically
+  and reloads it, so agents get the new settings as described in BROKER. If the
+  broker's file changed since it was loaded, nothing is written and a dialog
+  offers **Reload (discard mine)**, **Overwrite** (write the editor's text
+  regardless) or **Cancel**.
+* **Reload** (**File > Reload**) fetches the broker's current file.
+* **Save As...** writes a local file instead. The document then becomes that
+  file and is no longer connected to the broker; the broker's file is not
+  changed.
+* **Changes by others**: while a broker is open, the editor checks its file
+  about every 5 seconds, from a background thread. If the document has no
+  unsaved changes, it reloads and shows "Reloaded: file changed on disk".
+  Otherwise a banner offers **Reload** (discarding your changes) or **Keep
+  mine**. A broker that cannot be reached is not reported: the check is simply
+  repeated.
+
 # BROKER
 
 The broker watches its settings file and reloads it about a second after it changes, whether the
@@ -317,8 +410,7 @@ change comes from this editor, **mads ini \-\-set** or a text editor (including 
 writing a new file and renaming it over the old one). Agents fetch their settings from the broker
 when they start, so a running agent keeps its settings until it is restarted.
 
-One exception: a changed **attachment** path is only picked up when the broker restarts (press
-**X** in the broker's console, or restart it).
+A changed **attachment** path is picked up on reload as well.
 
 The broker's remote editing service (**remote_edit**) can require a password. **mads ini
 \-\-set-password** creates the verifier of that password next to the settings file, in
@@ -365,6 +457,20 @@ Without a GUI, **mads ini** *FILE* exits **1** with a message.
 *FILE.edit_password*
 :  Editing password verifier of the broker, written by **\-\-set-password** and removed by
    **\-\-remove-password**. Owner-only.
+
+`~/Library/Application Support/MADS/mads-ini.json`
+:  Editor preferences on macOS.
+
+`$XDG_CONFIG_HOME/mads/mads-ini.json`
+:  Editor preferences on Linux, or `~/.config/mads/mads-ini.json` when `XDG_CONFIG_HOME` is not set.
+
+`%APPDATA%\MADS\mads-ini.json`
+:  Editor preferences on Windows.
+
+`$MADS_CONFIG_DIR/mads-ini.json`
+:  Editor preferences in the folder named by the `MADS_CONFIG_DIR` environment variable, when it is set and not empty. It replaces the three folders above.
+
+The preferences file holds the last manual address and CURVE choice, the paths of the key files, the local port, the recent local files and the password keys kept by **Remember on this computer**. It is written through a temporary file and is owner-only (mode 0600 on POSIX). The folder is created on first use, with owner-only permissions. If the file cannot be read, the editor ignores it and says so; if it cannot be written, the editor says so and the preferences are not kept.
 
 *FILE.bak*
 :  The content of *FILE* before the last save. Overwritten at each save.

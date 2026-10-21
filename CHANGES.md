@@ -32,7 +32,9 @@
   subscribe, Ctrl-click (Cmd-click on macOS) or Delete to disconnect, and
   edit every schema key in the inspector. Comments and the file layout are
   preserved, saves are atomic with a `.bak` copy and conflict detection, and
-  the editor warns when the file changes on disk. See **mads-ini**(1).
+  the editor warns when the file changes on disk. It can also open the
+  settings file of a running broker (see *Remote editing* below). See
+  **mads-ini**(1).
 - **Headless `mads ini` subcommands.** `--check [FILE]` lints a file (exit 0
   clean, 1 warnings, 2 errors), `--get SECTION.KEY` prints a raw value, and
   `--set SECTION.KEY=VALUE` (repeatable, with `--comment`) changes keys while
@@ -49,6 +51,17 @@
   `%APPDATA%\MADS` on Windows (`MADS_CONFIG_DIR` overrides it). An old
   `./mads_chat_settings.json` is copied there on first start and can then
   be deleted.
+- **Remote editing of the broker's settings file.** Opt-in with
+  `remote_edit = true` in `[broker]`. On the broker's host, **mads ini**
+  reaches the broker over an owner-only ipc endpoint, with no key or
+  password. Over tcp the service needs `--crypto` and admits the editor keys
+  of `editors_dir` (CURVE). A password set with `mads ini --set-password` is
+  a second factor with CURVE, or the only check without it, where the text
+  then travels in clear. The *Open broker settings* panel of the editor
+  lists the brokers it discovers, opens them with their keys and password,
+  and checks them for outside changes. Saves are validated, written
+  atomically, backed up (`edit_backups`) and logged on the broker's console.
+  Setup: **mads-broker**(1), **mads-ini**(1) and CRYPTO.md.
 
 ## Fixes
 
@@ -58,9 +71,18 @@
   on Linux, kqueue on macOS) followed the replaced inode, so later changes
   went unnoticed until a restart. The watcher now re-arms on the path when
   the file is replaced (also used by `mads top`).
+- **The broker's daemon mode with `--crypto` hung on SIGTERM.** The ZAP
+  handler is now released before the context is closed, as in interactive
+  mode.
+- **A changed `attachment` path is used on settings reload.** The broker
+  kept the parsed settings it looked attachments up in from startup, so a
+  changed path needed a broker restart. Reloads now replace that table too.
 
 ## For developers
 
+- **Two attachment tests had colliding test ports.** `test_agent_broker`
+  used ports 42208 and 42209 twice each, so under `ctest -j` the tests could
+  fail at random. The attachment tests now use 42212 and 42213.
 - **New static library `mads_ini_core`** (`src/ini`): the comment-preserving
   mads.ini document model, the key schema (`ini_schema.toml`, embedded at build
   time), the editor state and the `mads ini` command line. It is GUI-free, so
