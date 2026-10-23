@@ -25,9 +25,9 @@ void HttpsClient::add_query_pair(const std::string& k, const std::string &v) {
 }
 
 std::string HttpsClient::query_string() {
-  std::string s = "?";
+  std::string s;
   for (const auto &[k, v]: _query) {
-    s += k + "=" + v;
+    s += (s.empty() ? "?" : "&") + k + "=" + v;
   }
   return s;
 }
