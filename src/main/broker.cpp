@@ -31,10 +31,12 @@ Author(s): Paolo Bosetti
 #include "../watcher.hpp"
 #include "../curve.hpp"
 #include "../keypress.hpp"
-#include "../goback.hpp"
 #include "../service_discovery.hpp"
 #include "../socket_monitor.hpp"
+#include <array>
 #include <atomic>
+#include <deque>
+#include <optional>
 #include <csignal>
 #include <cstring>
 #include <cxxopts.hpp>
@@ -59,6 +61,7 @@ Author(s): Paolo Bosetti
 #include <zmq_addon.hpp>
 #ifdef _WIN32
 #include <iphlpapi.h>
+#include <io.h>
 #include <signal.h>
 #else
 #include <arpa/inet.h>
@@ -214,112 +217,507 @@ string timestamp() {
   return ss.str();
 }
 
-// Interactive-mode footer. The bottom of the screen is a block: one
-// "Settings are provided on <url> (<kind>)" line (cycled by the N key) plus
-// the instructions of print_instructions(). Every message printed once the
-// block is up goes through log(): under one mutex it erases the block, writes
-// the message and reprints the block below it, so messages always stay above
-// the footer and N only ever rewrites the block. Assumes every block line fits
-// in one terminal row (it is the cursor-up count of goback() that is exact),
-// and that the message ends with a newline. Without show() -- daemon mode,
-// startup, shutdown -- log() just writes, as plain cout/cerr would.
-class Console {
+// The interactive dashboard. With stdout a terminal that understands VT
+// sequences, mads-broker takes over the alternate screen and shows one frame
+// that never scrolls:
+//
+//   header     MADS broker <version>, room, RUNNING/PAUSED, uptime
+//   Endpoints  label/value pairs set by endpoint() next to the startup prints
+//   Agents connect to   the settings URL cycled by N
+//   Traffic    the proxy counters, toggled by the I key, sampled every second
+//   Log        the last messages, filling the remaining rows
+//   footer     the keys
+//
+// Redraw model: every event (a log message, a key, the 1 s tick() driven by
+// the key loop) repaints the WHOLE frame from the data -- ESC[H, each row
+// followed by ESC[K, ESC[J at the end, never a relative cursor move -- so
+// anything stray written to the screen by another thread or by libzmq is
+// painted over at the next redraw. The terminal size is queried at every
+// draw and every row is cut to the width, counting UTF-8 code points of the
+// visible text only (styling is kept apart in Seg::sgr), so nothing wraps.
+//
+// log(stream) keeps the shape of `cerr << ...`: `dashboard.log(cerr) << fg::red
+// << "text" << endl;`. While the frame is up the text goes to the Log section
+// (coloured by the first fg colour streamed) and is remembered, to be printed
+// on the normal screen by hide(); otherwise -- daemon mode, startup, shutdown,
+// plain fallback -- it is written to the real stream exactly as plain
+// cout/cerr would be, and recorded too, so the Log section starts with the
+// startup messages. The frame is only used for an interactive broker whose
+// stdout is a VT-capable terminal (on Windows: VT processing is enabled, and
+// the code page set to UTF-8); otherwise show() prints the key help once and
+// everything stays plain.
+//
+// The terminal is restored (cursor, normal screen, input mode) by hide(), at
+// exit() and on SIGINT/SIGTERM/SIGHUP, via leave_alt_screen(), which is
+// async-signal-safe. shortcut: not on SIGABRT/SIGKILL, run `reset` then.
+constexpr char LEAVE_ALT_SCREEN[] = "\x1b[?25h\x1b[?1049l";
+std::atomic<bool> alt_screen_on{false};
+#ifndef _WIN32
+termios saved_termios;
+#endif
+
+void leave_alt_screen() noexcept {
+  if (!alt_screen_on.exchange(false))
+    return;
+#ifdef _WIN32
+  DWORD n;
+  WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), LEAVE_ALT_SCREEN,
+            sizeof(LEAVE_ALT_SCREEN) - 1, &n, nullptr);
+#else
+  tcsetattr(STDIN_FILENO, TCSANOW, &saved_termios);
+  if (::write(STDOUT_FILENO, LEAVE_ALT_SCREEN, sizeof(LEAVE_ALT_SCREEN) - 1) < 0) {
+  }
+#endif
+}
+
+#ifdef _WIN32
+BOOL WINAPI leave_alt_screen_on_ctrl(DWORD) {
+  leave_alt_screen();
+  return FALSE; // default handling: terminate
+}
+#else
+void leave_alt_screen_on_signal(int sig) {
+  leave_alt_screen();
+  std::signal(sig, SIG_DFL);
+  std::raise(sig);
+}
+#endif
+
+class Dashboard {
 public:
-  // One settings URL of the footer: `url` plus the dim `kind` after it.
+  enum class Severity { Info, Ok, Warn, Error };
+
+  // One settings URL of the frame: `url` plus the dim `kind` after it.
   struct Entry {
     string url, kind;
   };
 
   class Log {
   public:
-    Log(Console &console, ostream &os)
-        : _console(console), _os(os), _lock(console._mutex) {
-      _console.erase(_os);
-    }
+    Log(Dashboard &dashboard, ostream &os)
+        : _dashboard(dashboard), _os(os), _lock(dashboard._mutex),
+          _capture(dashboard._active) {}
     ~Log() {
-      _os << flush;
-      _console.draw();
+      if (!_capture)
+        _os << flush;
+      _dashboard.record(_buf.str(), _severity, _capture);
     }
     Log(const Log &) = delete;
     Log &operator=(const Log &) = delete;
-    template <typename T> Log &operator<<(T &&value) {
-      _os << std::forward<T>(value);
+    template <typename T> Log &operator<<(T const &value) {
+      if constexpr (is_same_v<T, rang::fg>) {
+        if (!_severity_set && value != rang::fg::reset) {
+          _severity_set = true;
+          _severity = value == rang::fg::red      ? Severity::Error
+                      : value == rang::fg::yellow ? Severity::Warn
+                      : value == rang::fg::green  ? Severity::Ok
+                                                  : Severity::Info;
+        }
+      }
+      if (!_capture)
+        _os << value; // the real stream, with its colours
+      _buf << value;  // not a terminal: rang adds no escape codes
       return *this;
     }
     Log &operator<<(ostream &(*manipulator)(ostream &)) {
-      _os << manipulator;
+      if (!_capture)
+        _os << manipulator;
+      _buf << manipulator;
       return *this;
     }
 
   private:
-    Console &_console;
+    Dashboard &_dashboard;
     ostream &_os;
     std::lock_guard<std::mutex> _lock;
+    bool _capture;
+    ostringstream _buf;
+    Severity _severity = Severity::Info;
+    bool _severity_set = false;
   };
 
-  // A message on `os` (cout or cerr), written when the Log is destroyed at
-  // the end of the full expression: `console.log(cerr) << "text" << endl;`
+  // `dashboard.log(cerr) << ... << endl;` -- takes effect when the full
+  // expression ends.
   Log log(ostream &os) { return Log(*this, os); }
 
-  // Prints the footer for the first time; `entries` must not be empty.
+  void header(string version, string room) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _version = std::move(version);
+    _room = std::move(room);
+    draw();
+  }
+
+  // Adds or replaces a row of the Endpoints section.
+  void endpoint(string label, string value) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    for (auto &e : _endpoints)
+      if (e.first == label) {
+        e.second = std::move(value);
+        draw();
+        return;
+      }
+    _endpoints.emplace_back(std::move(label), std::move(value));
+    draw();
+  }
+
+  // Takes over the screen, if stdout is a terminal that can take it.
+  // `entries` (never empty) are the URLs N cycles through.
   void show(vector<Entry> entries) {
     std::lock_guard<std::mutex> lock(_mutex);
     _entries = std::move(entries);
     _current = 0;
+    if (!enable_vt()) {
+      print_instructions(); // plain fallback: the keys, once
+      return;
+    }
+#ifndef _WIN32
+    tcgetattr(STDIN_FILENO, &saved_termios);
+    std::signal(SIGINT, leave_alt_screen_on_signal);
+    std::signal(SIGTERM, leave_alt_screen_on_signal);
+    std::signal(SIGHUP, leave_alt_screen_on_signal);
+#else
+    SetConsoleCtrlHandler(leave_alt_screen_on_ctrl, TRUE);
+#endif
+    std::atexit([] { leave_alt_screen(); });
     _active = true;
+    alt_screen_on = true;
+    cout << "\x1b[?1049h\x1b[?25l";
     draw();
+  }
+
+  // Gives the screen back and prints, on the normal one, what was logged
+  // while the frame was up.
+  void hide() {
+    std::lock_guard<std::mutex> lock(_mutex);
+    if (!_active)
+      return;
+    _active = false;
+    cout << flush;
+    leave_alt_screen();
+    for (auto const &line : _pending) {
+      style_of(line.severity) << line.text << fg::reset << endl;
+    }
+    _pending.clear();
   }
 
   // N key: next settings URL.
   void next() {
     std::lock_guard<std::mutex> lock(_mutex);
-    if (!_active)
-      return;
-    erase(cout);
-    _current = (_current + 1) % _entries.size();
+    if (!_entries.empty())
+      _current = (_current + 1) % _entries.size();
     draw();
   }
 
-  // Stops managing the footer, leaving it on screen.
-  void hide() {
+  void paused(bool paused) {
     std::lock_guard<std::mutex> lock(_mutex);
-    _active = false;
+    _paused = paused;
+    draw();
+  }
+
+  // I key on the dashboard: shows or hides the Traffic section (sampled once
+  // a second while shown, see the key loop). Returns the new state.
+  bool toggle_traffic() {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _show_traffic = !_show_traffic;
+    if (!_show_traffic)
+      _stats.reset();
+    draw();
+    return _show_traffic;
+  }
+  bool active() {
+    std::lock_guard<std::mutex> lock(_mutex);
+    return _active;
+  }
+  bool traffic_shown() {
+    std::lock_guard<std::mutex> lock(_mutex);
+    return _active && _show_traffic;
+  }
+
+  // The 8 counters of zmq_proxy_steerable(), in its order.
+  void traffic(array<uint64_t, 8> const &stats) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    if (!_active) { // plain console: print the table, as the I key always did
+      // Wide enough for a 20-digit uint64_t, so two large counters can
+      // never run together into one unreadable number.
+      constexpr int STAT_W = 22;
+      cout << setw(13) << " " << style::bold << setw(STAT_W) << "FRONTEND"
+           << setw(STAT_W) << "BACKEND" << style::reset << endl;
+      cout << fg::green << setw(13) << "Messages in:" << setw(STAT_W)
+           << stats[0] << setw(STAT_W) << stats[4] << fg::reset << endl;
+      cout << fg::green << setw(13) << "Bytes in:" << setw(STAT_W) << stats[1]
+           << setw(STAT_W) << stats[5] << fg::reset << endl;
+      cout << fg::yellow << setw(13) << "Messages out:" << setw(STAT_W)
+           << stats[2] << setw(STAT_W) << stats[6] << fg::reset << endl;
+      cout << fg::yellow << setw(13) << "Bytes out:" << setw(STAT_W)
+           << stats[3] << setw(STAT_W) << stats[7] << fg::reset << endl;
+      return;
+    }
+    _stats = stats;
+    _stats_time = timestamp();
+    draw();
+  }
+
+  // Called by the key loop: repaints when the uptime second has changed.
+  void tick() {
+    std::lock_guard<std::mutex> lock(_mutex);
+    if (_active && chrono::duration_cast<chrono::seconds>(
+                       chrono::steady_clock::now() - _started)
+                           .count() != _drawn_second)
+      draw();
   }
 
 private:
-  // Lines of the block: the settings line + print_instructions()'s four.
-  static constexpr size_t BLOCK_LINES = 5;
+  struct Line {
+    Severity severity;
+    string text;
+  };
+  // A piece of a row: visible text and the SGR sequence styling it.
+  struct Seg {
+    string text, sgr;
+  };
+  using Row = vector<Seg>;
 
-  // Mutex held. The block always lives on cout; erasing it must come after
-  // anything pending on the other stream.
-  void erase(ostream &os) {
-    if (!_active)
-      return;
-    (&os == &cout ? cerr : cout).flush();
-    cout << goback(BLOCK_LINES) << flush;
+  static constexpr size_t MAX_LINES = 200;
+  static constexpr const char *BOLD = "\x1b[1m", *DIM = "\x1b[2m",
+                              *RED = "\x1b[31m", *GREEN = "\x1b[32m",
+                              *YELLOW = "\x1b[33m", *CYAN = "\x1b[36m";
+
+  static ostream &style_of(Severity s) {
+    switch (s) {
+    case Severity::Error: cout << fg::red; break;
+    case Severity::Warn: cout << fg::yellow; break;
+    case Severity::Ok: cout << fg::green; break;
+    default: break;
+    }
+    return cout;
   }
 
-  // Mutex held.
+  // Mutex held (by the Log). Remembers the text, one entry per non-empty line.
+  void record(string const &text, Severity severity, bool shown) {
+    istringstream in(text);
+    string line;
+    while (getline(in, line)) {
+      for (auto &c : line)
+        if (c == '\r' || c == '\t')
+          c = ' ';
+      if (line.empty())
+        continue;
+      _lines.push_back({severity, line});
+      if (_lines.size() > MAX_LINES)
+        _lines.pop_front();
+      if (shown)
+        _pending.push_back({severity, line});
+    }
+    if (shown)
+      draw();
+  }
+
+  static bool enable_vt() {
+#ifdef _WIN32
+    HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD mode = 0;
+    if (!_isatty(_fileno(stdout)) || !GetConsoleMode(h, &mode) ||
+        !SetConsoleMode(h, mode | ENABLE_PROCESSED_OUTPUT |
+                               ENABLE_VIRTUAL_TERMINAL_PROCESSING))
+      return false;
+    SetConsoleOutputCP(CP_UTF8);
+    return true;
+#else
+    const char *term = getenv("TERM");
+    return isatty(STDOUT_FILENO) && term && string(term) != "dumb";
+#endif
+  }
+
+  static void size(size_t &width, size_t &height) {
+    width = 80;
+    height = 24;
+#ifdef _WIN32
+    CONSOLE_SCREEN_BUFFER_INFO info;
+    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &info)) {
+      width = info.srWindow.Right - info.srWindow.Left + 1;
+      height = info.srWindow.Bottom - info.srWindow.Top + 1;
+    }
+#else
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0 &&
+        ws.ws_row > 0) {
+      width = ws.ws_col;
+      height = ws.ws_row;
+    }
+#endif
+  }
+
+  // Number of code points of a UTF-8 string.
+  static size_t cols(string const &s) {
+    size_t n = 0;
+    for (unsigned char c : s)
+      n += (c & 0xC0) != 0x80;
+    return n;
+  }
+
+  // The first `n` code points of `s`.
+  static string head(string const &s, size_t n) {
+    size_t i = 0;
+    for (; i < s.size(); ++i)
+      if (((unsigned char)s[i] & 0xC0) != 0x80 && n-- == 0)
+        break;
+    return s.substr(0, i);
+  }
+
+  // Row to terminal text, cut to `width` columns (with an ellipsis).
+  static string render(Row const &row, size_t width) {
+    string out;
+    size_t room = width;
+    for (auto const &seg : row) {
+      if (room == 0)
+        break;
+      size_t n = cols(seg.text);
+      string text = n <= room ? seg.text : head(seg.text, room - 1) + "…";
+      room -= min(n, room);
+      out += seg.sgr.empty() ? text : seg.sgr + text + "\x1b[0m";
+    }
+    return out;
+  }
+
+  static Row section(string const &title, size_t width) {
+    string head = "── " + title + " ";
+    return {{head + string_repeat("─", width > cols(head) ? width - cols(head) : 0),
+             string(DIM) + CYAN}};
+  }
+
+  static string string_repeat(string const &s, size_t n) {
+    string out;
+    while (n-- > 0)
+      out += s;
+    return out;
+  }
+
+  static string clock(long long seconds) {
+    char buf[32];
+    snprintf(buf, sizeof buf, "%02lld:%02lld:%02lld", seconds / 3600,
+             seconds / 60 % 60, seconds % 60);
+    return buf;
+  }
+
+  // Mutex held. Paints the whole frame.
   void draw() {
     if (!_active)
       return;
-    auto const &e = _entries[_current];
-    cout << "Settings are provided on " << style::bold << e.url
-         << style::reset;
-    if (!e.kind.empty())
-      cout << style::italic << " (" << e.kind << ")" << style::reset;
-    cout << endl;
-    print_instructions();
-    cout << flush;
+    size_t width, height;
+    size(width, height);
+    const auto up = chrono::duration_cast<chrono::seconds>(
+                        chrono::steady_clock::now() - _started)
+                        .count();
+    _drawn_second = up;
+
+    vector<Row> rows;
+    // header
+    Row left{{" MADS broker " + _version, BOLD}};
+    if (const char *fake = std::getenv("MADS_FAKE_VERSION"))
+      left.push_back({"  MADS_FAKE_VERSION=" + string(fake), YELLOW});
+    left.insert(left.end(), {
+             {"  ·  room " + _room + "  ·  ", ""},
+             {_paused ? "● PAUSED" : "● RUNNING",
+              string(BOLD) + (_paused ? YELLOW : GREEN)}});
+    string right = "uptime " + clock(up) + " ";
+    size_t used = 0;
+    for (auto const &s : left)
+      used += cols(s.text);
+    if (used + cols(right) < width)
+      left.push_back({string(width - used - cols(right), ' ') + right, DIM});
+    rows.push_back(left);
+
+    rows.push_back(section("Endpoints", width));
+    for (auto const &[label, value] : _endpoints) {
+      string l = "  " + label;
+      l.append(label.size() < 18 ? 18 - label.size() : 0, ' ');
+      rows.push_back({{l, DIM}, {" " + value, ""}});
+    }
+
+    rows.push_back(section("Agents connect to", width));
+    if (!_entries.empty()) {
+      auto const &e = _entries[_current];
+      Row r{{"  " + e.url, BOLD}};
+      if (!e.kind.empty())
+        r.push_back({" (" + e.kind + ")", DIM});
+      r.push_back({"   N: next", DIM});
+      rows.push_back(r);
+    }
+
+    if (_show_traffic) {
+    rows.push_back(section(_stats ? "Traffic (" + _stats_time.substr(1, 19) + ")"
+                                  : "Traffic",
+                           width));
+    if (!_stats) {
+      rows.push_back({{"  sampling the proxy counters...", DIM}});
+    } else {
+      auto num = [](uint64_t v) {
+        char b[32];
+        snprintf(b, sizeof b, "%16llu", (unsigned long long)v);
+        return string(b);
+      };
+      rows.push_back({{string(15, ' ') + "        FRONTEND         BACKEND", BOLD}});
+      static const char *labels[] = {"Messages in:", "Bytes in:",
+                                     "Messages out:", "Bytes out:"};
+      for (int i = 0; i < 4; ++i) {
+        string l = "  " + string(labels[i]);
+        l.append(15 - min<size_t>(15, l.size()), ' ');
+        rows.push_back({{l, i < 2 ? GREEN : YELLOW},
+                        {num((*_stats)[i]) + num((*_stats)[i + 4]), ""}});
+      }
+    }
+    } // _show_traffic
+
+    rows.push_back(section("Log", width));
+    Row footer{{" ", ""}};
+    for (auto const &[key, what] : vector<pair<string, string>>{
+             {"P", "pause"}, {"R", "resume"}, {"I", "traffic"}, {"N", "next URL"},
+#ifndef _WIN32
+             {"X", "restart & reload"},
+#endif
+             {"Q", "quit"}, {"Ctrl-C", "immediate exit"}}) {
+      footer.push_back({key, BOLD});
+      footer.push_back({" " + what + "  ", DIM});
+    }
+    const size_t log_rows = max<size_t>(3, height > rows.size() + 1 ? height - rows.size() - 1 : 0);
+    for (size_t i = _lines.size() > log_rows ? _lines.size() - log_rows : 0;
+         i < _lines.size(); ++i) {
+      auto const &l = _lines[i];
+      rows.push_back({{" " + l.text, l.severity == Severity::Error  ? RED
+                                       : l.severity == Severity::Warn ? YELLOW
+                                       : l.severity == Severity::Ok   ? GREEN
+                                                                      : ""}});
+    }
+    // Never taller than the screen: the footer stays, the middle goes.
+    if (rows.size() + 1 > height)
+      rows.erase(rows.begin() + (height > 1 ? height - 1 : 0), rows.end());
+    while (rows.size() + 1 < height)
+      rows.push_back({});
+    rows.push_back(footer);
+
+    string frame = "\x1b[H";
+    for (size_t i = 0; i < rows.size(); ++i)
+      frame += render(rows[i], width) + "\x1b[K" + (i + 1 < rows.size() ? "\r\n" : "");
+    cout << frame << "\x1b[J" << flush;
   }
 
   std::mutex _mutex;
   bool _active = false;
+  string _version = LIB_VERSION, _room;
+  vector<pair<string, string>> _endpoints;
   vector<Entry> _entries;
   size_t _current = 0;
+  bool _paused = false;
+  bool _show_traffic = false;
+  optional<array<uint64_t, 8>> _stats;
+  string _stats_time;
+  deque<Line> _lines;    // for the Log section
+  vector<Line> _pending; // shown on the frame, to print at hide()
+  chrono::steady_clock::time_point _started = chrono::steady_clock::now();
+  long long _drawn_second = -1;
 };
 
-Console console;
+Dashboard dashboard;
 
 // (A local htonll() used to live here, for Linux only, where the platform
 // headers do not provide one. Nothing byte-swaps the proxy statistics any
@@ -562,7 +960,7 @@ private:
         reported = total;
         next_summary = chrono::steady_clock::now() + SUMMARY_PERIOD;
         if (exhausted) {
-          console.log(cerr) << fg::red << timestamp()
+          dashboard.log(cerr) << fg::red << timestamp()
                << "OUT OF FILE DESCRIPTORS: refused an agent connection on "
                << address << "." << fg::reset << endl
                << fg::yellow
@@ -580,7 +978,7 @@ private:
                << "  file, or LimitNOFILE= in the systemd unit, to raise it."
                << fg::reset << endl;
         } else {
-          console.log(cerr) << fg::red << timestamp()
+          dashboard.log(cerr) << fg::red << timestamp()
                << "Refused an inbound connection on " << address << ": "
                << std::strerror(last_errno) << fg::reset << endl;
         }
@@ -590,7 +988,7 @@ private:
       // Already explained once. Roll the rest up rather than let a listener
       // that re-fires continuously scroll the explanation off the screen.
       if (chrono::steady_clock::now() >= next_summary) {
-        console.log(cerr) << fg::red << timestamp() << fresh
+        dashboard.log(cerr) << fg::red << timestamp() << fresh
              << " more inbound connection(s) refused"
              << (exhausted ? " (out of file descriptors)" : "") << fg::reset
              << endl;
@@ -663,7 +1061,7 @@ std::set<std::string> load_editor_keys(filesystem::path const &dir) {
     while (!line.empty() && isspace(static_cast<unsigned char>(line.back())))
       line.pop_back();
     if (line.size() != 40) {
-      cerr << fg::yellow << "Ignoring editor key " << entry.path().string()
+      dashboard.log(cerr) << fg::yellow << "Ignoring editor key " << entry.path().string()
            << " (not a Z85 public key)" << fg::reset << endl;
       continue;
     }
@@ -717,27 +1115,27 @@ int main(int argc, char **argv) {
   try {
     options_parsed = options.parse(argc, argv);
   } catch (const cxxopts::exceptions::exception &e) {
-    cerr << fg::red << "Error parsing command line: " << e.what() 
+    dashboard.log(cerr) << fg::red << "Error parsing command line: " << e.what() 
          << style::reset << endl;
     std::exit(EXIT_FAILURE);
   }
 
   if (options_parsed.unmatched().size() > 0) {
-    cerr << fg::red << "Unrecognized command line options: ";
+    dashboard.log(cerr) << fg::red << "Unrecognized command line options: ";
     for (const auto &opt : options_parsed.unmatched()) {
-      cerr << opt << " ";
+      dashboard.log(cerr) << opt << " ";
     }
-    cerr << fg::reset << endl;
+    dashboard.log(cerr) << fg::reset << endl;
     std::exit(EXIT_FAILURE);
   }
 
   if (options_parsed.count("help")) {
-    cout << argv[0] << " ver. " << Mads::version() << endl;
-    cout << options.help() << endl;
+    dashboard.log(cout) << argv[0] << " ver. " << Mads::version() << endl;
+    dashboard.log(cout) << options.help() << endl;
     return 0;
   }
   if (options_parsed.count("version")) {
-    cout << Mads::version() << endl;
+    dashboard.log(cout) << Mads::version() << endl;
     return 0;
   }
   if (options_parsed.count("daemon")) {
@@ -757,8 +1155,11 @@ int main(int argc, char **argv) {
   filesystem::path executable(argv[0]);
   string name = executable.stem().string();
   name = name.substr(name.find_last_of("-") + 1);
-  cout << style::italic << "Reading settings from " << style::bold
+  dashboard.log(cout) << style::italic << "Reading settings from " << style::bold
        << settings_path << " [" << name << "]" << style::reset << endl;
+  dashboard.header(LIB_VERSION, service_info.room);
+  dashboard.endpoint("Settings file", settings_path);
+  dashboard.endpoint("Security", "off (plain tcp)");
 
   // Configurations
   toml::table config;
@@ -767,7 +1168,7 @@ int main(int argc, char **argv) {
     config = toml::parse_file(settings_path);
     static_cast<void>(config);
   } catch (const toml::parse_error &err) {
-    cout << fg::red << "Cannot open settings file " << settings_path << ", "
+    dashboard.log(cout) << fg::red << "Cannot open settings file " << settings_path << ", "
          << err << style::reset << endl;
     std::exit(EXIT_FAILURE);
   }
@@ -777,13 +1178,14 @@ int main(int argc, char **argv) {
     if (options_parsed.count("keys_dir") != 0) {
       keys_dir = filesystem::path(options_parsed["keys_dir"].as<string>());
     }
-    cout << fg::cyan << "Enabling CURVE encryption for broker sockets" << endl
+    dashboard.log(cout) << fg::cyan << "Enabling CURVE encryption for broker sockets" << endl
          << "  Searching for keys in " << style::bold << keys_dir.string()
          << style::reset << endl
          << fg::cyan << "  Broker key name: " << style::bold << key_name
          << "[.key|.pub]" << fg::reset << endl;
     crypto = true;
     service_info.encrypted = true;
+    dashboard.endpoint("Security", "CURVE, broker key '" + key_name + "'");
   }
 
   unsigned int timecode_fps =
@@ -805,7 +1207,7 @@ int main(int argc, char **argv) {
     if (ep && ep->port_number())
       service_info.ports[role] = *ep->port_number();
     else
-      cerr << fg::yellow << "Not advertising the " << role << " address "
+      dashboard.log(cerr) << fg::yellow << "Not advertising the " << role << " address "
            << address << " (not a tcp address with a numeric port)"
            << fg::reset << endl;
   }
@@ -818,7 +1220,7 @@ int main(int argc, char **argv) {
   // than throw.
   int io_threads = config[name]["io_threads"].value_or(1);
   if (io_threads < 1) {
-    cerr << fg::yellow << "Invalid [broker] io_threads = " << io_threads
+    dashboard.log(cerr) << fg::yellow << "Invalid [broker] io_threads = " << io_threads
          << ", clamping to 1" << fg::reset << endl;
     io_threads = 1;
   }
@@ -845,15 +1247,17 @@ int main(int argc, char **argv) {
   const auto fd_outcome = Mads::detail::apply_fd_limit(fd_plan);
   if (!fd_plan.message.empty()) {
     if (fd_plan.warn)
-      cerr << fg::yellow << fd_plan.message << fg::reset << endl;
+      dashboard.log(cerr) << fg::yellow << fd_plan.message << fg::reset << endl;
     else
-      cout << fd_plan.message << endl;
+      dashboard.log(cout) << fd_plan.message << endl;
   }
   if (!fd_outcome.error.empty()) {
-    cerr << fg::red << "Could not set the open-file limit: "
+    dashboard.log(cerr) << fg::red << "Could not set the open-file limit: "
          << fd_outcome.error << fg::reset << endl;
   }
   const uint64_t fd_soft_limit = fd_outcome.limits.soft;
+  dashboard.endpoint("Runtime", "io_threads " + to_string(io_threads) +
+                                    ", open files " + to_string(fd_soft_limit));
 
   // ZMQ_DEVELOPMENT.md §2.2: off by default. See SubscriptionTable's comment
   // above for the cost this opts into.
@@ -891,7 +1295,7 @@ int main(int argc, char **argv) {
     try {
       curve_auth_ptr->fetch_public_keys(keys_dir);
     } catch (const runtime_error &e) {
-      cerr << fg::red << "Error setting up CURVE authentication: " << e.what()
+      dashboard.log(cerr) << fg::red << "Error setting up CURVE authentication: " << e.what()
            << fg::reset << endl;
       curve_auth_ptr = nullptr;
       frontend.close();
@@ -903,7 +1307,7 @@ int main(int argc, char **argv) {
       curve_auth_ptr->setup_curve_server(frontend, key_name);
       curve_auth_ptr->setup_curve_server(backend, key_name);
     } catch (const runtime_error &e) {
-      cerr << fg::red << e.what() << fg::reset << endl;
+      dashboard.log(cerr) << fg::red << e.what() << fg::reset << endl;
       curve_auth_ptr = nullptr;
       frontend.close();
       backend.close();
@@ -935,7 +1339,7 @@ int main(int argc, char **argv) {
   };
   auto report_ipc_warnings = [&]() {
     for (auto const &w : ipc.warnings)
-      cerr << fg::yellow << "ipc: " << w << fg::reset << endl;
+      dashboard.log(cerr) << fg::yellow << "ipc: " << w << fg::reset << endl;
     ipc.warnings.clear();
   };
   report_ipc_warnings();
@@ -949,26 +1353,30 @@ int main(int argc, char **argv) {
   AcceptWatch accept_watch;
 
   try {
-    std::cout << "Binding broker frontend (XSUB) at " << style::bold
+    dashboard.log(cout) << "Binding broker frontend (XSUB) at " << style::bold
               << frontend_address << style::reset << endl;
     accept_watch.watch(frontend, watch_label(frontend_address, ipc.frontend));
     frontend.bind(frontend_address);
     if (Mads::detail::bind_broker_ipc(frontend, ipc.frontend,
                                       frontend_ipc_file, ipc.warnings,
                                       ipc_buffers))
-      std::cout << "Binding broker frontend (XSUB) at " << style::bold
+      dashboard.log(cout) << "Binding broker frontend (XSUB) at " << style::bold
                 << ipc.frontend << style::reset << endl;
-    std::cout << "Binding broker backend (XPUB) at " << style::bold
+    dashboard.log(cout) << "Binding broker backend (XPUB) at " << style::bold
               << backend_address << style::reset << endl;
     accept_watch.watch(backend, watch_label(backend_address, ipc.backend));
     backend.bind(backend_address);
     if (Mads::detail::bind_broker_ipc(backend, ipc.backend, backend_ipc_file,
                                       ipc.warnings, ipc_buffers))
-      std::cout << "Binding broker backend (XPUB) at " << style::bold
+      dashboard.log(cout) << "Binding broker backend (XPUB) at " << style::bold
                 << ipc.backend << style::reset << endl;
     report_ipc_warnings();
+    dashboard.endpoint("Frontend (XSUB)", frontend_address +
+                                              (ipc.frontend.empty() ? "" : "  " + ipc.frontend));
+    dashboard.endpoint("Backend (XPUB)", backend_address +
+                                             (ipc.backend.empty() ? "" : "  " + ipc.backend));
   } catch (const zmq::error_t &e) {
-    cerr << fg::red << "ZMQ error, could not bind broker sockets: "
+    dashboard.log(cerr) << fg::red << "ZMQ error, could not bind broker sockets: "
          << explain_zmq_error(e, fd_soft_limit) << fg::reset << endl;
     remove_ipc_files();
     std::exit(EXIT_FAILURE);
@@ -1014,7 +1422,7 @@ int main(int argc, char **argv) {
   // handshake to secure.
   int settings_workers = config[name]["settings_workers"].value_or(2);
   if (settings_workers < 1) {
-    cerr << fg::yellow << "Invalid [broker] settings_workers = "
+    dashboard.log(cerr) << fg::yellow << "Invalid [broker] settings_workers = "
          << settings_workers << ", clamping to 1" << fg::reset << endl;
     settings_workers = 1;
   }
@@ -1031,13 +1439,18 @@ int main(int argc, char **argv) {
       settings_router, ipc.settings, settings_ipc_file, ipc.warnings,
       ipc_buffers);
   accept_watch.start_reporting(fd_soft_limit, daemon);
-  cout << "Binding broker shared settings (ROUTER, " << settings_workers
+  dashboard.log(cout) << "Binding broker shared settings (ROUTER, " << settings_workers
        << " worker" << (settings_workers == 1 ? "" : "s") << ") at "
        << style::bold << settings_address << style::reset << endl;
   if (settings_ipc_bound)
-    cout << "Binding broker shared settings (ROUTER) at " << style::bold
+    dashboard.log(cout) << "Binding broker shared settings (ROUTER) at " << style::bold
          << ipc.settings << style::reset << endl;
   report_ipc_warnings();
+  dashboard.endpoint("Settings (ROUTER)",
+                     settings_address +
+                         (settings_ipc_bound ? "  " + ipc.settings : "") + "  (" +
+                         to_string(settings_workers) + " worker" +
+                         (settings_workers == 1 ? "" : "s") + ")");
 
   // Reply to the `transport` command, fixed once the binds above are done:
   // an endpoint that failed to bind has been cleared, so it is not offered.
@@ -1063,7 +1476,7 @@ int main(int argc, char **argv) {
     settings_proxy_controller.connect(
         "inproc://mads-broker-settings-proxy-ctrl");
   } catch (const zmq::error_t &e) {
-    cerr << fg::red << "ZMQ error, could not create broker settings sockets: "
+    dashboard.log(cerr) << fg::red << "ZMQ error, could not create broker settings sockets: "
          << explain_zmq_error(e, fd_soft_limit) << fg::reset << endl;
     std::exit(EXIT_FAILURE);
   }
@@ -1088,7 +1501,7 @@ int main(int argc, char **argv) {
     if (edit_ep && edit_ep->is_tcp() && edit_ep->port_number())
       edit_port = *edit_ep->port_number();
     else
-      cerr << fg::yellow << "remote_edit: edit_address " << edit_address
+      dashboard.log(cerr) << fg::yellow << "remote_edit: edit_address " << edit_address
            << " is not a tcp address with a numeric port; no tcp listener"
            << fg::reset << endl;
 
@@ -1100,7 +1513,7 @@ int main(int argc, char **argv) {
         if (!edit_ipc.empty()) {
           auto e = Mads::detail::parse_endpoint(edit_ipc);
           if (!e || !e->is_ipc()) {
-            cerr << fg::yellow << "remote_edit: edit_ipc = \"" << edit_ipc
+            dashboard.log(cerr) << fg::yellow << "remote_edit: edit_ipc = \"" << edit_ipc
                  << "\" is not an ipc:// endpoint; ignored" << fg::reset
                  << endl;
             edit_ipc.clear();
@@ -1110,13 +1523,14 @@ int main(int argc, char **argv) {
               edit_port, filesystem::path(config[name]["ipc_dir"].value_or(""s)));
         }
       } catch (const exception &e) {
-        cerr << fg::yellow << "remote_edit: no ipc endpoint: " << e.what()
+        dashboard.log(cerr) << fg::yellow << "remote_edit: no ipc endpoint: " << e.what()
              << fg::reset << endl;
         edit_ipc.clear();
       }
       if (!edit_ipc.empty()) {
         edit_listeners.push_back({edit_ipc, std::nullopt});
-        cout << "Settings editing on " << style::bold << edit_ipc
+        dashboard.endpoint("Editing (ipc)", edit_ipc + "  (this host only)");
+        dashboard.log(cout) << "Settings editing on " << style::bold << edit_ipc
              << style::reset << style::italic << " (ipc, this host only)"
              << style::reset << endl;
       }
@@ -1135,9 +1549,9 @@ int main(int argc, char **argv) {
         vector<string> password_warnings;
         verifier = Remote::read_password_file(password_file, &password_warnings);
         for (auto const &w : password_warnings)
-          cerr << fg::yellow << "remote_edit: " << w << fg::reset << endl;
+          dashboard.log(cerr) << fg::yellow << "remote_edit: " << w << fg::reset << endl;
       } catch (const exception &e) {
-        cerr << fg::red << "remote_edit: unusable password file "
+        dashboard.log(cerr) << fg::red << "remote_edit: unusable password file "
              << password_file.string() << ": " << e.what()
              << " -- treating it as no password" << fg::reset << endl;
       }
@@ -1145,15 +1559,17 @@ int main(int argc, char **argv) {
     if (edit_port > 0) {
       const bool password = verifier.has_value();
       if (!crypto && !password) {
-        cerr << fg::yellow
+        dashboard.log(cerr) << fg::yellow
              << "remote_edit over tcp needs --crypto or an editing password "
                 "(mads ini --set-password): serving the ipc endpoint only"
              << fg::reset << endl;
       } else if (!crypto) {
         // Development mode: no CURVE, the password alone gates the listener.
         edit_listeners.push_back({edit_address, std::nullopt, true});
+        dashboard.endpoint("Editing (tcp)",
+                           edit_address + "  (password, NOT encrypted)");
         service_info.ports[Remote::kDiscoveryPortName] = edit_port;
-        cerr << fg::yellow << "Settings editing on " << style::bold
+        dashboard.log(cerr) << fg::yellow << "Settings editing on " << style::bold
              << edit_address << style::reset << fg::yellow
              << " (password, NOT encrypted: development/trusted networks only)"
              << fg::reset << endl;
@@ -1176,12 +1592,12 @@ int main(int argc, char **argv) {
                       filesystem::perms::others_exec,
                   filesystem::perm_options::replace, ec);
 #endif
-              cout << fg::yellow << "Created the editors folder "
+              dashboard.log(cout) << fg::yellow << "Created the editors folder "
                    << editors_dir.string()
                    << ": copy editor public keys (*.pub) there and restart the broker"
                    << fg::reset << endl;
             } else if (ec) {
-              cerr << fg::yellow << "Cannot create the editors folder "
+              dashboard.log(cerr) << fg::yellow << "Cannot create the editors folder "
                    << editors_dir.string() << ": " << ec.message()
                    << fg::reset << endl;
             }
@@ -1194,7 +1610,7 @@ int main(int argc, char **argv) {
             kind = "bus";
           }
           if (allowed.empty()) {
-            cerr << fg::yellow << "remote_edit: no editor keys (*.pub) in "
+            dashboard.log(cerr) << fg::yellow << "remote_edit: no editor keys (*.pub) in "
                  << editors_dir.string() << "; no tcp listener" << fg::reset
                  << endl;
           } else {
@@ -1205,7 +1621,12 @@ int main(int argc, char **argv) {
                 {edit_address, Remote::ServerKeys{kp.public_key, kp.secret_key},
                  password});
             service_info.ports[Remote::kDiscoveryPortName] = edit_port;
-            cout << "Settings editing on " << style::bold << edit_address
+            dashboard.endpoint("Editing (tcp)",
+                               edit_address + "  (CURVE, " +
+                                   to_string(allowed.size()) + " " + kind +
+                                   " key" + (allowed.size() == 1 ? "" : "s") +
+                                   (password ? ", password" : "") + ")");
+            dashboard.log(cout) << "Settings editing on " << style::bold << edit_address
                  << style::reset << style::italic << " (CURVE, "
                  << allowed.size() << " " << kind << " key"
                  << (allowed.size() == 1 ? "" : "s")
@@ -1213,14 +1634,14 @@ int main(int argc, char **argv) {
                  << endl;
           }
         } catch (const exception &e) {
-          cerr << fg::yellow << "remote_edit: no tcp listener: " << e.what()
+          dashboard.log(cerr) << fg::yellow << "remote_edit: no tcp listener: " << e.what()
                << fg::reset << endl;
         }
       }
     }
 
     if (edit_listeners.empty()) {
-      cerr << fg::yellow << "remote_edit is on but no endpoint is available"
+      dashboard.log(cerr) << fg::yellow << "remote_edit is on but no endpoint is available"
            << fg::reset << endl;
     } else {
       edit_service = make_unique<Remote::EditService>(
@@ -1229,7 +1650,7 @@ int main(int argc, char **argv) {
               std::max<int64_t>(0, config[name]["edit_backups"].value_or(10))),
           verifier);
       edit_service->log = [&](string const &line) {
-        console.log(cout) << fg::yellow << timestamp()
+        dashboard.log(cout) << fg::yellow << timestamp()
              << "Settings editing: " << line << fg::reset << endl;
       };
     }
@@ -1267,7 +1688,7 @@ int main(int argc, char **argv) {
       content.addstr(Mads::version());
       if (msg.recv(settings)) {
         if (msg.size() < 2) {
-          console.log(cerr) << fg::red << timestamp()
+          dashboard.log(cerr) << fg::red << timestamp()
                << "Received malformed message from agent, "
                << "expected at least 2 parts" << fg::reset << endl;
           continue;
@@ -1280,12 +1701,12 @@ int main(int argc, char **argv) {
         }
         if (cmd == "settings") {
           if (!Mads::check_version(agent_version)) {
-            console.log(cerr) << fg::red << timestamp()
+            dashboard.log(cerr) << fg::red << timestamp()
                  << "Received settings request from agent with wrong version: "
                  << agent_version << " (vs. " << Mads::version() << ")" << fg::reset
                  << endl;
           } else {
-            console.log(cout) << timestamp()
+            dashboard.log(cout) << timestamp()
                  << "Sending settings to agent " << agent_name << " ("
                  << agent_version << ")" << endl;
             shared_ptr<const toml::table> current_config;
@@ -1301,14 +1722,14 @@ int main(int argc, char **argv) {
                 attachment_path = Mads::exec_dir(attachment_path);
               }
               if (!filesystem::exists(attachment_path)) {
-                console.log(cerr) << fg::red << timestamp()
+                dashboard.log(cerr) << fg::red << timestamp()
                      << "Attachment path does not exist: " << attachment_path
                      << fg::reset << endl;
               } else {
                 ifstream attachment_file(attachment_path,
                                          ios::in | ios::binary);
                 stringstream attachment_content;
-                console.log(cout) << fg::yellow << timestamp()
+                dashboard.log(cout) << fg::yellow << timestamp()
                      << "  Attaching binary object: " << style::bold
                      << attachment_path << " ("
                      << filesystem::file_size(attachment_path) << " bytes)"
@@ -1347,7 +1768,7 @@ int main(int argc, char **argv) {
           // bare [Mads::version()], which agents read as "no ipc offered".
           settings.send(zmq::buffer(transport_reply), zmq::send_flags::none);
         } else {
-          console.log(cerr) << fg::yellow << timestamp()
+          dashboard.log(cerr) << fg::yellow << timestamp()
                << "Got unexpected command " << cmd << fg::reset << endl;
           content.send(settings);
         }
@@ -1360,7 +1781,7 @@ int main(int argc, char **argv) {
       // interleave into an unreadable braid of half-messages.
       const string report = timestamp() + "Settings worker stopped: " +
                             explain_zmq_error(e, fd_soft_limit);
-      console.log(cerr) << fg::red << report << fg::reset << endl;
+      dashboard.log(cerr) << fg::red << report << fg::reset << endl;
       // A worker that cannot open its socket leaves agents unable to fetch
       // settings at all, so this is a startup failure, not a degraded mode.
       Mads::Runtime::stop_process();
@@ -1373,8 +1794,9 @@ int main(int argc, char **argv) {
     settings_worker_threads.emplace_back(settings_worker_body);
   }
 
-  cout << "Timecode FPS: " << style::bold << timecode_fps << style::reset
+  dashboard.log(cout) << "Timecode FPS: " << style::bold << timecode_fps << style::reset
        << endl;
+  dashboard.endpoint("Timecode", to_string(timecode_fps) + " fps");
 
   // In daemon mode, install the shutdown signal handlers before the (possibly
   // slow) discovery startup so that a SIGINT/SIGTERM arriving during early
@@ -1390,16 +1812,19 @@ int main(int argc, char **argv) {
   // (e.g. the network is not up yet) it returns false and, unless quiet, prints
   // a warning. start_advertising() throws when there are no broadcast-capable
   // interfaces, which is exactly the situation we want to keep retrying from.
+  dashboard.endpoint("Discovery", "disabled");
   auto try_start_discovery = [&](bool quiet) -> bool {
     try {
       discovery_service.start_advertising(service_info, discovery_interval);
-      cout << "Advertising service on UDP discovery port " << MADS_SERVICE_PORT
+      dashboard.endpoint("Discovery", "UDP port " + to_string(MADS_SERVICE_PORT) +
+                                          ", room '" + service_info.room + "'");
+      dashboard.log(cout) << "Advertising service on UDP discovery port " << MADS_SERVICE_PORT
            << " with room name '" << style::bold << service_info.room
            << style::reset << "'" << endl;
       return true;
     } catch (const runtime_error &e) {
       if (!quiet) {
-        cerr << fg::red << "Error starting service discovery: " << e.what()
+        dashboard.log(cerr) << fg::red << "Error starting service discovery: " << e.what()
              << endl;
       }
       return false;
@@ -1414,7 +1839,7 @@ int main(int argc, char **argv) {
   constexpr auto discovery_retry_interval = std::chrono::seconds(5);
   if (!try_start_discovery(false)) {
     if (daemon) {
-      cerr << style::bold << "Will keep retrying every "
+      dashboard.log(cerr) << style::bold << "Will keep retrying every "
            << discovery_retry_interval.count() << "s in the background"
            << style::reset << fg::reset << endl;
       discovery_retry_thread = thread([&, discovery_retry_interval]() {
@@ -1434,7 +1859,7 @@ int main(int argc, char **argv) {
         }
       });
     } else {
-      cerr << style::bold << "Service discovery will be disabled" << style::reset
+      dashboard.log(cerr) << style::bold << "Service discovery will be disabled" << style::reset
            << fg::reset << endl;
     }
   }
@@ -1443,15 +1868,15 @@ int main(int argc, char **argv) {
   if (!daemon) {
   } else if (auto ep = Mads::detail::parse_endpoint(settings_address);
       ep && ep->port_number()) {
-    cout << "Settings are provided on " << style::bold
+    dashboard.log(cout) << "Settings are provided on " << style::bold
          << "tcp://127.0.0.1:" << ep->port << style::reset << style::italic
          << " (loopback)" << style::reset << endl;
   } else {
-    cout << "Settings are provided on " << style::bold << settings_address
+    dashboard.log(cout) << "Settings are provided on " << style::bold << settings_address
          << style::reset << endl;
   }
   if (daemon && !ipc.settings.empty()) {
-    cout << "Settings are provided on " << style::bold << ipc.settings
+    dashboard.log(cout) << "Settings are provided on " << style::bold << ipc.settings
          << style::reset << style::italic << " (ipc, this host only)"
          << style::reset << endl;
   }
@@ -1463,7 +1888,7 @@ int main(int argc, char **argv) {
         Remote::serve(context, edit_listeners, *edit_service, edit_running);
       } catch (const exception &e) {
         // Never fatal: the broker carries on without the editing service.
-        console.log(cerr) << fg::red << timestamp()
+        dashboard.log(cerr) << fg::red << timestamp()
              << "Settings editing unavailable: " << e.what() << fg::reset
              << endl;
       }
@@ -1475,7 +1900,7 @@ int main(int argc, char **argv) {
     string ini_tmp = "";
     settings_watcher.watch([&](const std::string &file_name) {
       // One Log for the whole report, so the footer is redrawn once.
-      auto report = console.log(cout);
+      auto report = dashboard.log(cout);
       report << fg::yellow << timestamp() << "Reloading settings "
              << file_name << "... ";
       ini_tmp = read_settings_file(settings_path);
@@ -1496,7 +1921,7 @@ int main(int argc, char **argv) {
   });
 
   if (daemon) {
-    cout << fg::yellow
+    dashboard.log(cout) << fg::yellow
 #ifndef _WIN32
          << "Running as daemon with PID " << getpid()
 #else
@@ -1522,7 +1947,7 @@ int main(int argc, char **argv) {
       this_thread::sleep_for(200ms);
     }
 
-    cout << fg::green << "Shutdown requested, stopping proxy..." << fg::reset
+    dashboard.log(cout) << fg::green << "Shutdown requested, stopping proxy..." << fg::reset
          << endl;
     steer(controller, "TERMINATE");
     proxy_thread.join();
@@ -1571,7 +1996,7 @@ int main(int argc, char **argv) {
 
     // The footer starts with the loopback URL (as the startup line used to
     // say), then cycles through every address settings_urls() knows.
-    vector<Console::Entry> footer;
+    vector<Dashboard::Entry> footer;
     if (auto ep = Mads::detail::parse_endpoint(settings_address);
         ep && ep->port_number())
       footer.push_back({"tcp://127.0.0.1:" + ep->port, "loopback"});
@@ -1584,11 +2009,48 @@ int main(int argc, char **argv) {
 
     thread(proxy, ref(frontend), ref(backend), ref(controlled), capture_ref)
         .detach();
-    console.show(footer);
+    dashboard.show(footer);
+
+    // Samples the proxy counters into the Traffic section (or, without the
+    // dashboard, prints them): on the I key and, while the section is
+    // shown, once a second.
+    auto sample_traffic = [&]() {
+      auto msg = steer(controller, "STATISTICS");
+      // zmq_proxy_steerable() writes each counter as a NATIVE-endian
+      // uint64_t, so these are read straight out with no byte-order
+      // conversion. (Until the cppzmq migration this went through zmqpp's
+      // message::get<uint64_t>(), which applied ntohll() to every integer
+      // part it read; the htonll() that used to wrap each value here was
+      // undoing that, not converting anything. Both are gone -- applying
+      // only one of the two swaps prints 19-digit garbage.)
+      vector<uint64_t> stats;
+      for (size_t i = 0; i < msg.size(); i++) {
+        uint64_t v = 0;
+        const size_t n =
+            msg.at(i).size() < sizeof(v) ? msg.at(i).size() : sizeof(v);
+        std::memcpy(&v, msg.at(i).data(), n);
+        stats.push_back(v);
+      }
+      if (stats.size() < 8) {
+        dashboard.log(cerr) << fg::red << "Broker returned " << stats.size()
+             << " statistics counters, expected 8" << fg::reset << endl;
+        return;
+      }
+      array<uint64_t, 8> counters;
+      copy(stats.begin(), stats.begin() + 8, counters.begin());
+      dashboard.traffic(counters);
+    };
+    auto next_sample = chrono::steady_clock::now();
 
     while (running) {
       zmq::multipart_t msg;
       char c = getch();
+      dashboard.tick();
+      if (dashboard.traffic_shown() &&
+          chrono::steady_clock::now() >= next_sample) {
+        sample_traffic();
+        next_sample = chrono::steady_clock::now() + 1s;
+      }
       if (c == '\0')
         continue;
       switch (c) {
@@ -1622,64 +2084,32 @@ int main(int argc, char **argv) {
       case 'r':
       case 'R':
         msg = steer(controller, "PAUSE"); // -> state = active
-        console.log(cout) << "Resuming operation" << endl;
+        dashboard.paused(false);
+        dashboard.log(cout) << "Resuming operation" << endl;
         break;
       case 'p':
       case 'P':
         msg = steer(controller, "RESUME"); // -> state = paused
-        console.log(cout) << "Pausing operation" << endl;
+        dashboard.paused(true);
+        dashboard.log(cout) << "Pausing operation" << endl;
         break;
       case 'i':
-      case 'I': {
-        msg = steer(controller, "STATISTICS");
-        // zmq_proxy_steerable() writes each counter as a NATIVE-endian
-        // uint64_t, so these are read straight out with no byte-order
-        // conversion. (Until the cppzmq migration this went through zmqpp's
-        // message::get<uint64_t>(), which applied ntohll() to every integer
-        // part it read; the htonll() that used to wrap each value here was
-        // undoing that, not converting anything. Both are gone -- applying
-        // only one of the two swaps prints 19-digit garbage.)
-        vector<uint64_t> stats;
-        for (size_t i = 0; i < msg.size(); i++) {
-          uint64_t v = 0;
-          const size_t n =
-              msg.at(i).size() < sizeof(v) ? msg.at(i).size() : sizeof(v);
-          std::memcpy(&v, msg.at(i).data(), n);
-          stats.push_back(v);
-        }
-        if (stats.size() < 8) {
-          console.log(cerr) << fg::red << "Broker returned " << stats.size()
-               << " statistics counters, expected 8" << fg::reset << endl;
-          break;
-        }
-        // Wide enough for a 20-digit uint64_t, so two large counters can
-        // never run together into one unreadable number.
-        constexpr int STAT_W = 22;
-        auto out = console.log(cout);
-        out << setw(13) << " " << style::bold << setw(STAT_W) << "FRONTEND"
-             << setw(STAT_W) << "BACKEND" << style::reset << endl;
-        out << fg::green << setw(13) << "Messages in:" << setw(STAT_W)
-             << stats[0] << setw(STAT_W) << stats[4] << fg::reset << endl;
-        out << fg::green << setw(13) << "Bytes in:" << setw(STAT_W)
-             << stats[1] << setw(STAT_W) << stats[5] << fg::reset << endl;
-        out << fg::yellow << setw(13) << "Messages out:" << setw(STAT_W)
-             << stats[2] << setw(STAT_W) << stats[6] << fg::reset << endl;
-        out << fg::yellow << setw(13) << "Bytes out:" << setw(STAT_W)
-             << stats[3] << setw(STAT_W) << stats[7] << fg::reset << endl;
+      case 'I':
+        if (!dashboard.active() || dashboard.toggle_traffic())
+          sample_traffic();
         break;
-      }
       case 'n':
       case 'N':
-        console.next();
+        dashboard.next();
         break;
       default:
         break;
       }
     }
 
-    console.hide();
+    dashboard.hide();
     discovery_service.stop_advertising();
-    cout << fg::green << "Closing sockets..." << fg::reset << endl;
+    dashboard.log(cout) << fg::green << "Closing sockets..." << fg::reset << endl;
     // Before the context closes, and before a possible execv() below.
     stop_edit_service();
     running = false;
@@ -1706,7 +2136,7 @@ int main(int argc, char **argv) {
     context.close();
     remove_ipc_files();
     if (reload) {
-      cout << fg::yellow << "Restarting..." << fg::reset << endl;
+      dashboard.log(cout) << fg::yellow << "Restarting..." << fg::reset << endl;
 #ifdef _WIN32
       relaunch();
 #else
