@@ -260,5 +260,8 @@ Read this before upgrading from 2.5.x.
 - **Docs:** new man page **mads-ini**(1); ipc, shared-memory and doctor
   sections in the broker, agent, doctor and plugin pages; a remote-editing
   section in CRYPTO.md.
+- **VERSION OVERRIDE**: set `MADS_FAKE_VERSION` to a string like `v2.5.0` to
+  override the version check in `Mads::check_version()` and `mads doctor` (for
+  testing only).
 
 Changes up to v2.5.x: see CHANGES_v2.md.
