@@ -323,7 +323,7 @@ static std::optional<json> github_get_json(
       client.set_path(path);
       for (auto const &[key, value] : queries)
         client.add_query_pair(key, value);
-      client.set_user_agent("MADS" LIB_VERSION);
+      client.set_user_agent("MADS" + Mads::version());
       return json::parse(client.get().body);
     } catch (const json::exception &e) {
       cerr << "Error fetching info, retry " << i << "/" << n << endl;

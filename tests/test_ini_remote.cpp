@@ -72,10 +72,10 @@ struct TempSettings {
   }
 };
 
-// [LIB_VERSION, command, "" (no auth), args...] from command, args...
+// [Mads::version(), command, "" (no auth), args...] from command, args...
 std::vector<std::string> req(std::vector<std::string> frames) {
   frames.insert(frames.begin() + 1, "");
-  frames.insert(frames.begin(), LIB_VERSION);
+  frames.insert(frames.begin(), Mads::version());
   return frames;
 }
 
@@ -86,7 +86,7 @@ TEST_CASE("EditService get returns the text and its etag", "[ini][remote]") {
   EditService svc(t.file);
   auto r = svc.handle(req({"get"}));
   REQUIRE(r.size() == 4);
-  CHECK(r[0] == LIB_VERSION);
+  CHECK(r[0] == Mads::version());
   CHECK(r[1] == "ok");
   CHECK(r[2] == content_etag("[broker]\nport = 1\n"));
   CHECK(r[3] == "[broker]\nport = 1\n");
@@ -184,7 +184,7 @@ TEST_CASE("EditService info reports the file", "[ini][remote]") {
   CHECK(j["path"] == t.file.string());
   CHECK(j["size"] == 18);
   CHECK(j["etag"] == content_etag("[broker]\nport = 1\n"));
-  CHECK(j["version"] == LIB_VERSION);
+  CHECK(j["version"] == Mads::version());
   const std::string mtime = j["mtime"];
   CHECK(mtime.size() == 20);
   CHECK(mtime.back() == 'Z');
@@ -287,7 +287,7 @@ struct Client {
     std::string proof(32, '\0');
     for (int i = 0; i < 32; ++i)
       proof[i] = static_cast<char>(b.secret.client_key[i] ^ sig[i]);
-    b.request = {LIB_VERSION, command, server_nonce + client_nonce + proof};
+    b.request = {Mads::version(), command, server_nonce + client_nonce + proof};
     b.request.insert(b.request.end(), args.begin(), args.end());
     return b;
   }
@@ -642,7 +642,7 @@ TEST_CASE("RemoteSource edits the file through the CURVE edit socket",
 
   auto j = nlohmann::json::parse(source.info());
   CHECK(j["etag"] == saved.etag);
-  CHECK(j["version"] == LIB_VERSION);
+  CHECK(j["version"] == Mads::version());
 }
 
 TEST_CASE("RemoteSource with a non-editor key gets no answer",
@@ -945,7 +945,7 @@ TEST_CASE("the client rejects an unsigned reply to an authenticated request",
       zmq::multipart_t out;
       out.addstr(m.at(0).to_string()); // routing id
       out.addstr("");
-      out.addstr(LIB_VERSION);
+      out.addstr(Mads::version());
       out.addstr("ok");
       if (m.at(3).to_string() == "hello") {
         std::string nonce(32, 'n');

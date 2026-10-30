@@ -322,13 +322,13 @@ public:
         "SaveAgentT must be constructible from (std::string, std::string)");
 
     if (parsed.count("help")) {
-      out << argv[0] << " ver. " << LIB_VERSION << std::endl;
+      out << argv[0] << " ver. " << Mads::version() << std::endl;
       out << parser.help() << std::endl;
       return EXIT_SUCCESS;
     }
 
     if (parsed.count("version")) {
-      out << LIB_VERSION << std::endl;
+      out << Mads::version() << std::endl;
       return EXIT_SUCCESS;
     }
 

@@ -170,7 +170,7 @@ bool probe_broker(const std::string &uri, std::chrono::milliseconds timeout,
     socket.connect(uri);
 
     zmq::multipart_t request;
-    request.addstr(std::string(LIB_VERSION));
+    request.addstr(std::string(Mads::version()));
     request.addstr(std::string("settings"));
     request.addstr(std::string("__mads_up_probe__"));
     if (!request.send(socket)) {
@@ -202,7 +202,7 @@ fetch_broker_transport(const std::string &uri, std::chrono::milliseconds timeout
     socket.connect(uri);
 
     zmq::multipart_t request;
-    request.addstr(std::string(LIB_VERSION));
+    request.addstr(std::string(Mads::version()));
     request.addstr(std::string("transport"));
     request.addstr(std::string("__mads_doctor__"));
     if (!request.send(socket)) {
@@ -214,10 +214,10 @@ fetch_broker_transport(const std::string &uri, std::chrono::milliseconds timeout
       socket.close();
       return std::nullopt;
     }
-    // A broker predating the command answers with a bare [LIB_VERSION]:
+    // A broker predating the command answers with a bare [Mads::version()]:
     // report that as an empty reply, "answered, but offers no ipc".
     std::string first = reply.at(0).to_string();
-    if (first == LIB_VERSION || first.empty() || first.front() != '{')
+    if (first == Mads::version() || first.empty() || first.front() != '{')
       first.clear();
     socket.close();
     return first;

@@ -209,14 +209,14 @@ struct TestBroker {
       const std::string cmd = msg.at(1).to_string();
       zmq::multipart_t out;
       if (cmd == "settings") {
-        out.addstr(LIB_VERSION);
+        out.addstr(Mads::version());
         out.addstr(settings_body);
       } else if (cmd == "timecode") {
         out.addstr("0");
       } else if (cmd == TRANSPORT_CMD && !opts.legacy) {
         out.addstr(reply);
       } else {
-        out.addstr(LIB_VERSION); // broker.cpp's "unexpected command" branch
+        out.addstr(Mads::version()); // broker.cpp's "unexpected command" branch
       }
       out.send(settings);
     }
@@ -280,7 +280,7 @@ std::string transport_request(zmq::context_t &ctx, std::string const &uri) {
   req.set(zmq::sockopt::rcvtimeo, 2000);
   req.connect(uri);
   zmq::multipart_t out;
-  out.addstr(LIB_VERSION);
+  out.addstr(Mads::version());
   out.addstr(TRANSPORT_CMD);
   out.addstr("probe");
   out.send(req);

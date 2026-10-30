@@ -6,13 +6,13 @@
 //
 // Wire protocol transcribed from src/agent.cpp query_broker():
 //   Settings round-trip (REQ->REP on one socket, reused for both exchanges):
-//     -> [LIB_VERSION]["settings"][agent_name]                (3 parts)
+//     -> [Mads::version()]["settings"][agent_name]                (3 parts)
 //     <- [broker_version][raw_toml_settings]                  (2 parts), or
 //     <- [broker_version][raw_toml_settings][attachment_bytes] (3 parts)
 //        parts()==3 is the ONLY trigger for attachment handling; anything
 //        else >= 2 parts is accepted with no attachment.
 //   Timecode round-trip (same socket, immediately after):
-//     -> ["v" + LIB_VERSION]["timecode"]                      (2 parts)
+//     -> ["v" + Mads::version()]["timecode"]                      (2 parts)
 //     <- [broker_timecode_as_string]                          (>=1 part;
 //        only get(0) is read, via std::stod)
 //
@@ -55,7 +55,7 @@ public:
   ~FakeBroker() { stop(); }
 
   // --- configuration: set before start(), never mutated afterwards ---
-  std::string settings_version = LIB_VERSION;
+  std::string settings_version = Mads::version();
   std::string settings_body;
   bool with_attachment = false;
   std::string attachment_bytes;
@@ -98,7 +98,7 @@ private:
       } else {
         // Keep the REP socket's strict recv/send alternation intact even for
         // requests this fake broker does not otherwise understand.
-        reply.addstr(std::string(LIB_VERSION));
+        reply.addstr(std::string(Mads::version()));
         reply.addstr(std::string("{}"));
         reply.send(_sock);
       }
@@ -408,7 +408,7 @@ TEST_CASE("init() throws AgentError when the broker reports a mismatched "
   mads_test::RunningGuard guard;
   const uint16_t port = 42205;
   FakeBroker broker(port);
-  broker.settings_version = "v9.9.9"; // != LIB_VERSION_CHECK ("v0.0")
+  broker.settings_version = "v9.9.9"; // != Mads::version()_CHECK ("v0.0")
   broker.settings_body = make_settings_toml("bversion");
   broker.start();
 

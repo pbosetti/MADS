@@ -26,7 +26,7 @@ Author(s): Paolo Bosetti
 #include <string>
 #include <atomic>
 #include <memory>
-
+#include <iostream>
 
 /*
   ____        __ _
@@ -182,8 +182,38 @@ namespace Mads {
 /**
  * @brief Library version.
  *
+ * @return the full version string, e.g. "v1.2.3"
  */
-inline std::string version() { return LIB_VERSION; }
+inline std::string version() { 
+  // if the MADS_FAKE_VERSION environment variable is set, return that instead of the actual version
+  const char *fake_version = std::getenv("MADS_FAKE_VERSION");
+  if (fake_version != nullptr) {
+    return std::string(fake_version);
+  }
+  return LIB_VERSION; 
+}
+
+/**
+ * @brief Version check for the library.
+ *
+ * This function returns the version of the library for checking compatibility.
+ *
+ * @return The version string, without the PATCH component.
+ */
+inline std::string version_check() {
+  const char *fake_version = std::getenv("MADS_FAKE_VERSION");
+  if (fake_version != nullptr) {
+    std::string version_check = fake_version;
+    size_t last_dot = version_check.find_last_of('.');
+    if (last_dot != std::string::npos) {
+      version_check = version_check.substr(0, last_dot);
+      return version_check;
+    } else {
+      throw std::runtime_error("Invalid version string: " + std::string(std::getenv("MADS_FAKE_VERSION")));
+    }
+  }
+  return LIB_VERSION_CHECK;
+}
 
 /**
  * @brief Checks if the given version matches the library version.
@@ -197,7 +227,7 @@ inline bool check_version(const std::string &version) {
   std::string version_cmp;
   if (last_dot != std::string::npos) {
     version_cmp = version.substr(0, last_dot);
-    return version_cmp == LIB_VERSION_CHECK;
+    return version_cmp == version_check();
   } else {
     throw std::runtime_error("Invalid version string: " + version);
   }

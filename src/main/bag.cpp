@@ -308,7 +308,7 @@ int main(int argc, char *argv[]) {
     return 0;
   }
   if (subcommand == "-v" || subcommand == "--version") {
-    cout << LIB_VERSION << endl;
+    cout << Mads::version() << endl;
     return 0;
   }
   if (subcommand == "info")

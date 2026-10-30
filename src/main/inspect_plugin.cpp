@@ -313,7 +313,7 @@ int main(int argc, char *argv[]) {
   auto options_parsed = options.parse(argc, argv);
 
   if (options_parsed.count("help")) {
-    std::cout << argv[0] << " ver. " << LIB_VERSION << std::endl;
+    std::cout << argv[0] << " ver. " << Mads::version() << std::endl;
     std::cout << options.help() << std::endl;
     return 0;
   }

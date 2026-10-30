@@ -7,7 +7,7 @@ Settings command `transport`
 ----------------------------
 Sent by the agent on the settings REQ socket, after `settings`/`timecode`:
 
-  request:  [ LIB_VERSION ][ "transport" ][ agent_name ]
+  request:  [ Mads::version() ][ "transport" ][ agent_name ]
   reply:    [ json text ]                  (one frame, see TransportInfo)
 
 A broker that predates the command answers with an empty frame (the

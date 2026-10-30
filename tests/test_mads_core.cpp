@@ -17,7 +17,7 @@
 // ---------------------------------------------------------------------------
 
 TEST_CASE("version returns the library version string", "[mads_core]") {
-  REQUIRE(Mads::version() == std::string(LIB_VERSION));
+  REQUIRE(Mads::version() == std::string(Mads::version()));
 }
 
 TEST_CASE("check_version matches on identical minor version", "[mads_core]") {

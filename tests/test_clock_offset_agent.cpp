@@ -55,7 +55,7 @@ public:
 
   std::string settings_body;
   // false reproduces an old broker that does not know "clock": the reply
-  // falls into the generic branch and is a bare [LIB_VERSION], exactly as
+  // falls into the generic branch and is a bare [Mads::version()], exactly as
   // src/main/broker.cpp's own "else" branch does today.
   bool clock_supported = true;
 
@@ -74,7 +74,7 @@ private:
       const std::string kind = msg.at(1).to_string();
       zmq::multipart_t reply;
       if (kind == "settings") {
-        reply.addstr(std::string(LIB_VERSION));
+        reply.addstr(std::string(Mads::version()));
         reply.addstr(settings_body);
         reply.send(_sock);
       } else if (kind == "timecode") {
@@ -85,12 +85,12 @@ private:
             Mads::epoch_us(std::chrono::system_clock::now());
         const int64_t t3 =
             Mads::epoch_us(std::chrono::system_clock::now());
-        reply.addstr(std::string(LIB_VERSION));
+        reply.addstr(std::string(Mads::version()));
         reply.addstr(std::to_string(t2));
         reply.addstr(std::to_string(t3));
         reply.send(_sock);
       } else {
-        reply.addstr(std::string(LIB_VERSION));
+        reply.addstr(std::string(Mads::version()));
         reply.send(_sock);
       }
     }
@@ -219,7 +219,7 @@ TEST_CASE("measure_clock_offset() degrades gracefully against a broker that "
   const uint16_t front_port = 44511, back_port = 44512;
   FakeSettingsBroker broker(settings_port);
   broker.settings_body = make_settings_toml("cold", front_port, back_port);
-  broker.clock_supported = false; // bare [LIB_VERSION] reply, < 3 frames
+  broker.clock_supported = false; // bare [Mads::version()] reply, < 3 frames
   broker.start();
 
   Agent a("cold", mads_test::loopback(settings_port));

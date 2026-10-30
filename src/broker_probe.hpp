@@ -50,7 +50,7 @@ struct ProbeCurveKeys {
 /**
  * @brief Probes whether a MADS broker's settings endpoint is up and speaking
  * the MADS wire protocol: connects a REQ socket to `uri`, sends
- * `[LIB_VERSION, "settings", <probe-name>]` and waits up to `timeout` for any
+ * `[Mads::version(), "settings", <probe-name>]` and waits up to `timeout` for any
  * reply. Any protocol-shaped reply counts as success -- this does not try to
  * load or validate settings for a real agent, it only proves the broker is
  * listening and answering. ZeroMQ's own TCP reconnect logic means a single

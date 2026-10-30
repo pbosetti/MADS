@@ -30,8 +30,8 @@ settings file, never served by anything. The service can read and replace
 exactly one file, the broker's own settings file: requests carry no paths.
 
 Protocol: multipart messages, a REQ client talking to a ROUTER server.
-Requests are [LIB_VERSION, command, auth, args...]; replies are
-[LIB_VERSION, status, results...] where status is "ok", "conflict", "auth"
+Requests are [Mads::version(), command, auth, args...]; replies are
+[Mads::version(), status, results...] where status is "ok", "conflict", "auth"
 or "error":
 
   hello                  -> ok, json {auth: "none"|"password", and with a

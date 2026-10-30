@@ -104,7 +104,7 @@ int main(int argc, char** argv) {
   }
 
   if (show_version) {
-    std::cout << "mads-director " << LIB_VERSION << " (" << LIB_GIT_TAG << ")\n";
+    std::cout << "mads-director " << Mads::version() << " (" << LIB_GIT_TAG << ")\n";
     return 0;
   }
 

@@ -188,7 +188,7 @@ Agent::BrokerReply Agent::query_broker(string uri, string name, int timeout) {
 
   // ---- settings request ----
   zmq::multipart_t msg_out, msg_in;
-  msg_out.addstr(LIB_VERSION);
+  msg_out.addstr(Mads::version());
   msg_out.addstr("settings");
   msg_out.addstr(name);
   if (!msg_out.send(socket)) {
@@ -224,7 +224,7 @@ Agent::BrokerReply Agent::query_broker(string uri, string name, int timeout) {
   // ---- timecode request (same socket) ----
   chrono::system_clock::time_point now = chrono::system_clock::now();
   zmq::multipart_t tc_out, tc_in;
-  tc_out.addstr(string("v") + LIB_VERSION);
+  tc_out.addstr(string("v") + Mads::version());
   tc_out.addstr("timecode");
   tc_out.send(socket);
   if (!tc_in.recv(socket)) {
@@ -238,7 +238,7 @@ Agent::BrokerReply Agent::query_broker(string uri, string name, int timeout) {
   // Asked whatever the transport mode: it is one more round trip on an open
   // connection, and keeps what the broker offers on record whichever
   // transport ends up in use. A broker predating the command answers with a
-  // bare [LIB_VERSION] (not JSON), and a reply that is missing, late or of
+  // bare [Mads::version()] (not JSON), and a reply that is missing, late or of
   // the wrong shape just means "no ipc": never an error.
   string transport;
   {
@@ -246,7 +246,7 @@ Agent::BrokerReply Agent::query_broker(string uri, string name, int timeout) {
     socket.set(zmq::sockopt::rcvtimeo, to);
     socket.set(zmq::sockopt::sndtimeo, to);
     zmq::multipart_t tr_out, tr_in;
-    tr_out.addstr(LIB_VERSION);
+    tr_out.addstr(Mads::version());
     tr_out.addstr(TRANSPORT_CMD);
     tr_out.addstr(name);
     try {
@@ -860,7 +860,7 @@ void Agent::register_event(const event_type event, const nlohmann::json &info,
   auto build_payload = [&]() {
     nlohmann::json payload;
     payload["name"] = _name;
-    payload["version"] = LIB_VERSION;
+    payload["version"] = Mads::version();
     payload["event"] = event_map.at(event);
     payload["timecode_offset"] = _timecode_offset;
     payload["settings_path"] = _settings_uri;
@@ -894,7 +894,7 @@ void Agent::register_event(const event_type event, const nlohmann::json &info,
     }
     nlohmann::json payload;
     payload["name"] = _name;
-    payload["version"] = LIB_VERSION;
+    payload["version"] = Mads::version();
     payload["event"] = event_map.at(event);
     payload["timecode_offset"] = _timecode_offset;
     payload["settings_path"] = _settings_uri;
@@ -1753,7 +1753,7 @@ ClockOffsetResult Agent::measure_clock_offset(size_t samples,
       const auto t1_steady = chrono::steady_clock::now();
       const auto t1_wall = chrono::system_clock::now();
       zmq::multipart_t out, in;
-      out.addstr(LIB_VERSION);
+      out.addstr(Mads::version());
       out.addstr("clock");
       if (!out.send(socket))
         break;
@@ -1763,7 +1763,7 @@ ClockOffsetResult Agent::measure_clock_offset(size_t samples,
       const auto t4_wall = chrono::system_clock::now();
       // Fewer than 3 frames means an old broker that does not know "clock"
       // (it falls into the generic "unexpected command" branch and echoes
-      // back a bare [LIB_VERSION]) -- stop and report whatever, if
+      // back a bare [Mads::version()]) -- stop and report whatever, if
       // anything, earlier samples in this same call already gathered.
       if (in.size() < 3)
         break;

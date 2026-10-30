@@ -732,12 +732,12 @@ int main(int argc, char **argv) {
   }
 
   if (options_parsed.count("help")) {
-    cout << argv[0] << " ver. " << LIB_VERSION << endl;
+    cout << argv[0] << " ver. " << Mads::version() << endl;
     cout << options.help() << endl;
     return 0;
   }
   if (options_parsed.count("version")) {
-    cout << LIB_VERSION << endl;
+    cout << Mads::version() << endl;
     return 0;
   }
   if (options_parsed.count("daemon")) {
@@ -1264,7 +1264,7 @@ int main(int argc, char **argv) {
     while (running) {
       zmq::multipart_t msg;
       zmq::multipart_t content;
-      content.addstr(LIB_VERSION);
+      content.addstr(Mads::version());
       if (msg.recv(settings)) {
         if (msg.size() < 2) {
           console.log(cerr) << fg::red << timestamp()
@@ -1282,7 +1282,7 @@ int main(int argc, char **argv) {
           if (!Mads::check_version(agent_version)) {
             console.log(cerr) << fg::red << timestamp()
                  << "Received settings request from agent with wrong version: "
-                 << agent_version << " (vs. " << LIB_VERSION << ")" << fg::reset
+                 << agent_version << " (vs. " << Mads::version() << ")" << fg::reset
                  << endl;
           } else {
             console.log(cout) << timestamp()
@@ -1333,7 +1333,7 @@ int main(int argc, char **argv) {
           // clock domain lives on the bus (Mads::ClockConsensus), not here.
           // No version check, matching "timecode" above: an agent talking
           // to an old broker that doesn't know "clock" falls into the
-          // generic branch below and gets back a bare [LIB_VERSION] reply,
+          // generic branch below and gets back a bare [Mads::version()] reply,
           // which Agent::measure_clock_offset() detects (< 3 frames) and
           // degrades from gracefully.
           const int64_t t2 = Mads::epoch_us(chrono::system_clock::now());
@@ -1344,7 +1344,7 @@ int main(int argc, char **argv) {
         } else if (cmd == Mads::detail::TRANSPORT_CMD) {
           // One frame of JSON (detail/transport.hpp). A broker predating
           // this command falls into the branch below instead and replies a
-          // bare [LIB_VERSION], which agents read as "no ipc offered".
+          // bare [Mads::version()], which agents read as "no ipc offered".
           settings.send(zmq::buffer(transport_reply), zmq::send_flags::none);
         } else {
           console.log(cerr) << fg::yellow << timestamp()

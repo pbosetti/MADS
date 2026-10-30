@@ -67,12 +67,12 @@ private:
       std::string kind = msg.at(1).to_string();
       zmq::multipart_t reply;
       if (kind == "settings") {
-        reply.addstr(std::string(LIB_VERSION));
+        reply.addstr(std::string(Mads::version()));
         reply.addstr(_body);
       } else if (kind == "timecode") {
         reply.addstr(std::string("0.0"));
       } else {
-        reply.addstr(std::string(LIB_VERSION));
+        reply.addstr(std::string(Mads::version()));
         reply.addstr(std::string("{}"));
       }
       reply.send(_sock);
@@ -175,7 +175,7 @@ TEST_CASE("handle_standard_exit_options handles --help and --version",
     int rc = Mads::AgentApp::handle_standard_exit_options<Mads::AgentApp>(
         parsed, app.raw_options(), cli.argv(), "none", out, err);
     REQUIRE(rc == EXIT_SUCCESS);
-    REQUIRE(out.str().find(LIB_VERSION) != std::string::npos);
+    REQUIRE(out.str().find(Mads::version()) != std::string::npos);
   }
 
   SECTION("no early-exit option returns -1") {

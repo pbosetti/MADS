@@ -19,7 +19,7 @@ Paolo Bosetti, 2026
 using namespace Mads;
 
 const char *mads_version() {
-  static string v = LIB_VERSION;
+  static string v = Mads::version();
   return v.c_str();
 }
 

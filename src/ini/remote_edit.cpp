@@ -68,7 +68,7 @@ bool read_file(const fs::path &path, std::string &out) {
 }
 
 std::vector<std::string> error_reply(const std::string &message) {
-  return {LIB_VERSION, "error", message};
+  return {Mads::version(), "error", message};
 }
 
 std::string utc_timestamp(std::time_t t, const char *format) {
@@ -562,7 +562,7 @@ EditService::handle(const std::vector<std::string> &request,
     try {
       if (!Mads::check_version(request[0]))
         return fail(command, "incompatible version " + request[0] +
-                                 " (server is " + LIB_VERSION + ")");
+                                 " (server is " + Mads::version() + ")");
     } catch (const std::exception &err) {
       return fail(command, err.what());
     }
@@ -594,7 +594,7 @@ EditService::handle(const std::vector<std::string> &request,
         j["nonce"] = b64_encode(n.value);
         _nonces.push_back(std::move(n));
       }
-      return {LIB_VERSION, "ok", j.dump()};
+      return {Mads::version(), "ok", j.dump()};
     }
 
     // Authentication of get/put/info on a password listener. On success
@@ -605,7 +605,7 @@ EditService::handle(const std::vector<std::string> &request,
     if (is_data_command && require_password) {
       auto refuse = [&](const std::string &reason) {
         note("auth failure by " + who + " (" + command + "): " + reason);
-        return std::vector<std::string>{LIB_VERSION, "auth",
+        return std::vector<std::string>{Mads::version(), "auth",
                                         "authentication failed"};
       };
       if (!_password)
@@ -662,7 +662,7 @@ EditService::handle(const std::vector<std::string> &request,
         std::string text;
         if (!read_file(_path, text))
           return fail(command, "cannot read the settings file");
-        return {LIB_VERSION, "ok", content_etag(text), text};
+        return {Mads::version(), "ok", content_etag(text), text};
       }
 
       if (command == "info") {
@@ -689,9 +689,9 @@ EditService::handle(const std::vector<std::string> &request,
         j["size"] = text.size();
         j["mtime"] = mtime;
         j["etag"] = content_etag(text);
-        j["version"] = LIB_VERSION;
+        j["version"] = Mads::version();
         j["auth"] = require_password ? "password" : "none";
-        return {LIB_VERSION, "ok", j.dump()};
+        return {Mads::version(), "ok", j.dump()};
       }
 
       if (command == "put") {
@@ -721,7 +721,7 @@ EditService::handle(const std::vector<std::string> &request,
             return fail(command, "cannot read the settings file");
           if (content_etag(current) != base_etag) {
             note("put by " + who + ": conflict");
-            return {LIB_VERSION, "conflict", content_etag(current), current};
+            return {Mads::version(), "conflict", content_etag(current), current};
           }
         }
 
@@ -762,7 +762,7 @@ EditService::handle(const std::vector<std::string> &request,
         }
         note("put by " + who + ": ok, " + std::to_string(text.size()) +
              " bytes");
-        return {LIB_VERSION, "ok", content_etag(text)};
+        return {Mads::version(), "ok", content_etag(text)};
       }
 
       return fail(command, "unknown command");
@@ -1102,7 +1102,7 @@ RemoteSource::request(const std::vector<std::string> &frames) {
 
     auto exchange = [&](const std::vector<std::string> &out_frames) {
       zmq::multipart_t out;
-      out.addstr(LIB_VERSION);
+      out.addstr(Mads::version());
       for (const auto &frame : out_frames)
         out.addstr(frame);
       if (!out.send(socket))

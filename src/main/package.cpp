@@ -159,7 +159,7 @@ static HttpsClient::Response get_https(const string &hostname,
   HttpsClient client;
   client.set_hostname(hostname);
   client.set_path(path);
-  client.set_user_agent("MADS-Packager/" LIB_VERSION);
+  client.set_user_agent("MADS-Packager/" + Mads::version());
   return client.get();
 }
 
@@ -482,7 +482,7 @@ static void download_file_native(const string &url, const fs::path &output_path,
   HttpsClient client;
   client.set_hostname(hostname);
   client.set_path(path);
-  client.set_user_agent("MADS-Packager/" LIB_VERSION);
+  client.set_user_agent("MADS-Packager/" + Mads::version());
   HttpsClient::Response resp = client.get();
 
   {

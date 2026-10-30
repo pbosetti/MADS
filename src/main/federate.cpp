@@ -100,12 +100,12 @@ int main(int argc, char *argv[]) {
   auto options_parsed = options.parse(argc, argv);
 
   if (options_parsed.count("help")) {
-    cout << argv[0] << " ver. " << LIB_VERSION << endl;
+    cout << argv[0] << " ver. " << Mads::version() << endl;
     cout << options.help() << endl;
     return 0;
   }
   if (options_parsed.count("version")) {
-    cout << LIB_VERSION << endl;
+    cout << Mads::version() << endl;
     return 0;
   }
   if (options_parsed.count("settings-a") == 0 ||
