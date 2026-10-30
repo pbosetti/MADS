@@ -8,6 +8,7 @@
 // tests/mads_test_helpers.hpp for the loopback-only convention).
 //
 // Port range: 42700-42799 (see tests/mads_test_helpers.hpp).
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <atomic>
@@ -478,4 +479,69 @@ TEST_CASE("bag roundtrip: --rate paces replay relative to the recorded "
   }
   auto unpaced_elapsed = std::chrono::steady_clock::now() - t1;
   CHECK(unpaced_elapsed < elapsed);
+}
+
+// ---------------------------------------------------------------------------
+// --loop: try_shift() moves timestamp/timecode forward, in any data frame.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("bag roundtrip: --loop (Mads::Play::try_shift) shifts timestamp and "
+          "timecode of legacy and self-describing frames",
+          "[bag_roundtrip]") {
+  using namespace std::chrono;
+  using namespace Mads::detail;
+  const auto t0 = system_clock::time_point(milliseconds(1'700'000'000'123));
+  const std::string date0 = Mads::get_ISODate_time(t0);
+  // get_ISODate_time() writes local time with its offset: parsing it back
+  // must give the same instant.
+  REQUIRE(Mads::Play::parse_ISODate(date0) == t0);
+  CHECK_FALSE(Mads::Play::parse_ISODate("yesterday"));
+
+  const nlohmann::json doc = {{"timestamp", {{"$date", date0}}},
+                              {"timecode", 86395.0},
+                              {"reading", 42}};
+  const auto shift = seconds(10);
+  auto check = [&](const nlohmann::json &j) {
+    CHECK(Mads::Play::parse_ISODate(j.at("timestamp").at("$date")) ==
+          t0 + shift);
+    CHECK(j.at("timecode") == Catch::Approx(5.0)); // wraps at midnight, as live
+    CHECK(j.at("reading") == 42);
+  };
+
+  SECTION("legacy [snappy(json)]") {
+    std::string compressed, dumped = doc.dump(), back;
+    snappy::Compress(dumped.data(), dumped.size(), &compressed);
+    std::vector<std::string> parts = {compressed};
+    REQUIRE(Mads::Play::try_shift(parts, shift));
+    REQUIRE(snappy::Uncompress(parts[0].data(), parts[0].size(), &back));
+    check(nlohmann::json::parse(back));
+  }
+  SECTION("self-describing JSON and MsgPack, plain and compressed") {
+    for (auto fmt : {Mads::WireFormat::Json, Mads::WireFormat::MsgPack}) {
+      for (auto comp : {Comp::None, Comp::Snappy}) {
+        std::string raw = encode_payload(doc, fmt);
+        if (comp == Comp::Snappy) {
+          std::string c;
+          snappy::Compress(raw.data(), raw.size(), &c);
+          raw = c;
+        }
+        std::vector<std::string> parts = {make_wire_header(fmt, comp, false),
+                                          raw};
+        REQUIRE(Mads::Play::try_shift(parts, shift));
+        WireHeader hdr;
+        REQUIRE(parse_wire_header(parts[0], hdr));
+        nlohmann::json back;
+        REQUIRE(decode_to_json(parts[1], hdr.format, hdr.compression, back));
+        check(back);
+      }
+    }
+  }
+  SECTION("blobs and payloads without times are left alone") {
+    std::vector<std::string> blob = {
+        make_wire_header(Mads::WireFormat::Json, Comp::None, true), "{}",
+        "bytes"};
+    CHECK_FALSE(Mads::Play::try_shift(blob, shift));
+    std::vector<std::string> plain = {std::string("{\"x\":1}")};
+    CHECK_FALSE(Mads::Play::try_shift(plain, shift));
+  }
 }

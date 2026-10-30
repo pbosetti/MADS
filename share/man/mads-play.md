@@ -8,6 +8,7 @@
 **mads-play**
   **\-i, \-\-input** *path*
   [**\-\-restamp**]
+  [**\-l, \-\-loop**]
   [**\-\-topics** *pattern*]...
   [**\-\-rate** *factor*]
   [**\-x, \-\-cross**]
@@ -42,6 +43,15 @@ warning naming how many records will be replayed.
    JSON payload carrying a self-describing header, a MsgPack frame, or a blob's meta+bytes parts), is
    republished byte-for-byte unchanged. This is a **mads-play**-only convenience built on top of
    **publish_raw_message()**; it does not change what that function does for any other caller.
+
+**\-l**, **\-\-loop**
+:  Replay the bag over and over until stopped (Ctrl-C). On every pass after the first, the
+   **timestamp**/**timecode** of each data record are moved forward by the pass number times the
+   bag's span (first-to-last record time plus one mean gap between records), so they keep
+   increasing; with **\-\-rate**, the seam between passes lasts one mean gap. This works for JSON and
+   MsgPack data frames, compressed or not; blobs and shared-memory references keep their recorded
+   times, and their number is reported at exit. The timecode is seconds of the day, so it wraps at
+   midnight as it does live. With **\-\-restamp** the times are the current ones and need no shift.
 
 **\-\-topics** *pattern*
 :  MQTT-style topic filter (**+** matches one level, **#** matches this level and below); only records

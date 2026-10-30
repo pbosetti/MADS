@@ -33,6 +33,15 @@ header format here would mean duplicating Agent::publish()'s internal wire
 framing outside of agent.cpp, which is not worth the fragility for a
 best-effort convenience flag.
 
+--loop replays the bag again and again until stopped. On every pass after
+the first, the timestamp/timecode of each data record is moved forward by
+the pass number times the bag's span (first-to-last record time plus one
+mean gap), so they keep increasing across passes (Mads::Play::try_shift(),
+which handles both the legacy and the self-describing JSON/MsgPack data
+frames, re-encoded in their own format). Blobs and shared-memory references
+cannot be rewritten and keep their recorded times. With --restamp the times
+are "now" and need no shift.
+
 Author(s): Paolo Bosetti
 */
 #include "../agent_app.hpp"
@@ -56,6 +65,8 @@ int main(int argc, char *argv[]) {
   player.options()
     ("i,input", "Bag file to replay (required)", cxxopts::value<string>())
     ("restamp", "Rewrite timestamp/timecode fields of plain JSON frames to now")
+    ("l,loop", "Replay the bag over and over, shifting timestamps/timecodes "
+               "forward on each pass so they keep increasing")
     ("topics", "MQTT-style topic filter (repeatable); default replays every topic",
      cxxopts::value<vector<string>>())
     ("rate", "Pace replay using recorded gaps, scaled by this factor "
@@ -84,6 +95,7 @@ int main(int argc, char *argv[]) {
   }
   string input_path = options_parsed["input"].as<string>();
   bool restamp = options_parsed.count("restamp") != 0;
+  bool loop = options_parsed.count("loop") != 0;
   vector<string> topic_filters;
   if (options_parsed.count("topics"))
     topic_filters = options_parsed["topics"].as<vector<string>>();
@@ -122,6 +134,10 @@ int main(int argc, char *argv[]) {
   player.set_sub_topic({}); // pure publisher: no subscribe socket needed
   player.enable_events();
   player.connect();
+  // The replay loop below is not Agent::loop(), which is what installs these:
+  // without them Ctrl-C killed mads-play abruptly (no summary, no clean
+  // disconnect) -- and --loop never ends on its own.
+  Agent::install_signal_handlers();
   player.info();
 
   auto matches_filter = [&](const string &topic) {
@@ -137,17 +153,44 @@ int main(int argc, char *argv[]) {
   size_t published = 0, skipped = 0;
   bool have_prev_ts = false;
   int64_t prev_ts = 0;
+  // --loop: `pass` counts completed passes. A pass lasts `span_ns`: the
+  // first-to-last record time of the first pass plus its mean gap, so the
+  // seam between passes keeps the bag's cadence (and --rate's pacing).
+  size_t pass = 0, pass_records = 0, unshifted = 0;
+  int64_t first_ts = 0, last_ts = 0, span_ns = 0;
   cout << fg::green << "Replaying " << input_path << fg::reset << endl;
   bag->rewind();
   while (player.runtime()->running()) {
     auto rec_opt = bag->next();
-    if (!rec_opt)
-      break;
-    BagRecord rec = std::move(*rec_opt);
-    if (!matches_filter(rec.topic)) {
-      ++skipped;
+    if (!rec_opt) {
+      if (!loop || pass_records == 0) // nothing replayed: don't spin
+        break;
+      if (pass == 0) {
+        const int64_t length = last_ts - first_ts;
+        span_ns = length + (pass_records > 1
+                                ? length / static_cast<int64_t>(pass_records - 1)
+                                : 0);
+        if (span_ns <= 0)
+          span_ns = 1'000'000'000; // one instant recorded: step 1 s a pass
+      }
+      ++pass;
+      pass_records = 0;
+      prev_ts -= span_ns; // the seam is one mean gap long
+      bag->rewind();
       continue;
     }
+    BagRecord rec = std::move(*rec_opt);
+    if (!matches_filter(rec.topic)) {
+      if (pass == 0)
+        ++skipped;
+      continue;
+    }
+    if (pass == 0) {
+      if (pass_records == 0)
+        first_ts = rec.timestamp_ns;
+      last_ts = rec.timestamp_ns;
+    }
+    ++pass_records;
     if (rate && have_prev_ts) {
       int64_t gap_ns = rec.timestamp_ns - prev_ts;
       if (gap_ns > 0) {
@@ -160,12 +203,18 @@ int main(int argc, char *argv[]) {
     prev_ts = rec.timestamp_ns;
 
     if (restamp)
-      Mads::Play::try_restamp(rec.parts);
+      Mads::Play::try_restamp(rec.parts); // "now": monotonic on every pass
+    else if (pass > 0 &&
+             !Mads::Play::try_shift(rec.parts,
+                                    chrono::nanoseconds(span_ns * pass)))
+      ++unshifted;
 
     player.publish_raw_message(rec.topic, rec.parts);
     ++published;
     cerr << "\r\x1b[0KReplayed: " << fg::green << published << fg::reset
          << " (" << skipped << " skipped by --topics) ";
+    if (loop)
+      cerr << "pass " << pass + 1 << " ";
     cerr.flush();
   }
   cerr << endl;
@@ -175,7 +224,14 @@ int main(int argc, char *argv[]) {
   if (skipped)
     cout << fg::yellow << ", " << skipped << " skipped by --topics"
          << fg::reset;
+  if (loop)
+    cout << " in " << pass + 1 << " passes";
   cout << endl;
+  if (unshifted)
+    cout << fg::yellow << unshifted
+         << " records kept their recorded timestamp/timecode on later passes "
+            "(blobs, or no such fields)"
+         << fg::reset << endl;
 
   player.disconnect();
   player.restart_if_requested(argv);

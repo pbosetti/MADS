@@ -148,6 +148,10 @@ Read this before upgrading from 2.5.x.
   subscribe to every topic.
 - **`mads plugin --zero-copy`** adds the P9 shared-memory hooks (with the
   contract in comments) to a generated C++ plugin. See **mads-plugin**(1).
+- **`mads play -l/--loop`** replays a bag over and over, moving the
+  timestamps and timecodes of JSON/MsgPack data records forward on each
+  pass so they keep increasing. Ctrl-C now stops `mads play` cleanly, with
+  its summary, instead of killing it. See **mads-play**(1).
 
 ### Releases
 
