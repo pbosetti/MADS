@@ -18,13 +18,16 @@ mads-bag: inspection/export tool for bag files written by mads-record
 Every part is exported as base64 (parts are raw, possibly-binary wire
 bytes -- a header, a compressed payload, or blob bytes -- so this is the
 only encoding that's always valid regardless of content; see
-src/bag.hpp's format notes). `--format mcap` is intentionally not
+src/bag.hpp's format notes). Each record also carries the decoded JSON
+"payload" (data frames) or "meta" (blobs), whatever the wire format
+(JSON/MsgPack) and compression (none/Snappy). `--format mcap` is intentionally not
 implemented here: it is explicitly deferred/optional in NEW_FEATURES.md's
 P3 section.
 
 Author(s): Paolo Bosetti
 */
 #include "../bag.hpp"
+#include "../detail/wire_format.hpp"
 #include "../mads.hpp"
 #include <cxxopts.hpp>
 #include <rang.hpp>
@@ -288,7 +291,13 @@ int run_export(int argc, char *argv[]) {
     for (auto const &part : rec->parts)
       parts_b64.push_back(base64_encode(part));
     j["parts_base64"] = parts_b64;
-    *out << j.dump() << "\n";
+    // Parts may be MsgPack and/or Snappy-compressed: also emit them decoded.
+    json decoded;
+    bool is_blob = false;
+    if (Mads::detail::decode_raw_parts(rec->parts, decoded, is_blob))
+      j[is_blob ? "meta" : "payload"] = std::move(decoded);
+    // replace, not throw: a non-UTF-8 string must not abort the export
+    *out << j.dump(-1, ' ', false, json::error_handler_t::replace) << "\n";
   }
   if (out_file.is_open())
     out_file.close();

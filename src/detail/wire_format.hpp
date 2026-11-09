@@ -40,6 +40,7 @@ because the header is only emitted for non-default (e.g. MsgPack) formats.
 #include <nlohmann/json.hpp>
 #include <snappy.h>
 #include <string>
+#include <vector>
 
 #include "../mads.hpp"
 
@@ -174,6 +175,30 @@ inline bool decode_to_json_text(const std::string &raw, uint8_t format,
     json_text_out = *bytes;
   }
   return true;
+}
+
+// Decodes the parts of a raw message (topic excluded, as returned by
+// Agent::receive_raw_message() or stored in a bag) into JSON: the payload of
+// a data frame, or the meta of a blob (whose raw bytes are not decoded;
+// `is_blob` is set). Handles both the extended and the legacy frame shapes.
+// Returns false if the parts cannot be decoded.
+inline bool decode_raw_parts(const std::vector<std::string> &parts,
+                             nlohmann::json &out, bool &is_blob) {
+  WireHeader hdr;
+  if (!parts.empty() && parse_wire_header(parts[0], hdr)) {
+    is_blob = hdr.has_blob;
+    return parts.size() >= 2 &&
+           decode_to_json(parts[1], hdr.format, hdr.compression, out);
+  }
+  constexpr auto json_fmt = static_cast<uint8_t>(WireFormat::Json);
+  is_blob = parts.size() == 2; // legacy blob: [json meta][raw bytes]
+  if (parts.size() == 1) // legacy data: [snappy(json)], or plain json
+    return decode_to_json(parts[0], json_fmt,
+                          static_cast<uint8_t>(Comp::Snappy), out) ||
+           decode_to_json(parts[0], json_fmt,
+                          static_cast<uint8_t>(Comp::None), out);
+  return is_blob && decode_to_json(parts[0], json_fmt,
+                                   static_cast<uint8_t>(Comp::None), out);
 }
 
 } // namespace Mads::detail

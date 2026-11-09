@@ -16,6 +16,7 @@
 #endif
 
 #include "bag.hpp"
+#include "detail/wire_format.hpp"
 
 namespace fs = std::filesystem;
 using namespace Mads;
@@ -384,4 +385,50 @@ TEST_CASE("BagWriter::write() after close() throws BagError", "[bag]") {
   w.write(1, "a", {"x"});
   w.close();
   REQUIRE_THROWS_AS(w.write(2, "b", {"y"}), BagError);
+}
+
+TEST_CASE("decode_raw_parts decodes every recorded frame shape (mads bag "
+          "export)") {
+  using namespace Mads::detail;
+  const nlohmann::json doc = {{"value", 42}, {"name", "sensor"}};
+  auto snappy = [](const std::string &s) {
+    std::string c;
+    snappy::Compress(s.data(), s.size(), &c);
+    return c;
+  };
+  auto check = [&](const std::vector<std::string> &parts, bool want_blob) {
+    nlohmann::json out;
+    bool is_blob = !want_blob;
+    REQUIRE(decode_raw_parts(parts, out, is_blob));
+    CHECK(out == doc);
+    CHECK(is_blob == want_blob);
+  };
+  const std::string json_txt = encode_payload(doc, WireFormat::Json);
+  const std::string mp = encode_payload(doc, WireFormat::MsgPack);
+
+  // extended data frames: [header][payload], every format x compression
+  check({make_wire_header(WireFormat::Json, Comp::None, false), json_txt},
+        false);
+  check({make_wire_header(WireFormat::Json, Comp::Snappy, false),
+         snappy(json_txt)},
+        false);
+  check({make_wire_header(WireFormat::MsgPack, Comp::None, false), mp}, false);
+  check({make_wire_header(WireFormat::MsgPack, Comp::Snappy, false),
+         snappy(mp)},
+        false);
+  // extended blob: [header][meta][bytes]
+  check({make_wire_header(WireFormat::MsgPack, Comp::None, true), mp,
+         std::string("\x00\xff\x01", 3)},
+        true);
+  // legacy data: [snappy(json)] and plain [json]
+  check({snappy(json_txt)}, false);
+  check({json_txt}, false);
+  // legacy blob: [json meta][bytes]
+  check({json_txt, std::string("\x00\xff", 2)}, true);
+
+  nlohmann::json out;
+  bool is_blob = false;
+  CHECK_FALSE(decode_raw_parts({std::string("\xff\x00garbage", 9)}, out,
+                               is_blob));
+  CHECK_FALSE(decode_raw_parts({}, out, is_blob));
 }
