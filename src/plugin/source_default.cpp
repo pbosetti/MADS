@@ -42,6 +42,10 @@ public:
       _error = e.what();
       return return_type::error;
     }
+    if (!out.is_object()) {
+      _error = "Input is not a valid JSON object";
+      return return_type::error;
+    }
 
     if (!_agent_id.empty()) out["agent_id"] = _agent_id;
     return return_type::success;
