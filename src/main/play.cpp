@@ -47,13 +47,15 @@ Author(s): Paolo Bosetti
 #include "../agent_app.hpp"
 #include "../bag.hpp"
 #include "../topic_match.hpp"
+#include "../precise_wait.hpp"
+#include "play_pacing.hpp"
 #include "play_restamp.hpp"
 #include <cxxopts.hpp>
 #include <chrono>
+#include <iomanip>
 #include <memory>
 #include <optional>
 #include <string>
-#include <thread>
 #include <vector>
 
 using namespace std;
@@ -151,13 +153,29 @@ int main(int argc, char *argv[]) {
   };
 
   size_t published = 0, skipped = 0;
-  bool have_prev_ts = false;
-  int64_t prev_ts = 0;
+  // --rate: every record is due at a fixed offset from the start of replay
+  // (play_pacing.hpp); one that is already late goes out at once, so late
+  // wake-ups (a whole 15.6 ms tick on Windows) don't add up.
+  optional<Mads::Play::Pacer> pacer;
+  if (rate)
+    pacer.emplace(*rate);
+  constexpr auto max_lag = chrono::seconds(1);
+  chrono::steady_clock::time_point t_start, t_first, last_draw;
+  chrono::nanoseconds last_due{0}; // of the last record published
+  bool started = false;
+  size_t reanchors = 0;
   // --loop: `pass` counts completed passes. A pass lasts `span_ns`: the
   // first-to-last record time of the first pass plus its mean gap, so the
   // seam between passes keeps the bag's cadence (and --rate's pacing).
   size_t pass = 0, pass_records = 0, unshifted = 0;
   int64_t first_ts = 0, last_ts = 0, span_ns = 0;
+  auto draw_progress = [&] {
+    cerr << "\r\x1b[0KReplayed: " << fg::green << published << fg::reset
+         << " (" << skipped << " skipped by --topics) ";
+    if (loop)
+      cerr << "pass " << pass + 1 << " ";
+    cerr.flush();
+  };
   cout << fg::green << "Replaying " << input_path << fg::reset << endl;
   bag->rewind();
   while (player.runtime()->running()) {
@@ -175,7 +193,8 @@ int main(int argc, char *argv[]) {
       }
       ++pass;
       pass_records = 0;
-      prev_ts -= span_ns; // the seam is one mean gap long
+      if (pacer)
+        pacer->seam(span_ns); // the seam is one mean gap long
       bag->rewind();
       continue;
     }
@@ -191,16 +210,27 @@ int main(int argc, char *argv[]) {
       last_ts = rec.timestamp_ns;
     }
     ++pass_records;
-    if (rate && have_prev_ts) {
-      int64_t gap_ns = rec.timestamp_ns - prev_ts;
-      if (gap_ns > 0) {
-        auto sleep_ns = chrono::nanoseconds(
-            static_cast<int64_t>(static_cast<double>(gap_ns) / *rate));
-        this_thread::sleep_for(sleep_ns);
+    if (pacer) {
+      auto due = pacer->offset(rec.timestamp_ns);
+      auto now = chrono::steady_clock::now();
+      if (!started) {
+        t_start = now - due;
+        t_first = now;
+        started = true;
       }
+      auto deadline = t_start + due;
+      if (now - deadline > max_lag) {
+        // Stalled (suspend, debugger, slow broker): restart the schedule
+        // here rather than flood subscribers with the backlog.
+        t_start += now - deadline;
+        ++reanchors;
+      } else if (!Mads::precise_wait_until(deadline, [&] {
+                   return player.runtime()->running();
+                 })) {
+        break; // stopped during a gap: don't publish
+      }
+      last_due = due;
     }
-    have_prev_ts = true;
-    prev_ts = rec.timestamp_ns;
 
     if (restamp)
       Mads::Play::try_restamp(rec.parts); // "now": monotonic on every pass
@@ -211,12 +241,14 @@ int main(int argc, char *argv[]) {
 
     player.publish_raw_message(rec.topic, rec.parts);
     ++published;
-    cerr << "\r\x1b[0KReplayed: " << fg::green << published << fg::reset
-         << " (" << skipped << " skipped by --topics) ";
-    if (loop)
-      cerr << "pass " << pass + 1 << " ";
-    cerr.flush();
+    // Redrawn at most every 100 ms: per-record console writes are slow.
+    if (auto now = chrono::steady_clock::now(); now - last_draw >= 100ms) {
+      draw_progress();
+      last_draw = now;
+    }
   }
+  if (published)
+    draw_progress();
   cerr << endl;
 
   cout << fg::green << "Replay complete: " << published
@@ -227,6 +259,16 @@ int main(int argc, char *argv[]) {
   if (loop)
     cout << " in " << pass + 1 << " passes";
   cout << endl;
+  if (started) {
+    chrono::duration<double> took = chrono::steady_clock::now() - t_first;
+    cout << fixed << setprecision(2) << "Paced replay took " << took.count()
+         << " s (expected " << chrono::duration<double>(last_due).count()
+         << " s at --rate " << defaultfloat << *rate << ")";
+    if (reanchors)
+      cout << fg::yellow << "; " << reanchors
+           << " schedule restarts after stalls over 1 s" << fg::reset;
+    cout << endl;
+  }
   if (unshifted)
     cout << fg::yellow << unshifted
          << " records kept their recorded timestamp/timecode on later passes "
