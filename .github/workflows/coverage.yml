@@ -62,8 +62,13 @@ jobs:
           sudo sysctl -w net.ipv4.ip_local_reserved_ports=42100-44999
           sysctl net.ipv4.ip_local_reserved_ports
 
+      # The [timing] cases measure wall-clock waits and can fail on a busy
+      # runner; Catch2 3.7.1 can't turn tags into ctest labels, so they are
+      # excluded by name.
       - name: Test
-        run: ctest --test-dir build-cov --output-on-failure
+        run: >-
+          ctest --test-dir build-cov --output-on-failure
+          -E "precise_wait_until (keeps an absolute schedule|stops early)"
 
       - name: Coverage report
         run: |
