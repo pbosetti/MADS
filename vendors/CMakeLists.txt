@@ -201,7 +201,10 @@ FetchContent_Declare(
 )
 
 if(MADS_ENABLE_MONGOCXX)
-  set(MADS_MONGO_C_DRIVER_VERSION "2.3.3")
+  # shortcut: master commit 513e7b1 (2.6.0-dev, CDRIVER-6534) fixes the
+  # pointer-to-bool errors of MSVC 19.52 in libbson; go back to a release tag
+  # (and GIT_SHALLOW) once one includes it (> 2.5.9).
+  set(MADS_MONGO_C_DRIVER_VERSION "513e7b1aa742be8b8dbdefe4b9a1692c4ac94334")
   set(MADS_MONGO_CXX_DRIVER_VERSION "4.4.0")
 
   # mongo-cxx-driver derives its own version from BUILD_VERSION. Left at the
@@ -221,11 +224,10 @@ if(MADS_ENABLE_MONGOCXX)
       SOURCE_DIR "${_mads_local_mongo_c_driver_src}"
     )
   else()
+    # Archive, not git: a shallow clone cannot fetch a bare commit SHA.
     FetchContent_Declare(
       mongo_c_driver
-      GIT_REPOSITORY https://github.com/mongodb/mongo-c-driver.git
-      GIT_TAG ${MADS_MONGO_C_DRIVER_VERSION}
-      GIT_SHALLOW TRUE
+      URL https://github.com/mongodb/mongo-c-driver/archive/${MADS_MONGO_C_DRIVER_VERSION}.tar.gz
     )
   endif()
   unset(_mads_local_mongo_c_driver_src)
