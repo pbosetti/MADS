@@ -25,8 +25,8 @@ namespace MadsIni {
 
 class IniApp {
 public:
-  /// `file` is opened at startup; nullopt starts a new document from the
-  /// template.
+  /// `file` is opened at startup; a missing `file` starts a document from
+  /// the template that saves to `file`; nullopt: the same, with no file.
   explicit IniApp(std::optional<std::filesystem::path> file);
   IniApp(const IniApp &) = delete;
   IniApp &operator=(const IniApp &) = delete;
@@ -39,7 +39,8 @@ private:
   enum class Action { None, New, Open, OpenRecent, OpenRemote, Reload, Quit };
 
   void load_startup_document();
-  void new_default_document();
+  /// From the template; with `target`, save() writes that file.
+  void new_default_document(const std::optional<std::filesystem::path> &target = std::nullopt);
   void request(Action action);
   void perform(Action action);
   bool save_document();

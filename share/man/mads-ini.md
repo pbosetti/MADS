@@ -42,8 +42,11 @@ the document settings, edited in the inspector. The editor reads and writes the 
 keeps comments, leaves the values of keys it does not change exactly as written, and saves through a
 temporary file, so a crash or power loss leaves either the old or the new file.
 
-Bare **mads ini** opens the editor on `<prefix>/etc/mads.ini` when that file exists, or on a new
-document rendered from the template when it does not. **mads ini** *FILE* opens the editor on *FILE*.
+Bare **mads ini** opens the editor on `mads.ini` in the working directory, else on
+`<prefix>/etc/mads.ini`; when neither exists it opens a new document rendered from the template, and
+**Save** writes it to `mads.ini` in the working directory. **mads ini** *FILE* opens the editor on
+*FILE*, or on the template when *FILE* does not exist yet, saving to *FILE*. The editor runs detached
+from the terminal, so the command returns at once.
 Builds without the GUI (or a system where mads-ini is not installed) have no editor: a bare
 **mads ini** then prints the template, as older releases did, and **mads ini** *FILE* is an error that
 points to **\-\-check**, **\-\-get** and **\-\-set**.

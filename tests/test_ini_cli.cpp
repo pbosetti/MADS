@@ -272,20 +272,29 @@ TEST_CASE("mads ini dispatch to the GUI", "[ini][cli]") {
     REQUIRE(seen.has_value());
     CHECK(*seen == fs::path("/tmp/some/mads.ini"));
   }
-  SECTION("bare invocation passes the default path only if it exists") {
+  SECTION("bare invocation prefers ./mads.ini, then the installed one") {
     std::optional<fs::path> seen;
     auto launch = [&](std::optional<fs::path> p) {
       seen = p;
       return 0;
     };
+    const fs::path old_cwd = fs::current_path();
+    const fs::path dir = fs::temp_directory_path() / "mads_ini_bare_test";
+    fs::create_directories(dir);
+    fs::remove(dir / "mads.ini");
+    fs::current_path(dir);
     Args args{};
     CHECK(run_cli(args.argc(), args.argv(), launch) == 0);
-    if (fs::exists(Mads::Ini::default_ini_path())) {
-      REQUIRE(seen.has_value());
-      CHECK(*seen == Mads::Ini::default_ini_path());
-    } else {
-      CHECK_FALSE(seen.has_value());
-    }
+    REQUIRE(seen.has_value());
+    const fs::path local = fs::absolute("mads.ini");
+    CHECK(*seen == (fs::exists(Mads::Ini::default_ini_path())
+                        ? Mads::Ini::default_ini_path()
+                        : local));
+    std::ofstream(dir / "mads.ini") << kClean;
+    CHECK(run_cli(args.argc(), args.argv(), launch) == 0);
+    CHECK(*seen == local);
+    fs::current_path(old_cwd);
+    fs::remove_all(dir);
   }
   SECTION("FILE alone without a GUI is an error") {
     Args args{"/tmp/some/mads.ini"};

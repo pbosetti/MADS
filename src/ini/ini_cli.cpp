@@ -576,6 +576,16 @@ fs::path default_ini_path() {
   return fs::path(Mads::exec_dir("../etc/")) / "mads.ini";
 }
 
+fs::path startup_ini_path() {
+  std::error_code ec;
+  const fs::path local = fs::absolute("mads.ini", ec);
+  if (fs::exists(local, ec)) {
+    return local;
+  }
+  const fs::path installed = default_ini_path();
+  return fs::exists(installed, ec) ? installed : local;
+}
+
 int run_cli(int argc, char **argv, const LaunchGui &launch_gui) {
   json data = default_template_data();
   std::string etc_dir = Mads::exec_dir("../etc/");
@@ -723,9 +733,7 @@ int run_cli(int argc, char **argv, const LaunchGui &launch_gui) {
 
   // Bare invocation.
   if (launch_gui) {
-    fs::path path = default_ini_path();
-    return launch_gui(fs::exists(path) ? std::optional<fs::path>(path)
-                                       : std::nullopt);
+    return launch_gui(startup_ini_path());
   }
   try {
     std::cout << render_template(data) << std::endl;

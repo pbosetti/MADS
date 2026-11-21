@@ -153,6 +153,13 @@ void Editor::new_document(const std::string &text) {
   finish_load();
 }
 
+void Editor::new_document(const std::string &text,
+                          const std::filesystem::path &target) {
+  new_document(text);
+  _source = std::make_unique<FileSource>(target);
+  _saved_text.clear();
+}
+
 bool Editor::open(const std::filesystem::path &path, std::string *error) {
   return open_source(std::make_unique<FileSource>(path), error);
 }

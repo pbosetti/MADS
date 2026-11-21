@@ -8,10 +8,11 @@
 `mads ini` command line, shared by the internal command of the `mads`
 dispatcher (builds without GUI) and the mads-ini editor executable.
 
-  mads ini                     GUI on <prefix>/etc/mads.ini, or a new document
-                               from the template if that file does not exist;
-                               without a GUI: print the template (legacy)
-  mads ini FILE                GUI on FILE
+  mads ini                     GUI on ./mads.ini, else <prefix>/etc/mads.ini,
+                               else a new document from the template that
+                               saves to ./mads.ini; the GUI runs detached.
+                               Without a GUI: print the template (legacy)
+  mads ini FILE                GUI on FILE (from the template if missing)
   mads ini -p|--print          print the rendered template
   mads ini -o FILE | -i        write / install the rendered template
            [-b -F -B -s -f -m] template parameters (unchanged)
@@ -44,8 +45,8 @@ Author(s): Paolo Bosetti
 
 namespace Mads::Ini {
 
-/// Opens the editor on `file` (nullopt: a new document from the template)
-/// and returns the process exit code. When the GUI cannot start (e.g. no
+/// Opens the editor on `file` (missing: a new document from the template
+/// that saves to `file`; nullopt: the same, unsaved) and returns the process exit code. When the GUI cannot start (e.g. no
 /// display), it prints why, suggests --print/--check, and returns non-zero.
 using LaunchGui = std::function<int(std::optional<std::filesystem::path>)>;
 
@@ -73,5 +74,9 @@ std::string render_template(const nlohmann::json &data =
 
 /// <prefix>/etc/mads.ini.
 std::filesystem::path default_ini_path();
+
+/// What a bare `mads ini` edits: ./mads.ini if it exists, else
+/// default_ini_path() if it exists, else ./mads.ini (absolute paths).
+std::filesystem::path startup_ini_path();
 
 } // namespace Mads::Ini

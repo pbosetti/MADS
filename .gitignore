@@ -47,6 +47,7 @@ coverage_html/
 *.profraw
 
 .DS_Store
+.cache
 
 # Left next to a settings file by mads ini and the broker: backups, and the
 # editing password verifier (never commit one).

@@ -41,6 +41,10 @@ public:
   /// Replaces the document with `text` (e.g. the rendered template), with no
   /// source: the next save needs save_as(). Clears undo history.
   void new_document(const std::string &text);
+  /// Like new_document(text), but save() writes the not yet existing file
+  /// `target`. The document starts dirty, since nothing is on disk.
+  void new_document(const std::string &text,
+                    const std::filesystem::path &target);
   /// Loads `path` through a FileSource. On failure returns false, sets
   /// `error` and leaves the current document untouched.
   bool open(const std::filesystem::path &path, std::string *error = nullptr);

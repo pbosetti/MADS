@@ -234,7 +234,11 @@ int IniApp::run() {
 // ------------------------------------------------------------ documents
 
 void IniApp::load_startup_document() {
-  if (_file) {
+  std::error_code ec;
+  if (_file && !std::filesystem::exists(*_file, ec)) {
+    new_default_document(*_file);
+    _ui.notify("New document from the template, save to create " + _file->string());
+  } else if (_file) {
     std::string error;
     if (!_editor.open(*_file, &error)) {
       _ui.notify("Cannot open " + _file->string() + ": " + error, true);
@@ -248,12 +252,17 @@ void IniApp::load_startup_document() {
   _editor.auto_layout();
 }
 
-void IniApp::new_default_document() {
+void IniApp::new_default_document(const std::optional<std::filesystem::path> &target) {
+  std::string text = "[agents]\n\n[broker]\n";
   try {
-    _editor.new_document(Mads::Ini::render_template());
+    text = Mads::Ini::render_template();
   } catch (const std::exception &error) {
     _ui.notify(std::string("Template unavailable: ") + error.what(), true);
-    _editor.new_document("[agents]\n\n[broker]\n");
+  }
+  if (target) {
+    _editor.new_document(text, *target);
+  } else {
+    _editor.new_document(text);
   }
 }
 
