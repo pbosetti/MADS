@@ -8,12 +8,14 @@
  Install available packages from binaries.
  This mads subcommand fetches a JSON list of available packages from
  GitHub, then either presents a list of the packages, or installs a
- specified package from the latest release on GitHub.
+ specified package from a GitHub release: the latest one, or the one tagged
+ exactly TAG with NAME@TAG.
 */
 
 #include "../exec_path.hpp"
 #include "../https_client.hpp"
 #include "../mads.hpp"
+#include "package_releases.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cctype>
@@ -40,7 +42,7 @@ namespace Mads {
 static const string PACKAGE_LIST_URL =
     "https://raw.githubusercontent.com/MADS-NET/.github/main/profile/packages.json";
 static const string GITHUB_API_HOST = "api.github.com";
-static constexpr int CACHE_SCHEMA_VERSION = 3;
+static constexpr int CACHE_SCHEMA_VERSION = 4; // 4: per-package release list
 static constexpr chrono::hours CACHE_MAX_AGE(6);
 static bool GitHubTrafficLimited = false;
 
@@ -623,14 +625,6 @@ static void extract_zip_file(const fs::path &zip_path, const fs::path &prefix,
   fs::remove_all(extract_dir, ec);
 }
 
-static string release_timestamp(const json &release) {
-  string published_at = json_string_value(release, "published_at");
-  if (!published_at.empty())
-    return published_at;
-
-  return json_string_value(release, "created_at");
-}
-
 static string http_error_message(const HttpsClient::Response &response) {
   string message = "HTTP " + to_string(response.status_code);
   if (!response.status_message.empty())
@@ -646,41 +640,60 @@ static json response_json(const HttpsClient::Response &response) {
   return json::parse(response.body);
 }
 
-static json get_latest_release(const string &owner, const string &repo,
-                               bool &is_prerelease_fallback) {
-  is_prerelease_fallback = false;
+// Compact copy of the published releases, newest first, for the cached list.
+static json release_summaries(const json &releases) {
+  json out = json::array();
+  for (const json &release : Package::published_releases(releases)) {
+    json assets = json::array();
+    if (release.contains("assets") && release["assets"].is_array())
+      for (const json &asset : release["assets"])
+        if (asset.is_object())
+          assets.push_back({{"name", json_string_value(asset, "name")},
+                            {"content_type",
+                             json_string_value(asset, "content_type")}});
+    out.push_back({{"tag_name", json_string_value(release, "tag_name")},
+                   {"published_at", Package::release_timestamp(release)},
+                   {"assets", assets}});
+  }
+  return out;
+}
 
+// Stores in `package` the release list and the selected release: the latest
+// one, or the one tagged exactly `tag`.
+static void fetch_releases(json &package, const string &owner,
+                           const string &repo, const string &tag) {
   string releases_path = "/repos/" + owner + "/" + repo + "/releases";
-  HttpsClient::Response latest_response =
-      get_https(GITHUB_API_HOST, releases_path + "/latest");
-  if (latest_response.status_code != 404)
-    return response_json(latest_response);
-
-  json releases = get_json(GITHUB_API_HOST, releases_path);
+  // shortcut: one page, the 100 newest releases; an older pinned tag is
+  // fetched by name below, but is missing from the listed history.
+  json releases = get_json(GITHUB_API_HOST, releases_path + "?per_page=100");
   if (!releases.is_array())
     throw runtime_error("Release list response is not an array");
+  package["releases"] = release_summaries(releases);
 
-  json latest_prerelease;
-  string latest_timestamp;
-  bool found_prerelease = false;
-  for (const json &release : releases) {
-    if (!release.is_object() || !release.value("prerelease", false) ||
-        release.value("draft", false))
-      continue;
-
-    string timestamp = release_timestamp(release);
-    if (!found_prerelease || timestamp > latest_timestamp) {
-      latest_prerelease = release;
-      latest_timestamp = timestamp;
-      found_prerelease = true;
+  bool prerelease_fallback = false;
+  json release;
+  if (tag.empty()) {
+    release = Package::latest_release(releases, prerelease_fallback);
+    if (release.is_null())
+      throw runtime_error("No releases published");
+  } else {
+    release = Package::release_with_tag(releases, tag);
+    if (release.is_null()) {
+      HttpsClient::Response response =
+          get_https(GITHUB_API_HOST, releases_path + "/tags/" + tag);
+      if (response.status_code == 404) {
+        vector<string> tags;
+        for (const json &r : package["releases"])
+          tags.push_back(json_string_value(r, "tag_name"));
+        throw runtime_error("No release tagged '" + tag + "'" +
+                            (tags.empty() ? string()
+                                          : "; releases: " + Package::join(tags)));
+      }
+      release = response_json(response);
     }
   }
-
-  if (!found_prerelease)
-    throw runtime_error(http_error_message(latest_response));
-
-  is_prerelease_fallback = true;
-  return latest_prerelease;
+  package["release"] = release;
+  package["prerelease_fallback"] = prerelease_fallback;
 }
 
 static vector<PackageEntry> read_package_entries(const json &package_list) {
@@ -757,7 +770,8 @@ static size_t package_result_name_width(const json &packages) {
   return width;
 }
 
-static json fetch_package_result(const PackageEntry &entry) {
+static json fetch_package_result(const PackageEntry &entry,
+                                 const string &tag = "") {
   json package;
   package["name"] = entry.name;
   package["uri"] = entry.uri;
@@ -772,9 +786,7 @@ static json fetch_package_result(const PackageEntry &entry) {
   }
 
   try {
-    bool is_prerelease_fallback = false;
-    package["release"] = get_latest_release(owner, repo, is_prerelease_fallback);
-    package["prerelease_fallback"] = is_prerelease_fallback;
+    fetch_releases(package, owner, repo, tag);
   } catch (const exception &e) {
     package["error"] = e.what();
   }
@@ -821,11 +833,15 @@ static json load_or_fetch_list_packages_data(bool no_cache,
   return data;
 }
 
-static string package_info_cache_filename(const string &package_name) {
-  return "info_" + cache_component(package_name) + ".json";
+static string package_info_cache_filename(const string &package_name,
+                                          const string &tag) {
+  return "info_" + cache_component(tag.empty() ? package_name
+                                               : package_name + "@" + tag) +
+         ".json";
 }
 
 static json fetch_package_info_data(const string &package_name,
+                                    const string &tag,
                                     const string &package_list_source) {
   json package_list = get_package_list_json(package_list_source);
   vector<PackageEntry> entries = read_package_entries(package_list);
@@ -836,7 +852,7 @@ static json fetch_package_info_data(const string &package_name,
 
     json data;
     data["package_list"] = package_list;
-    data["package"] = fetch_package_result(entry);
+    data["package"] = fetch_package_result(entry, tag);
 
     string owner;
     string repo;
@@ -853,9 +869,10 @@ static json fetch_package_info_data(const string &package_name,
     if (default_branch.empty())
       default_branch = "main";
 
+    // A pinned release documents its own requirements.
     json mads_package;
-    data["mads_package_found"] =
-        fetch_mads_package_file(owner, repo, default_branch, mads_package);
+    data["mads_package_found"] = fetch_mads_package_file(
+        owner, repo, tag.empty() ? default_branch : tag, mads_package);
     if (data["mads_package_found"].get<bool>())
       data["mads_package"] = mads_package;
     return data;
@@ -865,19 +882,41 @@ static json fetch_package_info_data(const string &package_name,
 }
 
 static json load_or_fetch_package_info_data(const string &package_name,
-                                            bool no_cache,
+                                            const string &tag, bool no_cache,
                                             const string &package_list_source,
                                             bool save_result = true) {
   bool use_cache = package_list_source.empty();
-  string filename = package_info_cache_filename(package_name);
+  string filename = package_info_cache_filename(package_name, tag);
   json data;
   if (use_cache && load_cache_file(filename, "package_info", no_cache, data))
     return data;
 
-  data = fetch_package_info_data(package_name, package_list_source);
+  data = fetch_package_info_data(package_name, tag, package_list_source);
   if (use_cache && save_result)
     save_cache_file(filename, "package_info", data);
   return data;
+}
+
+static bool has_compatible_zip(const json &release, const Platform &platform) {
+  if (release.contains("assets") && release["assets"].is_array())
+    for (const json &asset : release["assets"])
+      if (asset.is_object() && is_compatible_zip_asset(asset, platform))
+        return true;
+  return false;
+}
+
+// Published release tags, newest first, marking those with no ZIP for here.
+static string release_history(const json &package, const Platform &platform) {
+  vector<string> tags;
+  if (package.contains("releases") && package["releases"].is_array())
+    for (const json &release : package["releases"]) {
+      string tag = json_string_value(release, "tag_name");
+      tags.push_back(has_compatible_zip(release, platform)
+                         ? tag
+                         : tag + " (no " + platform.os + "-" + platform.arch +
+                               " zip)");
+    }
+  return Package::join(tags);
 }
 
 static void print_package_result(const json &package, const Platform &platform,
@@ -916,6 +955,10 @@ static void print_package_result(const json &package, const Platform &platform,
   if (!release_url.empty())
     cout << "\n  URL: " << release_url;
   cout << endl;
+  string history = release_history(package, platform);
+  cout << "  releases: "
+       << (history.empty() ? "none published (pre-releases only)" : history)
+       << endl;
 
   if (!release.contains("assets") || !release["assets"].is_array()) {
     cout << "  " << fg::yellow << "No assets in latest release" << fg::reset
@@ -980,6 +1023,14 @@ static void print_list_packages_data_json(const json &data) {
       if (!rel_url.empty())
         rel["url"] = rel_url;
       pkg["release"] = rel;
+      json releases = json::array();
+      if (package.contains("releases") && package["releases"].is_array())
+        for (const json &r : package["releases"])
+          releases.push_back(
+              {{"tag", json_string_value(r, "tag_name")},
+               {"published_at", json_string_value(r, "published_at")},
+               {"compatible", has_compatible_zip(r, platform)}});
+      pkg["releases"] = releases;
 
       if (release.contains("assets") && release["assets"].is_array()) {
         json zips = json::array();
@@ -1036,7 +1087,8 @@ static void print_list_packages_data(const json &data, bool verbose) {
              << fg::reset << endl;
       }
     }
-    cout << style::italic << "Run 'mads list --verbose' to see release details"
+    cout << style::italic
+         << "Run 'mads package --list --verbose' to see release details"
          << style::reset << endl
          << endl;
   }
@@ -1101,6 +1153,12 @@ static void print_package_info_data_json(const json &data) {
   string package_type = json_string_value(package, "type");
   if (!package_type.empty())
     out["type"] = package_type;
+
+  string package_error = json_string_value(package, "error");
+  if (!package_error.empty())
+    out["error"] = package_error;
+  else if (package.contains("release") && package["release"].is_object())
+    out["release"] = json_string_value(package["release"], "tag_name");
 
   if (data.contains("repository") && data["repository"].is_object()) {
     const json &repository = data["repository"];
@@ -1195,6 +1253,13 @@ static void print_package_info_data(const json &data) {
   string package_type = json_string_value(package, "type");
   if (!package_type.empty())
     cout << "Type: " << package_type << endl;
+  string package_error = json_string_value(package, "error");
+  if (!package_error.empty())
+    cout << fg::yellow << "Release: " << package_error << fg::reset << endl;
+  else if (package.contains("release") && package["release"].is_object())
+    cout << "Release: " << style::bold
+         << json_string_value(package["release"], "tag_name", "unknown")
+         << style::reset << endl;
   cout << endl;
 
   print_about_section(data);
@@ -1243,7 +1308,9 @@ static json find_install_asset(const json &release, const Platform &platform) {
   if (found_universal)
     return universal_asset;
 
-  throw runtime_error("No compatible ZIP installer found in latest release");
+  throw runtime_error("No compatible ZIP installer for " + platform.os + "-" +
+                      platform.arch + " in release " +
+                      json_string_value(release, "tag_name", "(untagged)"));
 }
 
 bool list_packages(bool no_cache, bool verbose, bool json_output,
@@ -1267,15 +1334,14 @@ bool list_packages(bool no_cache, bool verbose, bool json_output,
   return false;
 }
 
-bool print_package_info(const string &package_name, bool no_cache,
-                        bool json_output,
+bool print_package_info(const string &package_name, const string &tag,
+                        bool no_cache, bool json_output,
                         const string &package_list_source) {
   GitHubTrafficLimited = false;
 
   try {
-    json data =
-        load_or_fetch_package_info_data(package_name, no_cache,
-                                        package_list_source);
+    json data = load_or_fetch_package_info_data(package_name, tag, no_cache,
+                                                package_list_source);
     if (json_output)
       print_package_info_data_json(data);
     else
@@ -1288,13 +1354,14 @@ bool print_package_info(const string &package_name, bool no_cache,
   return false;
 }
 
-bool install_package(const string &package_name, bool force, bool no_cache,
+bool install_package(const string &package_name, const string &tag,
+                     bool force, bool no_cache,
                      const string &package_list_source) {
   GitHubTrafficLimited = false;
 
   fs::path temp_dir;
   try {
-    json data = load_or_fetch_package_info_data(package_name, no_cache,
+    json data = load_or_fetch_package_info_data(package_name, tag, no_cache,
                                                 package_list_source, false);
     if (!data.contains("package") || !data["package"].is_object())
       throw runtime_error("Package information is unavailable");
@@ -1324,8 +1391,10 @@ bool install_package(const string &package_name, bool force, bool no_cache,
     fs::path zip_path = temp_dir / asset_filename;
     fs::path status_path = temp_dir / "download.status";
 
+    string release_tag =
+        json_string_value(package["release"], "tag_name", "(untagged)");
     cout << "Installing " << style::bold << package_name << style::reset
-         << endl;
+         << " " << release_tag << endl;
     cout << "  Downloading " << fg::green << asset_name << fg::reset << endl;
     download_file(download_url, zip_path, status_path);
 
@@ -1336,8 +1405,17 @@ bool install_package(const string &package_name, bool force, bool no_cache,
     error_code cleanup_error;
     fs::remove_all(temp_dir, cleanup_error);
 
-    cout << fg::green << "Installed " << package_name << " to "
-         << prefix.string() << fg::reset << endl;
+    cout << fg::green << "Installed " << package_name << " " << release_tag
+         << " to " << prefix.string() << fg::reset << endl;
+    string newest;
+    if (package.contains("releases") && package["releases"].is_array() &&
+        !package["releases"].empty())
+      newest = json_string_value(package["releases"][0], "tag_name");
+    if (!tag.empty() && !newest.empty() && tag != newest)
+      cout << fg::yellow << "Note: " << tag << " is not the latest release ("
+           << newest << "). Plugins built for an older plugin protocol are "
+           << "refused by the MADS loaders: check with `mads inspect_plugin`."
+           << fg::reset << endl;
     return true;
   } catch (const exception &e) {
     if (!temp_dir.empty()) {
@@ -1357,8 +1435,8 @@ int main(int argc, char **argv) {
   options.add_options()
     ("l,list", "List available packages")
     ("v,verbose", "Show detailed information in list output")
-    ("n,info", "Print information on a package installation", value<string>())
-    ("i,install", "Install a package by name", value<string>())
+    ("n,info", "Print information on a package installation (NAME or NAME@TAG)", value<string>())
+    ("i,install", "Install a package: NAME (latest release) or NAME@TAG (the release tagged TAG)", value<string>())
     ("f,force", "Force overwrite of existing files")
     ("j,json", "Output results in JSON format (valid with --list and --info)")
     ("no-cache", "Fetch package data without reading cached results")
@@ -1428,9 +1506,21 @@ int main(int argc, char **argv) {
     return 0;
   }
 
+  Mads::Package::Spec spec;
+  for (const char *opt : {"info", "install"}) {
+    if (!options_parsed.count(opt))
+      continue;
+    try {
+      spec = Mads::Package::parse_spec(options_parsed[opt].as<string>());
+    } catch (const invalid_argument &e) {
+      cerr << fg::red << "Error: " << e.what() << style::reset << endl;
+      return -1;
+    }
+  }
+
   if (options_parsed.count("info")) {
     string package_name = options_parsed["info"].as<string>();
-    if (!Mads::print_package_info(package_name, no_cache, json_output,
+    if (!Mads::print_package_info(spec.name, spec.tag, no_cache, json_output,
                                   package_list_source)) {
       cerr << fg::red << "Error fetching package info: " << package_name
            << style::reset << endl;
@@ -1443,8 +1533,9 @@ int main(int argc, char **argv) {
 
   if (options_parsed.count("install")) {
     string package_name = options_parsed["install"].as<string>();
-    if (!Mads::install_package(package_name, options_parsed.count("force") > 0,
-                               no_cache, package_list_source)) {
+    if (!Mads::install_package(spec.name, spec.tag,
+                               options_parsed.count("force") > 0, no_cache,
+                               package_list_source)) {
       cerr << fg::red << "Error installing package: " << package_name
            << style::reset << endl;
       Mads::print_github_limit_warning();

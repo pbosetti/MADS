@@ -164,6 +164,12 @@ Read this before upgrading from 2.5.x.
   timestamps and timecodes of JSON/MsgPack data records forward on each
   pass so they keep increasing. Ctrl-C now stops `mads play` cleanly, with
   its summary, instead of killing it. See **mads-play**(1).
+- **`mads package` can install a given release:** `mads package -i
+  NAME@TAG` installs the release tagged exactly `TAG` (pre-releases
+  included), and plain `NAME` the latest one; `--info` takes `NAME@TAG` too.
+  `--list --verbose` shows each package's published releases, newest first,
+  marking those with no ZIP for this platform. The list costs the same
+  number of GitHub API calls as before.
 
 ### Releases
 

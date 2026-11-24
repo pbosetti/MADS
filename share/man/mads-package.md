@@ -8,8 +8,8 @@
 **mads-package**
   [**\-l**, **\-\-list**]
   [**\-v**, **\-\-verbose**]
-  [**\-n**, **\-\-info** *package*]
-  [**\-i**, **\-\-install** *package*]
+  [**\-n**, **\-\-info** *package*[**@***tag*]]
+  [**\-i**, **\-\-install** *package*[**@***tag*]]
   [**\-f**, **\-\-force**]
   [**\-\-no-cache**]
   [**\-\-json**]
@@ -20,7 +20,7 @@
 
 **mads-package** lists, inspects, and installs optional MADS packages distributed as ZIP archives from GitHub releases.
 
-The command reads the public MADS package index from GitHub, resolves each package repository, and inspects the latest compatible release asset for the current operating system and CPU architecture. Stable GitHub releases are preferred. If a repository has no stable latest release, **mads-package** falls back to the newest non-draft pre-release.
+The command reads the public MADS package index from GitHub, resolves each package repository, and inspects the compatible release assets for the current operating system and CPU architecture. By default the latest release is used; *package***@***tag* selects the release tagged exactly *tag* instead, e.g. to install an older version.
 
 Packages are installed from release ZIP files. The selected ZIP is downloaded to a temporary unprivileged directory, extracted, and merged into the MADS installation prefix, i.e. the directory printed by **mads** **\-p**. Archive directory structure is preserved. If an archive contains a single top-level directory, that directory is stripped so its contents are installed directly under the prefix.
 
@@ -29,16 +29,16 @@ The package index and package metadata are cached under the user's home director
 # OPTIONS
 
 **\-l**, **\-\-list**
-:  List installable MADS packages. For each package, show the repository, the latest stable release or latest pre-release fallback, and compatible ZIP release assets for the current platform.
+:  List installable MADS packages and their repositories. With **\-\-verbose**, also show for each package the latest release, the list of its published releases from the newest to the oldest, and the compatible ZIP release assets of the latest release for the current platform.
 
 **\-v**, **\-\-verbose**
-:  Show additional information when listing packages. This includes the GitHub repository About text when available, plus package requirements read from an optional **mads_package.json** file in the repository root.
+:  Show release details when listing packages: the latest release, its compatible ZIP assets and the tags of all published releases, comma separated, from the newest to the oldest. A release with no ZIP for the current platform is marked **(no** *os***-***arch* **zip)**.
 
-**\-n**, **\-\-info** *package*
-:  Print detailed information for *package*. This includes the GitHub repository About text when available, plus package requirements read from an optional **mads_package.json** file in the repository root.
+**\-n**, **\-\-info** *package*[**@***tag*]
+:  Print detailed information for *package*: the selected release, the GitHub repository About text when available, plus package requirements read from an optional **mads_package.json** file in the repository root (at *tag*, when given).
 
-**\-i**, **\-\-install** *package*
-:  Install *package*. The selected ZIP asset is downloaded to a temporary directory and extracted into the MADS prefix. On macOS, architecture-specific assets such as **darwin-arm64** or **darwin-x86_64** are preferred over **darwin-universal** when both are present.
+**\-i**, **\-\-install** *package*[**@***tag*]
+:  Install *package* from its latest release, or from the release tagged exactly *tag* (no **v** prefix is added or removed). Installing a release other than the latest prints a note, since plugins built for an older plugin protocol are refused by the MADS loaders. The selected ZIP asset is downloaded to a temporary directory and extracted into the MADS prefix. On macOS, architecture-specific assets such as **darwin-arm64** or **darwin-x86_64** are preferred over **darwin-universal** when both are present.
 
 **\-f**, **\-\-force**
 :  Force overwrite of existing files during installation. This option is only valid together with **\-\-install**.
@@ -73,7 +73,9 @@ Package names from this index are used as arguments to **\-\-info** and **\-\-in
 
 # RELEASE SELECTION
 
-**mads-package** first requests the latest stable GitHub release for a package repository. If GitHub reports that no stable latest release exists, the command fetches the release list and selects the newest non-draft pre-release by timestamp.
+**mads-package** fetches the 100 most recent releases of a package repository. The published releases (neither drafts nor pre-releases) are listed by publication date, newest first, and the newest of them is the latest release. If a repository has only pre-releases, the newest non-draft pre-release is used instead.
+
+With *package***@***tag*, the release whose tag is exactly *tag* is used, pre-releases included (e.g. the **ci-**... builds of a plugin's CI). If no release has that tag, the error lists the published tags.
 
 Only ZIP assets matching the current platform are shown or installed. Asset compatibility is determined from the filename suffix:
 
@@ -130,7 +132,7 @@ Cache files are stored in:
 
 On Windows, the home directory is resolved from **HOME**, then **USERPROFILE**, then **HOMEDRIVE** plus **HOMEPATH**.
 
-The list cache is stored as **list_packages.json**. Per-package info cache files are stored as **info_**\[*package*\]**.json**. Cache files older than six hours are ignored.
+The list cache is stored as **list_packages.json**. Per-package info cache files are stored as **info_**\[*package*\]**.json**, or **info_**\[*package*\]**_**\[*tag*\]**.json** for a pinned release. Cache files older than six hours are ignored.
 
 # EXAMPLES
 
@@ -156,6 +158,12 @@ Install a package:
 
 ```
 mads-package --install rerunner.plugin
+```
+
+Install the release tagged v3.0.0 of a package:
+
+```
+mads-package --install mongodb.plugin@v3.0.0
 ```
 
 Install a package and overwrite existing files:
