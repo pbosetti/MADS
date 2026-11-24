@@ -81,24 +81,7 @@ if(APPLE AND CMAKE_OSX_ARCHITECTURES MATCHES ";")
   set(SNAPPY_HAVE_NEON_CRC32 OFF CACHE BOOL "" FORCE)
 endif()
 
-set(ENABLE_TESTS OFF CACHE BOOL "" FORCE)
-set(ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(ENABLE_UNINSTALL OFF CACHE BOOL "" FORCE)
-set(ENABLE_MAN_PAGES OFF CACHE BOOL "" FORCE)
-set(ENABLE_HTML_DOCS OFF CACHE BOOL "" FORCE)
-set(ENABLE_MAINTAINER_FLAGS OFF CACHE BOOL "" FORCE)
-set(ENABLE_SHARED OFF CACHE STRING "" FORCE)
-set(ENABLE_STATIC ON CACHE STRING "" FORCE)
-set(ENABLE_SASL OFF CACHE STRING "" FORCE)
-set(ENABLE_ZSTD OFF CACHE STRING "" FORCE)
-set(ENABLE_MONGODB_AWS_AUTH OFF CACHE STRING "" FORCE)
-
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-set(BUILD_SHARED_AND_STATIC_LIBS OFF CACHE BOOL "" FORCE)
-if(MADS_ENABLE_MONGOCXX)
-  set(MONGOCXX_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-  set(BSONCXX_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-endif()
 
 FetchContent_Declare(
   nlohmann_json
@@ -199,46 +182,6 @@ FetchContent_Declare(
   GIT_TAG v9.0.0
   GIT_SHALLOW TRUE
 )
-
-if(MADS_ENABLE_MONGOCXX)
-  # shortcut: master commit 513e7b1 (2.6.0-dev, CDRIVER-6534) fixes the
-  # pointer-to-bool errors of MSVC 19.52 in libbson; go back to a release tag
-  # (and GIT_SHALLOW) once one includes it (> 2.5.9).
-  set(MADS_MONGO_C_DRIVER_VERSION "513e7b1aa742be8b8dbdefe4b9a1692c4ac94334")
-  set(MADS_MONGO_CXX_DRIVER_VERSION "4.4.0")
-
-  # mongo-cxx-driver derives its own version from BUILD_VERSION. Left at the
-  # default "0.0.0" it falls back to reading ${CMAKE_BINARY_DIR}/VERSION_CURRENT
-  # -- a file it writes itself into *our* build tree -- and otherwise shells out
-  # to a Python script. That makes the stamped version sticky across upgrades
-  # (a build dir configured against r3.11.1 keeps reporting 3.11.1 forever) and
-  # adds a Python dependency. Pin it to the tag we actually fetch.
-  set(BUILD_VERSION "${MADS_MONGO_CXX_DRIVER_VERSION}" CACHE STRING "" FORCE)
-  file(REMOVE "${CMAKE_BINARY_DIR}/VERSION_CURRENT")
-
-  set(_mads_local_mongo_c_driver_src
-      "${CMAKE_BINARY_DIR}/_deps/mongo-c-driver-src")
-  if(EXISTS "${_mads_local_mongo_c_driver_src}/CMakeLists.txt")
-    FetchContent_Declare(
-      mongo_c_driver
-      SOURCE_DIR "${_mads_local_mongo_c_driver_src}"
-    )
-  else()
-    # Archive, not git: a shallow clone cannot fetch a bare commit SHA.
-    FetchContent_Declare(
-      mongo_c_driver
-      URL https://github.com/mongodb/mongo-c-driver/archive/${MADS_MONGO_C_DRIVER_VERSION}.tar.gz
-    )
-  endif()
-  unset(_mads_local_mongo_c_driver_src)
-
-  FetchContent_Declare(
-    mongo_cxx_driver
-    GIT_REPOSITORY https://github.com/mongodb/mongo-cxx-driver.git
-    GIT_TAG r${MADS_MONGO_CXX_DRIVER_VERSION}
-    GIT_SHALLOW TRUE
-  )
-endif()
 
 # Configures a FetchContent dependency. Its own install rules are skipped:
 # MADS links every vendored library into MadsCore (or uses it at build time
@@ -349,20 +292,6 @@ install(
 
 add_vendor(snappy)  # statically linked into MadsCore, nothing installed
 
-if(MADS_ENABLE_MONGOCXX)
-  # Force mongo-cxx-driver to bind to in-tree libmongoc/libbson targets instead
-  # of stale user-local packages cached in the build directory.
-  set(ENABLE_EXTRA_ALIGNMENT OFF CACHE BOOL "" FORCE)
-  add_vendor(mongo_c_driver)
-
-  # Ensure mongo-c-driver (used by mongo_cxx_driver) uses fetched Snappy.
-  set(ENABLE_SNAPPY ON CACHE STRING "" FORCE)
-  set(SNAPPY_INCLUDE_DIRS "${snappy_SOURCE_DIR}" CACHE PATH "" FORCE)
-  set(SNAPPY_LIBRARIES "$<TARGET_FILE:snappy>" CACHE STRING "" FORCE)
-
-  add_vendor(mongo_cxx_driver)
-endif()
-
 #
 # Public third-party headers
 #
@@ -390,16 +319,4 @@ if(WIN32)
     DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT MadsCore)
   install(FILES "$<TARGET_LINKER_FILE:libzmq>"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT MadsCore)
-endif()
-
-# License/notice files of libraries statically linked into the shipped binaries.
-if(MADS_ENABLE_MONGOCXX)
-  install(FILES
-      "${mongo_c_driver_SOURCE_DIR}/COPYING"
-      "${mongo_c_driver_SOURCE_DIR}/THIRD_PARTY_NOTICES"
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/mongo-c-driver" COMPONENT MadsCore)
-  install(FILES
-      "${mongo_cxx_driver_SOURCE_DIR}/LICENSE"
-      "${mongo_cxx_driver_SOURCE_DIR}/THIRD-PARTY-NOTICES"
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/mongo-cxx-driver" COMPONENT MadsCore)
 endif()

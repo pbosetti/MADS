@@ -24,6 +24,18 @@ Read this before upgrading from 2.5.x.
   `v2.6-P9` and defaults the build type to Release before `project()` in
   `CMakeLists.txt`; no source change is needed, the zero-copy hooks are
   opt-in (see *For developers*).
+- **`mads-logger` is replaced by the `mongodb.plugin` filter.** MADS no longer
+  builds or ships the MongoDB C/C++ drivers: `mads filter mongodb.plugin -n
+  logger -b` writes the same documents (one collection per topic, `{timestamp,
+  message[, data]}`, pause via `metadata`, the same indexes) and reads the
+  same `[logger]` section. Install it with `mads package -i mongodb.plugin`;
+  the same package provides `replay.plugin`, no longer bundled with MADS.
+  `mads logger` remains as a deprecated shortcut for that command; its
+  `--echo`, `--file`, `--array`, `--no-mongo` and `--cross` options are gone,
+  and `-m URI`/`-p` become `-o mongo_uri=URI`/`-o initially_paused=true`. It
+  still publishes `{"logger_paused": ...}` on `logger_status`, now every
+  `status_period_ms` (default 1000). The `MADS_ENABLE_MONGOCXX`
+  option, `Mads::Logger` and `Mads::MongoFetch` are removed.
 - **Agents on the broker's host now use ipc by default.** `transport = "auto"`
   connects over `ipc://` sockets when the broker runs on the same host and the
   socket files are visible, and over tcp otherwise. Set `transport = "tcp"`
@@ -199,6 +211,11 @@ Read this before upgrading from 2.5.x.
   name.
 
 ## For developers
+
+- **`mads filter`:** when `process()` returns `retry`, the host now waits for
+  the plugin's `next_loop_duration`, as documented, instead of running the
+  next iteration at once (an idle `dont_block` filter no longer spins), and
+  the plugin settings carry the effective `dont_block`.
 
 - **Plugin protocol P9** (`mads_plugin` tag `v2.6-P9`). New virtual methods with
   copying defaults, so P8 sources compile unchanged: `Filter::load_data_view()`

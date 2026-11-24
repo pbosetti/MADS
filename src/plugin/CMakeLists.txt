@@ -36,33 +36,6 @@ set_target_properties(monitor PROPERTIES PREFIX "" SUFFIX ".plugin")
 target_link_libraries(monitor PRIVATE pugg rang)
 list(APPEND TARGET_LIST monitor)
 
-# replay plugin
-if(MADS_ENABLE_MONGOCXX)
-  add_library(replay SHARED ${SOURCE_DIR}/plugin/mongo_replay.cpp)
-  if(APPLE)
-    set(_mads_plugin_rel_rpath "@loader_path/../lib")
-  elseif(UNIX)
-    set(_mads_plugin_rel_rpath "\$ORIGIN/../lib")
-  endif()
-  if(DEFINED _mads_plugin_rel_rpath)
-    set_target_properties(
-      replay
-      PROPERTIES
-        PREFIX ""
-        SUFFIX ".plugin"
-        BUILD_RPATH "${_mads_plugin_rel_rpath}"
-        INSTALL_RPATH "${_mads_plugin_rel_rpath}"
-        INSTALL_RPATH_USE_LINK_PATH FALSE
-    )
-  else()
-    set_target_properties(replay PROPERTIES PREFIX "" SUFFIX ".plugin")
-  endif()
-  target_link_libraries(replay PRIVATE MadsCore pugg rang)
-  link_first_available(replay CANDIDATES mongo::mongocxx_static mongocxx_static)
-  link_first_available(replay CANDIDATES mongo::bsoncxx_static bsoncxx_static)
-  list(APPEND TARGET_LIST replay)
-endif()
-
 # Install plugins
 install(TARGETS ${TARGET_LIST}
   BUNDLE DESTINATION bin COMPONENT MadsApps

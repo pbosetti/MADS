@@ -80,6 +80,7 @@ endforeach()
 create_mads_target(source plugin_loader.cpp DEFS "PLUGIN_LOADER_SOURCE")
 create_mads_target(filter plugin_loader.cpp DEFS "PLUGIN_LOADER_FILTER")
 create_mads_target(sink   plugin_loader.cpp DEFS "PLUGIN_LOADER_SINK")
+create_mads_target(logger plugin_loader.cpp DEFS "PLUGIN_LOADER_FILTER" "PLUGIN_LOADER_LOGGER")
 
 # Rust plugin loaders (use mads_rust_plugin_t C ABI via dlopen, no pugg)
 if(NOT WIN32)

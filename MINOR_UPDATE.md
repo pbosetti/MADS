@@ -123,10 +123,9 @@ are pinned via `MADS_MONGO_C_DRIVER_VERSION` / `MADS_MONGO_CXX_DRIVER_VERSION`.
 - a new header in `src/` is published to the SDK automatically — intended or not;
 - internal headers belong in `src/detail/`, which the glob does not reach.
 
-Installed headers must not leak vendored types (bsoncxx/mongocxx), or SDK users
-need the whole driver header tree on their include path and `sizeof()` of our
-classes becomes driver-ABI dependent. `Logger` and `MongoFetch` use a pimpl for
-exactly this. To verify: compile a TU that includes the public headers with
+Installed headers must not leak vendored types, or SDK users need the whole
+dependency header tree on their include path and `sizeof()` of our classes
+becomes dependency-ABI dependent; use a pimpl for this. To verify: compile a TU that includes the public headers with
 every vendor `-I`/`-isystem` path stripped.
 
 ## 6. Build matrix that must stay green
@@ -134,7 +133,6 @@ every vendor `-I`/`-isystem` path stripped.
 | Configuration | Why |
 | --- | --- |
 | default | the shipped build |
-| `-DMADS_ENABLE_MONGOCXX=OFF` | must build *and* pass; `Logger` degrades to file-only, queryable at runtime via `Logger::has_mongo_support()` |
 | `-DMADS_BUILD_TESTS=ON` | full Catch2 suite, no broker/DB/network needed |
 | `-DMADS_COVERAGE=ON` | the coverage job |
 

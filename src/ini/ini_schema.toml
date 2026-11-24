@@ -905,7 +905,7 @@ id = "logger"
 label = "Logger"
 executable = "mads-logger"
 category = "Agents"
-role = "sink"
+role = "filter"
 custom_keys = false
   [[types.keys]]
   name = "mongo_uri"
@@ -931,6 +931,18 @@ custom_keys = false
   group = "Database"
   default = 'false'
   doc = "Start with logging paused"
+  [[types.keys]]
+  name = "status_period_ms"
+  type = "integer"
+  group = "Database"
+  default = '1000'
+  doc = "Period in ms of the logger_status message (0 disables it)"
+  [[types.keys]]
+  name = "dont_block"
+  type = "boolean"
+  group = "Timing"
+  default = 'true'
+  doc = "Non-blocking receive; with false the status goes out only on traffic"
 
 [[types]]
 id = "feedback"

@@ -32,8 +32,14 @@ Author(s): Paolo Bosetti
 #include <filter.hpp>
 #define PLUGIN_CLASS Filter
 #define PLUGIN_NAME "Filter"
+#ifdef PLUGIN_LOADER_LOGGER
+// mads-logger: deprecated shortcut for `mads filter mongodb.plugin -n logger -b`
+#define PLUGIN_DEFAULT "mongodb.plugin"
+#define AGENT_NAME_DEFAULT "logger"
+#else
 #define PLUGIN_DEFAULT "bridge.plugin"
 #define AGENT_NAME_DEFAULT "bridge"
+#endif
 #elif defined(PLUGIN_LOADER_SINK)
 #include <sink.hpp>
 #define PLUGIN_CLASS Sink
@@ -249,8 +255,20 @@ int main(int argc, char *argv[]) {
   if (!fs::exists(plugin_file)) {
     cerr << fg::red << "Error: cannot find plugin file " << plugin_file
          << " (extension .plugin is required!)" << fg::reset << endl;
+#ifdef PLUGIN_LOADER_LOGGER
+    cerr << fg::yellow
+         << "mads logger needs the MongoDB plugin, which is not installed: "
+            "install it with `mads package -i mongodb.plugin`"
+         << fg::reset << endl;
+#endif
     exit(1);
   }
+#ifdef PLUGIN_LOADER_LOGGER
+  cerr << fg::yellow
+       << "Warning: `mads logger` is deprecated, it is just a shortcut for "
+          "`mads filter mongodb.plugin -n logger -b`"
+       << fg::reset << endl;
+#endif
 
   // Driver: --driver > 'driver' setting > file stem.
   plugin_name = fs::path(plugin_file).stem().string();
@@ -453,6 +471,12 @@ int main(int argc, char *argv[]) {
   if (options_parsed.count("dont-block") != 0) {
     dont_block = true;
   }
+#ifdef PLUGIN_LOADER_LOGGER
+  // mongodb.plugin publishes its status from idle passes
+  if (settings["dont_block"].is_null() && settings["dont-block"].is_null())
+    dont_block = true;
+#endif
+  settings["dont_block"] = dont_block; // the effective mode, for the plugin
   if (dont_block) {
     cerr << fg::yellow << "Running in non-blocking mode" << fg::reset << endl;
   }
@@ -730,7 +754,7 @@ int main(int argc, char *argv[]) {
       }
       break; // next step
     case return_type::retry:
-      return 0ms; // next iteration
+      return plugin->next_loop_duration; // nothing to publish this pass
     case return_type::error:
       err["error"]["process"] = plugin->error();
       agent.register_event(event_type::message, err);

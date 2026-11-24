@@ -98,7 +98,6 @@ if(ANDROID)
 endif()
 
 include(GNUInstallDirs)
-option(MADS_ENABLE_MONGOCXX "Enable MongoDB C++ driver dependency" ON)
 option(MADS_BUILD_APPS "Build executables" ${PROJECT_IS_TOP_LEVEL})
 if(ANDROID)
   set(_mads_gui_default OFF)
@@ -224,7 +223,6 @@ if(NOT MSVC)
 endif()
 
 if(ANDROID)
-  list(REMOVE_ITEM LIB_SOURCES ${SOURCE_DIR}/mongo_fetch.cpp)
   list(REMOVE_ITEM LIB_SOURCES ${SOURCE_DIR}/https_client_linux.cpp)
   list(REMOVE_ITEM LIB_SOURCES ${SOURCE_DIR}/https_client_windows.cpp)
   list(REMOVE_ITEM LIB_SOURCES ${SOURCE_DIR}/https_client_macos.mm)
@@ -237,14 +235,6 @@ elseif(APPLE)
 else()
   list(REMOVE_ITEM LIB_SOURCES ${SOURCE_DIR}/https_client_windows.cpp)
   list(REMOVE_ITEM LIB_SOURCES ${SOURCE_DIR}/https_client_macos.mm)
-endif()
-
-# mongo_fetch.cpp unconditionally includes <mongocxx/...>, so it can only be
-# part of the library when the MongoDB driver is actually vendored in.
-# (logger.cpp guards its driver use with MADS_HAS_MONGOCXX and still builds as a
-# file-only logger, so it stays in the library either way.)
-if(NOT MADS_ENABLE_MONGOCXX)
-  list(REMOVE_ITEM LIB_SOURCES ${SOURCE_DIR}/mongo_fetch.cpp)
 endif()
 
 add_library(
@@ -291,24 +281,6 @@ link_first_available(${LIB_NAME} CANDIDATES Snappy::snappy snappy)
 # newer glibc, where librt is an empty stub. Bionic has no POSIX shm at all.
 if(UNIX AND NOT APPLE AND NOT ANDROID)
   target_link_libraries(${LIB_NAME} PRIVATE rt)
-endif()
-if(MADS_ENABLE_MONGOCXX)
-  # Guards the driver-dependent code paths in logger.cpp. PRIVATE on purpose:
-  # no installed header depends on it, so SDK consumers never need it. Use
-  # Mads::Logger::has_mongo_support() to query the build at runtime instead.
-  target_compile_definitions(${LIB_NAME} PRIVATE MADS_HAS_MONGOCXX)
-  link_first_available(
-    ${LIB_NAME}
-    CANDIDATES
-      mongo::mongocxx_static
-      mongocxx_static
-  )
-  link_first_available(
-    ${LIB_NAME}
-    CANDIDATES
-      mongo::bsoncxx_static
-      bsoncxx_static
-  )
 endif()
 if(APPLE)
   find_library(FOUNDATION_FRAMEWORK Foundation)
@@ -364,10 +336,6 @@ link_first_available(MadsMainDeps LINK_SCOPE INTERFACE CANDIDATES sodium sodium:
 link_first_available(MadsMainDeps LINK_SCOPE INTERFACE CANDIDATES libzmq libzmq-static zmq)
 link_first_available(MadsMainDeps LINK_SCOPE INTERFACE CANDIDATES inja::inja inja)
 link_first_available(MadsMainDeps LINK_SCOPE INTERFACE CANDIDATES Snappy::snappy snappy)
-if(MADS_ENABLE_MONGOCXX)
-  link_first_available(MadsMainDeps LINK_SCOPE INTERFACE CANDIDATES mongo::mongocxx_static mongocxx_static)
-  link_first_available(MadsMainDeps LINK_SCOPE INTERFACE CANDIDATES mongo::bsoncxx_static bsoncxx_static)
-endif()
 if(MADS_CPPZMQ_INCLUDE_DIR)
   target_include_directories(
     MadsMainDeps
@@ -509,11 +477,6 @@ install(
 # Note: this glob is deliberately non-recursive, so internal headers under
 # src/detail/ and src/shm/ are not part of the installed SDK.
 file(GLOB LIB_HEADERS ${SOURCE_DIR}/*.hpp ${SOURCE_DIR}/*.h)
-# MongoFetch is only compiled into the library when the driver is vendored in;
-# shipping its header otherwise would just hand consumers link errors.
-if(NOT MADS_ENABLE_MONGOCXX)
-  list(REMOVE_ITEM LIB_HEADERS ${SOURCE_DIR}/mongo_fetch.hpp)
-endif()
 install(
   FILES ${LIB_HEADERS}
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}

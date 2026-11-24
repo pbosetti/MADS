@@ -53,7 +53,7 @@ In addition, the **mads** command allows to create systemd services for running 
 :  Start a MADS broker. Use -d option unless you want it interactive. Wraps **mads-broker**.
 
 **logger**
-:  Start a MADS logger. Wraps **mads-logger**.
+:  Deprecated shortcut for `mads filter mongodb.plugin -n logger -b`, which logs to MongoDB. Wraps **mads-logger**.
 
 **source**
 :  Start a MADS source. Wraps **mads-source**.

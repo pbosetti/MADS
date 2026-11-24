@@ -1,98 +1,41 @@
-
 # NAME
 
-**mads-logger** - The logger for the MADS network
+**mads-logger** - Deprecated shortcut for the MongoDB logger filter
 
 # SYNOPSIS
 
-**mads-logger** 
-  [**\-p, \-\-pause**] 
-  [**\-e, \-\-echo**]
-  [**\-n, \-\-no-mongo**]
-  [**\-m, \-\-mongo** *URI*]
-  [**\-f, \-\-file** *filename*]
-  [**\-a, \-\-array**]
-  [**\-x, \-\-cross**]
-  [**\-s, \-\-settings** *arg*]
-  [**\-S, \-\-save-settings** *arg*]
-  [**\-\-crypto**]
-  [**\-\-keys_dir[=path]**]
-  [**\-\-key_broker[=name]**]
-  [**\-\-key_client[=name]**]
-  [**\-\-auth_verbose**]
-  [**\-v, \-\-version**]
-  [**\-h, \-\-help**]
+**mads-logger** [*mads-filter options*]
 
 # DESCRIPTION
 
-**mads-logger** is the logger for the MADS network. It is monolithinc agent that listens for incoming messages from sources and sinks and logs them to a file or to a MongoDB database. The logger can be configured to pause the logging, to echo the incoming messages to the console, to log to a file or to a MongoDB database.
+**mads-logger** is a deprecated shortcut for **mads filter mongodb.plugin -n logger -b**: it takes the same options as **mads-filter**(1), and warns on startup that it is deprecated.
 
-# OPTIONS
+The **mongodb.plugin** filter logs every message it receives to MongoDB, one collection per topic. It is not part of MADS: install it with **mads package -i mongodb.plugin**. If it is not installed, **mads-logger** exits with an error saying so.
 
-**\-p**, **\-\-pause**
-:  Start the logger paused. The logger will not log any message until the pause is lifted, typicaly by using the **resume** command on the GUI or by sending a {"pause": false} message to the metadata topic. The message {"pause": true} stops the logging
+The former options map as follows: **-m** *URI* becomes **-o mongo_uri=***URI*, and **-p** becomes **-o initially_paused=true**. The options **--echo**, **--file**, **--array**, **--no-mongo** and **--cross** no longer exist.
 
-**\-e**, **\-\-echo**
-:  echoes to the console any logged message.
+# SETTINGS
 
-**\-n**, **\-\-no-mongo**
-:  Disable logging to the MongoDB database, only logs to a file if **\-f** *filename* is given.
+The **[logger]** section of the settings file:
 
-**\-m**, **\-\-mongo** *URI*
-:  Log to the MongoDB database at the given URI. The URI must be in the form mongodb://user:password@host:port. If the URI is not given, the default URI mongodb://localhost:27017 is used.
+**mongo_uri**
+:  MongoDB connection URI (default *mongodb://localhost:27017*).
 
-**\-f**, **\-\-file** *filename*
-:  Log to the given file. If the file exists, the logger appends to it. If the file does not exist, the logger creates it.
+**mongo_db**
+:  Database name (default *mads*).
 
-**\-a**, **\-\-array**
-:  Log to a file as an array of JSON objects. If not, each message is logged as a separate JSON object, one per line.
+**initially_paused**
+:  Start with logging paused (default *false*). A message on the **metadata** topic with a boolean **pause** field pauses or resumes logging.
 
-**\-x**, **\-\-cross**
-:  Cross-connect sockets: this is for debugging purposes and allows to connect an agent directly to the logger, bypassing the broker. For this to work, the logger agent needs to read a local settings file (**\-s** option).
+**status_period_ms**
+:  Period of the **{"logger_paused": bool}** status published on the **logger_status** topic (default *1000*; *0* disables it).
 
-**\-s**, **\-\-settings** *URI*
-:  Path to the settings file (ini format). It can be a valid ZeroMQ url in the form tcp://host:port.
+**dont_block**
+:  Non-blocking receive (default *true* for **mads-logger**). With *false* the status is published only when messages arrive.
 
-**\-S**, **\-\-save-settings** *filename.ini*
-:  Save the settings (loaded by the broker or via **\-s** option) to the given file (ini format).
-
-**\-\-crypto**
-:  Enable CURVE encryption for broker communication.
-
-**\-\-keys_dir[=path]**
-:  Directory where CURVE key files are stored.
-
-**\-\-key_broker[=name]**
-:  Name of the broker key file, without the `.key` extension. Defaults to **broker**.
-
-**\-\-key_client[=name]**
-:  Name of the client key file, without the `.key` extension. Defaults to **client**.
-
-**\-\-auth_verbose**
-:  Enable verbose authentication messages.
-
-**\-v**, **\-\-version**
-: show version information.
-
-**\-h**, **\-\-help**
-:  show summary of options.
-
-# BUGS
-
-The upstream bug tracker can be found at https://github.com/pbosetti/MADS/issues.
+**sub_topic**
+:  Topics to log; **[""]** logs all of them.
 
 # SEE ALSO
 
-**mads**(1), **mads-broker**(1), **mads-source**(1), **mads-sink**(1), **mads-filter**(1)
-
-# FILES
-
-**/usr/local/etc/mads.ini**: MADS configuration file.
-
-# AUTHOR
-
-**mads-logger** was written by Paolo Bosetti <paolo.bosetti@unitn.it>.
-
-# LICENSE
-
-https://www.apache.org/licenses/LICENSE-2.0
+**mads**(1), **mads-filter**(1), **mads-package**(1)

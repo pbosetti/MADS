@@ -43,7 +43,7 @@ services:
       - outer
   logger:
     image: p4010/miroscic
-    command: logger -s tcp://broker:9092 -m mongodb://mongo:27017
+    command: filter mongodb.plugin -n logger -b -s tcp://broker:9092 -o mongo_uri=mongodb://mongo:27017
     depends_on:
       broker:
         condition: service_started

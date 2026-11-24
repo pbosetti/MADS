@@ -43,7 +43,6 @@ jobs:
             -DMADS_COVERAGE=ON \
             -DMADS_BUILD_APPS=OFF \
             -DMADS_ENABLE_GUI=OFF \
-            -DMADS_ENABLE_MONGOCXX=OFF
 
       - name: Build
         run: cmake --build build-cov -j$(nproc)
