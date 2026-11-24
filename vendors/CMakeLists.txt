@@ -99,7 +99,7 @@ FetchContent_Declare(
 FetchContent_Declare(
   rang
   GIT_REPOSITORY https://github.com/agauniyal/rang.git
-  GIT_TAG v3.2
+  GIT_TAG v3.3
   GIT_SHALLOW TRUE
 )
 
@@ -149,7 +149,7 @@ FetchContent_Declare(
 FetchContent_Declare(
   inja
   GIT_REPOSITORY https://github.com/pantor/inja.git
-  GIT_TAG v3.4.0
+  GIT_TAG v3.5.0
   GIT_SHALLOW TRUE
 )
 

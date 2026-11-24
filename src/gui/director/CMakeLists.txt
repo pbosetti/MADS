@@ -16,11 +16,6 @@ endif()
 
 mads_gui_executable(director main.cpp gui_app.cpp)
 target_link_libraries(${MADS_GUI_TARGET} PRIVATE mads_director_core mads_gui_common portable_file_dialogs)
-if(UNIX AND NOT APPLE)
-  # MadsCore leaves its OpenSSL symbols (https_client) undefined on Linux: like
-  # every executable in src/main, link ssl/crypto here.
-  target_link_libraries(${MADS_GUI_TARGET} PRIVATE ssl crypto)
-endif()
 if(WIN32)
   target_link_libraries(${MADS_GUI_TARGET} PRIVATE comdlg32 ole32 shell32)
 endif()

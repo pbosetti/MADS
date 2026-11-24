@@ -6,7 +6,9 @@
 # |____/ \___|\__|\__,_| .__/
 #                      |_|
 #
-cmake_minimum_required(VERSION 3.22)
+# 3.24: DOWNLOAD_EXTRACT_TIMESTAMP (vendors/) and src/main; the GUI's
+# mads-dashboard needs 3.28 and checks it itself.
+cmake_minimum_required(VERSION 3.24)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 if(POLICY CMP0169)
   cmake_policy(SET CMP0169 OLD)
@@ -281,6 +283,9 @@ link_first_available(${LIB_NAME} CANDIDATES Snappy::snappy snappy)
 # newer glibc, where librt is an empty stub. Bionic has no POSIX shm at all.
 if(UNIX AND NOT APPLE AND NOT ANDROID)
   target_link_libraries(${LIB_NAME} PRIVATE rt)
+  # https_client_linux.cpp; its consumers need not link OpenSSL themselves
+  find_package(OpenSSL REQUIRED)
+  target_link_libraries(${LIB_NAME} PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 endif()
 if(APPLE)
   find_library(FOUNDATION_FRAMEWORK Foundation)

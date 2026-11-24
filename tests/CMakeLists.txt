@@ -23,12 +23,6 @@ if(MADS_COVERAGE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_link_options(mads_test_flags INTERFACE --coverage)
 endif()
 
-# MadsCore leaves OpenSSL symbols (https_client) undefined on Linux; the
-# executables in src/main link ssl/crypto themselves, and so must the tests.
-if(UNIX AND NOT APPLE)
-  set(MADS_TEST_SSL_LIBS ssl crypto)
-endif()
-
 # One test executable per test_*.cpp file: new suites are added by dropping a
 # file in this directory, with no CMake edits required. test_main.cpp is the
 # shared entry point linked into every one of them below, not a suite itself.
@@ -54,7 +48,6 @@ foreach(test_src IN LISTS MADS_TEST_SOURCES)
     MadsMainDeps
     Catch2::Catch2
     mads_test_flags
-    ${MADS_TEST_SSL_LIBS}
   )
   if(test_name STREQUAL "test_director_adapter")
     target_link_libraries(${test_name} PRIVATE mads_director_core)

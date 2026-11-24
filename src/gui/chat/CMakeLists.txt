@@ -9,7 +9,7 @@ target_link_libraries(${MADS_GUI_TARGET} PRIVATE
   MadsMainDeps
 )
 if(UNIX AND NOT APPLE)
-  target_link_libraries(${MADS_GUI_TARGET} PRIVATE ssl crypto Threads::Threads)
+  target_link_libraries(${MADS_GUI_TARGET} PRIVATE Threads::Threads)
 endif()
 if(WIN32)
   target_link_libraries(${MADS_GUI_TARGET} PRIVATE comdlg32 ole32 shell32)
