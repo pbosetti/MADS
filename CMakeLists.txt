@@ -105,11 +105,11 @@ if(ANDROID)
 else()
   set(_mads_gui_default ON)
 endif()
-option(MADS_ENABLE_GUI "Build the GUI apps (mads-chat, mads-director); requires a graphical interface" ${_mads_gui_default})
+option(MADS_ENABLE_GUI "Build the GUI apps (mads-chat, mads-director, mads-dashboard); requires a graphical interface" ${_mads_gui_default})
 # One-shot migration of the former MADS_DIRECTOR option in existing build dirs.
 if(DEFINED CACHE{MADS_DIRECTOR})
   message(DEPRECATION "MADS_DIRECTOR is deprecated, use MADS_ENABLE_GUI instead (migrating value ${MADS_DIRECTOR})")
-  set(MADS_ENABLE_GUI ${MADS_DIRECTOR} CACHE BOOL "Build the GUI apps (mads-chat, mads-director); requires a graphical interface" FORCE)
+  set(MADS_ENABLE_GUI ${MADS_DIRECTOR} CACHE BOOL "Build the GUI apps (mads-chat, mads-director, mads-dashboard); requires a graphical interface" FORCE)
   unset(MADS_DIRECTOR CACHE)
 endif()
 option(MADS_BUILD_TESTS "Build unit tests (Catch2)" OFF)
@@ -649,7 +649,7 @@ elseif(WIN32)
     list(APPEND CPACK_COMPONENTS_ALL MadsGui)
     cpack_add_component(MadsGui
       DISPLAY_NAME "GUI components"
-      DESCRIPTION "The mads-director, mads-chat and mads-ini apps"
+      DESCRIPTION "The mads-director, mads-chat, mads-dashboard and mads-ini apps"
       DEPENDS MadsCore
       INSTALL_TYPES Full
     )
@@ -677,7 +677,7 @@ else()
     # runtime, which dpkg-shlibdeps cannot see.
     set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "zenity")
   else()
-    # GUI-less variant (no mads-chat/mads-director, no X11/GL deps): CI packages
+    # GUI-less variant (no mads-chat/mads-director/mads-dashboard, no X11/GL deps): CI packages
     # it from the same build tree, reconfigured with MADS_ENABLE_GUI=OFF.
     set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_FILE_NAME}_headless")
   endif()
