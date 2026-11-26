@@ -41,7 +41,7 @@ struct ProcessDefinition {
   std::vector<std::string> dependencies;
 };
 
-// The MadsCore parser (src/director_config.hpp) has already expanded `scale`,
+// The MadsCore parser (src/detail/director_config.hpp) has already expanded `scale`,
 // substituted ${PWD}/${ID}, resolved workdirs and dependency instance names,
 // and rejected dependency cycles: this only maps its output.
 std::vector<ProcessDefinition> build_process_definitions(const Mads::DirectorConfig& config) {

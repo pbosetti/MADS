@@ -260,12 +260,10 @@ target_include_directories(
   ${LIB_NAME}
   PUBLIC
     $<BUILD_INTERFACE:${MADS_FORWARD_INCLUDE_DIR}>
-    # shortcut: src/ is still exported to in-tree consumers, for the pinned
-    # mads_dashboard that includes <agent_app.hpp>; drop it once the pin
-    # uses <mads/...>.
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mads/vendor>
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src # its own sources: shm/, detail/
 )
 
 link_first_available(${LIB_NAME} CANDIDATES nlohmann_json::nlohmann_json)

@@ -163,6 +163,7 @@ add_subdirectory(ini)
 set(MADS_DASH_INSTALL_COMPONENT MadsGui)
 FetchContent_Declare(mads_dashboard
   GIT_REPOSITORY https://github.com/MADS-NET/MADS_dashboard.git
-  GIT_TAG v3.0.0
+  # a hash, not the tag: FetchContent does not refetch a moved tag
+  GIT_TAG 1168a4532c245d643b5c44065930cda7b73f77e2 # v3.0.0
 )
 FetchContent_MakeAvailable(mads_dashboard)

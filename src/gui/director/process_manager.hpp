@@ -1,6 +1,6 @@
 #pragma once
 
-#include "detail/director_config.hpp"
+#include "../../detail/director_config.hpp"
 
 #include <cstdint>
 #include <deque>
