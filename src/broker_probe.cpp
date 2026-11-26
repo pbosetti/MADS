@@ -22,7 +22,7 @@
 #include <unistd.h>
 #endif
 
-#include "broker_probe.hpp"
+#include "detail/broker_probe.hpp"
 
 #include "curve.hpp"
 #include "detail/wire_format.hpp"

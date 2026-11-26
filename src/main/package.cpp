@@ -13,7 +13,7 @@
 */
 
 #include "../exec_path.hpp"
-#include "../https_client.hpp"
+#include "../detail/https_client.hpp"
 #include "../mads.hpp"
 #include "package_releases.hpp"
 #include <algorithm>

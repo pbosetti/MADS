@@ -1,4 +1,4 @@
-#include "echo_format.hpp"
+#include "detail/echo_format.hpp"
 
 #include <chrono>
 #include <cstdint>

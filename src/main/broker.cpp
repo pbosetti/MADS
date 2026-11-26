@@ -30,7 +30,7 @@ Author(s): Paolo Bosetti
 #include "../mads.hpp"
 #include "../watcher.hpp"
 #include "../curve.hpp"
-#include "../keypress.hpp"
+#include "../detail/keypress.hpp"
 #include "../service_discovery.hpp"
 #include "../socket_monitor.hpp"
 #include <array>

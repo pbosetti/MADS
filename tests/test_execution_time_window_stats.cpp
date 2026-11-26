@@ -5,7 +5,7 @@
 #include <cmath>
 #include <thread>
 
-#include "execution_time_window_stats.hpp"
+#include "detail/execution_time_window_stats.hpp"
 
 using namespace std::chrono_literals;
 

@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-#include "director_config.hpp"
+#include "detail/director_config.hpp"
 
 namespace fs = std::filesystem;
 

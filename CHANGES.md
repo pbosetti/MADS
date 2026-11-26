@@ -36,6 +36,17 @@ Read this before upgrading from 2.5.x.
   still publishes `{"logger_paused": ...}` on `logger_status`, now every
   `status_period_ms` (default 1000). The `MADS_ENABLE_MONGOCXX`
   option, `Mads::Logger` and `Mads::MongoFetch` are removed.
+- **Installed headers moved to `<prefix>/include/mads/`.** Include them as
+  `#include <mads/agent.hpp>` (or `<mads/agent_app.hpp>`, `<mads/mads.hpp>`,
+  ...) instead of `<agent.hpp>`. The bundled third-party headers (nlohmann,
+  toml++, cxxopts, rang, zmq, cppzmq) moved to `<prefix>/include/mads/vendor`
+  and no longer clutter, or shadow, a shared `include/`; `Mads::Mads` adds both
+  directories, so `<nlohmann/json.hpp>` keeps working for CMake consumers.
+  Internal headers are no longer installed (`doctor_checks`, `director_config`,
+  `up_supervisor`, `broker_probe`, `topology_graph`, `TerminalLogoRenderer`,
+  `keypress`, `echo_format`, `https_client`, `topic_stats`,
+  `execution_time_window_stats`, `stb_image.h`), and the unused `dummy.hpp`
+  (Armadillo) and `metadata.hpp` (Linux-only libgpiod agent) are removed.
 - **Agents on the broker's host now use ipc by default.** `transport = "auto"`
   connects over `ipc://` sockets when the broker runs on the same host and the
   socket files are visible, and over tcp otherwise. Set `transport = "tcp"`

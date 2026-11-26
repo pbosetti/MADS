@@ -1,4 +1,4 @@
-#include "https_client.hpp"
+#include "detail/https_client.hpp"
 #include <stdexcept>
 #include <sstream>
 #include <algorithm>

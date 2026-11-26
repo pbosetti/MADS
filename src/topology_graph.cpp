@@ -1,4 +1,4 @@
-#include "topology_graph.hpp"
+#include "detail/topology_graph.hpp"
 
 #include "topic_match.hpp"
 

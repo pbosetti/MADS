@@ -1,6 +1,6 @@
-#include "doctor_checks.hpp"
+#include "detail/doctor_checks.hpp"
 
-#include "broker_probe.hpp"
+#include "detail/broker_probe.hpp"
 #include "detail/endpoint.hpp"
 #include "detail/fd_limit.hpp"
 #include "detail/runtime_dir.hpp"

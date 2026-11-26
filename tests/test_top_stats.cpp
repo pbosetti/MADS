@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-#include "topic_stats.hpp"
+#include "detail/topic_stats.hpp"
 
 using namespace std::chrono_literals;
 

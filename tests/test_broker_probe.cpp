@@ -12,7 +12,7 @@
 #include <zmq.hpp>
 #include <zmq_addon.hpp>
 
-#include "broker_probe.hpp"
+#include "detail/broker_probe.hpp"
 #include "mads_test_helpers.hpp"
 
 using namespace std::chrono_literals;

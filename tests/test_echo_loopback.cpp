@@ -25,7 +25,7 @@
 #include <nlohmann/json.hpp>
 
 #include "agent.hpp"
-#include "echo_format.hpp"
+#include "detail/echo_format.hpp"
 #include "mads_test_helpers.hpp"
 
 using namespace std::chrono_literals;

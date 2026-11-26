@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "topology_graph.hpp"
+#include "detail/topology_graph.hpp"
 
 using Mads::AgentTopicInfo;
 using Mads::GraphOptions;

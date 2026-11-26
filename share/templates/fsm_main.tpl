@@ -18,9 +18,9 @@ message(STATUS "Found Mads: ${Mads_DIR}")
 add_executable(fsm path/to/main.cpp)
 target_link_libraries(fsm PRIVATE Mads::Mads)
 */
-#include <mads.hpp>
-#include <agent.hpp>
-#include <agent_app.hpp>
+#include <mads/mads.hpp>
+#include <mads/agent.hpp>
+#include <mads/agent_app.hpp>
 #include <thread>
 #include <chrono>
 #include <filesystem>

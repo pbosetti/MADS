@@ -237,7 +237,7 @@ See **[rust/README.md](rust/README.md)** for the full guide: trait reference, re
 For full control, subclass `Mads::Agent` and wrap it with `AgentApp` ([`src/agent_app.hpp`](src/agent_app.hpp)), which folds away the repetitive CLI/startup boilerplate (option parsing, settings, identity, queue sizing, events, remote control, graceful restart):
 
 ```cpp
-#include "agent_app.hpp"
+#include <mads/agent_app.hpp>
 using namespace Mads;
 
 int main(int argc, char *argv[]) {

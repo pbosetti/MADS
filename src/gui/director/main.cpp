@@ -1,5 +1,5 @@
 #include "attach_client.hpp"
-#include "director_config.hpp"
+#include "detail/director_config.hpp"
 #include "example_config.hpp"
 #include "gui_app.hpp"
 #include "mads.hpp"

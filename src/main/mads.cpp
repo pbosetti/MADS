@@ -15,8 +15,8 @@ Author: Paolo Bosetti, July 2024
 #include "../agent.hpp"
 #include "../exec_path.hpp"
 #include "../detail/release_tag.hpp"
-#include "../https_client.hpp"
-#include "../TerminalLogoRenderer.hpp"
+#include "../detail/https_client.hpp"
+#include "../detail/TerminalLogoRenderer.hpp"
 #include "../service_discovery.hpp"
 #include "../ini/ini_cli.hpp"
 #ifdef _WIN32

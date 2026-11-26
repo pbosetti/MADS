@@ -20,7 +20,7 @@ Author(s): Paolo Bosetti
 */
 #pragma once
 
-#include "topic_match.hpp"
+#include "../topic_match.hpp"
 
 #include <toml++/toml.hpp>
 

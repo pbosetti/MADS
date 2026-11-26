@@ -52,7 +52,7 @@
 //  - `terminal`/`tty` are GUI-only (attach windows); headless execution
 //    ignores them, matching NEW_FEATURES.md.
 
-#include "director_config.hpp"
+#include "detail/director_config.hpp"
 
 #include <toml++/toml.hpp>
 

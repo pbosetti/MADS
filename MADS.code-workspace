@@ -111,7 +111,6 @@
 		"C_Cpp.default.compileCommands":
 	    "${workspaceFolder}/build/compile_commands.json",
 		"C_Cpp.default.defines": [
-			"HAVE_GPIOD=1",
 			"PLUGIN_LOADER_FILTER=1",
 			"PLUGIN_LOADER_SOURCE=1",
 			"PLUGIN_LOADER_SINK=1"

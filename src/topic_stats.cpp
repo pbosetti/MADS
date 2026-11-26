@@ -1,4 +1,4 @@
-#include "topic_stats.hpp"
+#include "detail/topic_stats.hpp"
 
 namespace Mads {
 

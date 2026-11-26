@@ -22,17 +22,17 @@ deployment before it is launched for real.
 
 Author(s): Paolo Bosetti
 */
-#include "../broker_probe.hpp"
+#include "../detail/broker_probe.hpp"
 #include "../detail/endpoint.hpp"
 #include "../detail/host_token.hpp"
 #include "../detail/plugin_protocol.hpp"
 #include "../detail/transport.hpp"
 #include "../shm/shared_segment.hpp"
-#include "../director_config.hpp"
-#include "../doctor_checks.hpp"
+#include "../detail/director_config.hpp"
+#include "../detail/doctor_checks.hpp"
 #include "../exec_path.hpp"
 #include "../mads.hpp"
-#include "../topology_graph.hpp"
+#include "../detail/topology_graph.hpp"
 #include "plugin_migrate.hpp"
 
 #include <cxxopts.hpp>

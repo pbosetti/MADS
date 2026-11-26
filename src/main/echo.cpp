@@ -27,7 +27,7 @@ filtering logic needed here.
 Author(s): Paolo Bosetti
 */
 #include "../agent_app.hpp"
-#include "../echo_format.hpp"
+#include "../detail/echo_format.hpp"
 #include <cxxopts.hpp>
 #include <chrono>
 #include <iostream>

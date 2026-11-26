@@ -116,7 +116,7 @@ endif()
 add_library(mads_gui_common STATIC common/gui_style.cpp common/room_discovery.cpp)
 target_include_directories(mads_gui_common PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/common
-  ${PROJECT_SOURCE_DIR}/src   # stb_image.h, shipped by MADS
+  ${PROJECT_SOURCE_DIR}/src   # detail/stb_image.h, shipped by MADS
 )
 target_link_libraries(mads_gui_common PUBLIC mads_imgui MadsCore)
 find_package(Threads REQUIRED)

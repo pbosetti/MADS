@@ -21,7 +21,7 @@ Author(s): Paolo Bosetti
 
 #include "ini_document.hpp"
 #include "ini_schema.hpp"
-#include "topology_graph.hpp"
+#include "detail/topology_graph.hpp"
 
 #include <filesystem>
 #include <map>

@@ -3,7 +3,7 @@
 
 #include "ini_schema_data.hpp"
 
-#include "../topology_graph.hpp"
+#include "../detail/topology_graph.hpp"
 
 #include <toml++/toml.hpp>
 

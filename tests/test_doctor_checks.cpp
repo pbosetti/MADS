@@ -36,7 +36,7 @@
 #include "zap_auth.hpp"
 
 #include "detail/fd_limit.hpp"
-#include "doctor_checks.hpp"
+#include "detail/doctor_checks.hpp"
 #include "mads_test_helpers.hpp"
 
 using namespace std::chrono_literals;

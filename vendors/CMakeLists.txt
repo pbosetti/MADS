@@ -286,7 +286,7 @@ install(
   FILES
     "${cppzmq_SOURCE_DIR}/zmq.hpp"
     "${cppzmq_SOURCE_DIR}/zmq_addon.hpp"
-  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/mads/vendor"
   COMPONENT MadsCore
 )
 
@@ -300,15 +300,15 @@ add_vendor(snappy)  # statically linked into MadsCore, nothing installed
 # nlohmann/json, toml++, cxxopts and rang. Everything else is linked into
 # MadsCore or used at build time only.
 install(DIRECTORY "${nlohmann_json_SOURCE_DIR}/include/nlohmann"
-  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT MadsCore)
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/mads/vendor" COMPONENT MadsCore)
 install(DIRECTORY "${tomlplusplus_SOURCE_DIR}/include/toml++"
-  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT MadsCore)
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/mads/vendor" COMPONENT MadsCore)
 install(FILES
     "${cxxopts_SOURCE_DIR}/include/cxxopts.hpp"
     "${rang_SOURCE_DIR}/include/rang.hpp"
-  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT MadsCore)
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/mads/vendor" COMPONENT MadsCore)
 install(FILES "${libzmq_SOURCE_DIR}/include/zmq.h"
-  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT MadsCore)
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/mads/vendor" COMPONENT MadsCore)
 install(FILES "${libzmq_SOURCE_DIR}/LICENSE"
   DESTINATION "${CMAKE_INSTALL_DATADIR}/zmq" RENAME LICENSE.txt COMPONENT MadsCore)
 if(WIN32)

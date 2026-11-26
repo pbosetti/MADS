@@ -16,10 +16,10 @@ exits, exactly what systemd Type=simple / Docker / CI expect.
 
 Author(s): Paolo Bosetti
 */
-#include "../director_config.hpp"
+#include "../detail/director_config.hpp"
 #include "../exec_path.hpp"
 #include "../mads.hpp"
-#include "../up_supervisor.hpp"
+#include "../detail/up_supervisor.hpp"
 
 #include <cxxopts.hpp>
 #include <rang.hpp>

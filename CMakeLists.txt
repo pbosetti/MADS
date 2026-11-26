@@ -250,11 +250,22 @@ if(WIN32)
   set_target_properties(${LIB_NAME} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 endif()
 
+# Installed SDK: <prefix>/include/mads/*.hpp, included as <mads/agent.hpp>,
+# and the bundled third-party headers in <prefix>/include/mads/vendor, so that
+# <nlohmann/json.hpp> & co. never land in (or shadow) a shared include/.
+# In the build tree, ${MADS_FORWARD_INCLUDE_DIR}/mads holds one-line stubs
+# forwarding to src/ (generated below with the list of public headers).
+set(MADS_FORWARD_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/include")
 target_include_directories(
   ${LIB_NAME}
   PUBLIC
+    $<BUILD_INTERFACE:${MADS_FORWARD_INCLUDE_DIR}>
+    # shortcut: src/ is still exported to in-tree consumers, for the pinned
+    # mads_dashboard that includes <agent_app.hpp>; drop it once the pin
+    # uses <mads/...>.
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mads/vendor>
 )
 
 link_first_available(${LIB_NAME} CANDIDATES nlohmann_json::nlohmann_json)
@@ -484,9 +495,25 @@ install(
 file(GLOB LIB_HEADERS ${SOURCE_DIR}/*.hpp ${SOURCE_DIR}/*.h)
 install(
   FILES ${LIB_HEADERS}
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/mads
   COMPONENT MadsCore
 )
+# Build-tree <mads/...>: a stub per public header; stale stubs are removed.
+set(_mads_stubs)
+foreach(_mads_header IN LISTS LIB_HEADERS)
+  get_filename_component(_mads_name "${_mads_header}" NAME)
+  list(APPEND _mads_stubs "${MADS_FORWARD_INCLUDE_DIR}/mads/${_mads_name}")
+  file(CONFIGURE OUTPUT "${MADS_FORWARD_INCLUDE_DIR}/mads/${_mads_name}"
+       CONTENT "#include \"${_mads_header}\"\n")
+endforeach()
+file(GLOB _mads_old_stubs "${MADS_FORWARD_INCLUDE_DIR}/mads/*")
+foreach(_mads_old IN LISTS _mads_old_stubs)
+  if(NOT _mads_old IN_LIST _mads_stubs)
+    file(REMOVE "${_mads_old}")
+  endif()
+endforeach()
+unset(_mads_stubs)
+unset(_mads_old_stubs)
 
 # Data and scripts for the command line utilities (and the GUI apps): useless,
 # and not installed, in a library-only build (MADS_BUILD_APPS=OFF, e.g. Android).
@@ -495,7 +522,7 @@ if(MADS_BUILD_APPS)
   if(NOT WIN32)
     install(
       FILES ${CMAKE_CURRENT_LIST_DIR}/src/main/mads_rust_plugin.h
-      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/mads
       COMPONENT MadsApps
     )
 

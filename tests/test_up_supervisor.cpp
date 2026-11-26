@@ -35,7 +35,7 @@
 
 #include "curve.hpp"
 #include "mads_test_helpers.hpp"
-#include "up_supervisor.hpp"
+#include "detail/up_supervisor.hpp"
 
 namespace fs = std::filesystem;
 using namespace std::chrono_literals;

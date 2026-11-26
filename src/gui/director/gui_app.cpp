@@ -1,6 +1,6 @@
 #include "gui_app.hpp"
 
-#include "director_config.hpp"
+#include "detail/director_config.hpp"
 #include "example_config.hpp"
 #include "process_manager.hpp"
 

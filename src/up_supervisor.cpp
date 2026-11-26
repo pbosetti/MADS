@@ -1,6 +1,6 @@
-#include "up_supervisor.hpp"
+#include "detail/up_supervisor.hpp"
 
-#include "broker_probe.hpp"
+#include "detail/broker_probe.hpp"
 
 #include <reproc/error.h>
 #include <reproc/reproc.h>

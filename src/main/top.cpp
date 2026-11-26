@@ -29,8 +29,8 @@ using namespace std::chrono_literals;
 
 #include "../agent_app.hpp"
 #include "../clock_offset.hpp"
-#include "../keypress.hpp"
-#include "../topic_stats.hpp"
+#include "../detail/keypress.hpp"
+#include "../detail/topic_stats.hpp"
 #include <cxxopts.hpp>
 #include <algorithm>
 #include <cstdio>
