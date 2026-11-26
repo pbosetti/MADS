@@ -163,6 +163,6 @@ add_subdirectory(ini)
 set(MADS_DASH_INSTALL_COMPONENT MadsGui)
 FetchContent_Declare(mads_dashboard
   GIT_REPOSITORY https://github.com/MADS-NET/MADS_dashboard.git
-  GIT_TAG 6871bc88a8846e54248a45d38a25cbe9714ff510 # main, 2026-11-24
+  GIT_TAG v3.0.0
 )
 FetchContent_MakeAvailable(mads_dashboard)
