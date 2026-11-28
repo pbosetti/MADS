@@ -16,7 +16,7 @@ Author: Paolo Bosetti, July 2024
 #include "../exec_path.hpp"
 #include "../detail/release_tag.hpp"
 #include "../detail/https_client.hpp"
-#include "../detail/TerminalLogoRenderer.hpp"
+#include "../detail/terminal_logo_renderer.hpp"
 #include "../service_discovery.hpp"
 #include "../ini/ini_cli.hpp"
 #ifdef _WIN32
@@ -961,6 +961,8 @@ int main(int argc, char **argv) {
     terminal_logo::TerminalLogoRenderer::Options options;
     options.width = 80;
     options.mode = terminal_logo::TerminalLogoRenderer::ColorMode::Auto;
+    options.glyphs = terminal_logo::TerminalLogoRenderer::Glyphs::Braille;
+    options.min_saturation = 60;  // skip the logo's white outline
     terminal_logo::TerminalLogoRenderer::render_from_path(logo, std::cout, options);
   }
 #endif

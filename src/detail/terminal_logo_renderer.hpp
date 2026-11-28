@@ -39,9 +39,18 @@ public:
     Mono
   };
 
+  enum class Glyphs {
+    HalfBlock,  // two pixels per cell (upper/lower half blocks), two colours
+    Braille     // 2x4 dots per cell, one colour
+  };
+
   struct Options {
     int width = 80;
     ColorMode mode = ColorMode::Auto;
+    Glyphs glyphs = Glyphs::HalfBlock;
+    // Braille only: leave dots off where the pixel is greyish (max-min channel
+    // spread below this), e.g. to drop a white outline. 0 disables it.
+    int min_saturation = 0;
   };
 
   static ColorMode parse_mode(std::string_view value) {
@@ -79,7 +88,11 @@ public:
 
     const Image image = load_image(image_path.string());
     const ColorMode resolved_mode = detect_mode(options.mode);
-    render_to_stream(image, options.width, resolved_mode, out);
+    if (options.glyphs == Glyphs::Braille) {
+      render_braille(image, options.width, options.min_saturation, resolved_mode, out);
+    } else {
+      render_to_stream(image, options.width, resolved_mode, out);
+    }
   }
 
   static void render_from_path(const std::filesystem::path& image_path, std::ostream& out) {
@@ -322,6 +335,58 @@ private:
             out << "\x1b[0m" << fg_escape(bottom, mode) << "▄";
           }
         }
+      }
+      if (mode != ColorMode::Mono) {
+        out << "\x1b[0m";
+      }
+      out << '\n';
+    }
+  }
+
+  // Each cell is a 2x4 dot grid (U+2800 + bit mask). A dot is lit where the
+  // pixel is opaque (and saturated enough); the cell's colour is the average
+  // of its lit dots.
+  static void render_braille(const Image& image, int cols, int min_saturation, ColorMode mode, std::ostream& out) {
+    const int dot_w = cols * 2;
+    // Braille dots are roughly square: a cell is ~1:2 and holds 2x4 dots.
+    const int rows = std::max(1, static_cast<int>(std::round(static_cast<float>(image.height) * static_cast<float>(dot_w) /
+                                                             static_cast<float>(image.width) / 4.0f)));
+    const int dot_h = rows * 4;
+    const std::vector<Color> scaled = resize_image(image, dot_w, dot_h);
+
+    // Bit for dot (dx, dy) in the Unicode braille pattern.
+    constexpr int bits[4][2] = {{0x01, 0x08}, {0x02, 0x10}, {0x04, 0x20}, {0x40, 0x80}};
+
+    for (int row = 0; row < rows; ++row) {
+      for (int col = 0; col < cols; ++col) {
+        int mask = 0;
+        int n = 0;
+        int r = 0, g = 0, b = 0;
+        for (int dy = 0; dy < 4; ++dy) {
+          for (int dx = 0; dx < 2; ++dx) {
+            const Color c = scaled[static_cast<std::size_t>(row * 4 + dy) * static_cast<std::size_t>(dot_w) +
+                                   static_cast<std::size_t>(col * 2 + dx)];
+            if (c.a >= 128 && std::max({c.r, c.g, c.b}) - std::min({c.r, c.g, c.b}) >= min_saturation) {
+              mask |= bits[dy][dx];
+              r += c.r;
+              g += c.g;
+              b += c.b;
+              ++n;
+            }
+          }
+        }
+        if (mask == 0) {
+          out << ' ';
+          continue;
+        }
+        if (mode != ColorMode::Mono) {
+          out << fg_escape(Color{static_cast<std::uint8_t>(r / n), static_cast<std::uint8_t>(g / n),
+                                 static_cast<std::uint8_t>(b / n), 255},
+                           mode);
+        }
+        const int cp = 0x2800 + mask;  // always 3 bytes in UTF-8
+        out << static_cast<char>(0xE0 | (cp >> 12)) << static_cast<char>(0x80 | ((cp >> 6) & 0x3F))
+            << static_cast<char>(0x80 | (cp & 0x3F));
       }
       if (mode != ColorMode::Mono) {
         out << "\x1b[0m";
